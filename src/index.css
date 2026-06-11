@@ -310,6 +310,7 @@ body {
 .status-dot { width: 8px; height: 8px; border-radius: 50%; z-index: 2; flex-shrink: 0; }
 .status-dot.ok   { background: var(--status-ok);   box-shadow: 0 0 6px var(--status-ok-glow); }
 .status-dot.idle { background: var(--status-warn);  box-shadow: 0 0 6px rgba(245,158,11,0.4); }
+.status-dot.connecting { background: var(--accent-primary); box-shadow: 0 0 6px var(--accent-primary-glow); }
 .status-dot.err  { background: var(--status-err);   box-shadow: 0 0 6px var(--status-err-glow); }
 
 .status-ring {
@@ -322,6 +323,7 @@ body {
 }
 .status-ring.ok   { background: var(--status-ok); }
 .status-ring.idle { background: var(--status-warn); }
+.status-ring.connecting { background: var(--accent-primary); animation: status-pulse 1s infinite ease-in-out; }
 .status-ring.err  { background: var(--status-err); }
 
 @keyframes status-pulse {
@@ -343,6 +345,7 @@ body {
 }
 .status-label.ok { color: var(--status-ok); }
 .status-label.idle { color: var(--status-warn); }
+.status-label.connecting { color: var(--accent-primary); }
 .status-label.err { color: var(--status-err); }
 
 .status-sublabel {
@@ -886,6 +889,7 @@ body {
 .power-button-container { position: relative; display: flex; align-items: center; justify-content: center; }
 .power-button-outer { position: absolute; width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--border-default); animation: none; }
 .power-button-outer.connected { border-color: rgba(74,158,255,0.3); animation: pulse-ring 2.5s ease-out infinite; }
+.power-button-outer.connecting { border-color: var(--accent-primary); border-top-color: transparent; animation: spin 1.5s linear infinite; }
 .power-button {
   position: relative; z-index: 1;
   width: 80px; height: 80px; border-radius: 50%;
@@ -895,6 +899,7 @@ body {
 }
 .power-button:hover { border-color: var(--accent-primary); color: var(--accent-primary); box-shadow: 0 0 20px var(--accent-primary-glow); }
 .power-button.connected { border-color: var(--accent-primary); color: var(--accent-primary); box-shadow: 0 0 0 6px rgba(74,158,255,0.08), 0 0 24px var(--accent-primary-glow); }
+.power-button.connecting { border-color: var(--accent-primary-dim); color: var(--accent-primary); }
 
 /* ── CHART ─────────────────────────────────────────────────────────────────── */
 .chart-panel { min-height: 240px; display: flex; flex-direction: column; }

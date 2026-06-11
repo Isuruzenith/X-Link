@@ -73,12 +73,27 @@ fn get_active_profile_name(app: &AppHandle) -> String {
     format!("Profile ({})", &active_id[0..std::cmp::min(8, active_id.len())])
 }
 
+fn get_disconnected_icon() -> tauri::image::Image<'static> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/System_tray_ico/disconnected.png"))
+        .expect("Failed to load disconnected icon")
+}
+
+fn get_connecting_icon() -> tauri::image::Image<'static> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/System_tray_ico/connecting.png"))
+        .expect("Failed to load connecting icon")
+}
+
+fn get_connected_icon() -> tauri::image::Image<'static> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/System_tray_ico/connected.png"))
+        .expect("Failed to load connected icon")
+}
+
 /// Asynchronously handles the Connect/Disconnect toggle from the tray
 async fn handle_toggle_proxy(app: AppHandle) -> Result<(), String> {
     let state = app.state::<crate::state::ProxyState>();
-    let is_running = state.is_running();
+    let status = state.get_status();
 
-    if is_running {
+    if status != crate::state::ConnectionStatus::Disconnected {
         crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, "".to_string()).await?;
     } else {
         // Find the first available profile to connect to, fallback to "default"
@@ -102,26 +117,27 @@ async fn handle_toggle_proxy(app: AppHandle) -> Result<(), String> {
         crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, profile_id).await?;
     }
 
-    // Update tray menu state
-    update_tray_menu(&app);
+    // Update tray state
+    update_tray(&app);
     Ok(())
 }
 
 /// Rebuilds the context-aware tray menu in a clean, state-driven manner
 pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
-    let is_running = {
-        let state = app.state::<crate::state::ProxyState>();
-        state.is_running()
-    };
+    let state = app.state::<crate::state::ProxyState>();
+    let status = state.get_status();
 
-    let profile_name = if is_running {
-        get_active_profile_name(app)
-    } else {
-        "Disconnected".to_string()
+    let profile_name = match status {
+        crate::state::ConnectionStatus::Connected => get_active_profile_name(app),
+        crate::state::ConnectionStatus::Connecting => "Connecting...".to_string(),
+        crate::state::ConnectionStatus::Disconnected => "Disconnected".to_string(),
     };
 
     let info_text = format!("X-Link — {}", profile_name);
-    let toggle_text = if is_running { "Disconnect" } else { "Connect" };
+    let toggle_text = match status {
+        crate::state::ConnectionStatus::Connected | crate::state::ConnectionStatus::Connecting => "Disconnect",
+        crate::state::ConnectionStatus::Disconnected => "Connect",
+    };
 
     let menu = Menu::new(app).map_err(|e| e.to_string())?;
     
@@ -147,7 +163,7 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
     let menu = build_tray_menu(app)?;
 
     let tray = TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(get_disconnected_icon())
         .menu(&menu)
         .on_menu_event(|app, event| {
             match event.id.as_ref() {
@@ -179,11 +195,26 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
     Ok(tray)
 }
 
-/// Triggers a dynamic redraw of the system tray menu from any state transition
-pub fn update_tray_menu(app: &AppHandle) {
+/// Triggers a dynamic redraw of the system tray icon and menu from any state transition
+pub fn update_tray(app: &AppHandle) {
+    let state = app.state::<crate::state::ProxyState>();
+    let status = state.get_status();
+
     if let Some(tray) = app.tray_by_id("main") {
+        let icon = match status {
+            crate::state::ConnectionStatus::Disconnected => get_disconnected_icon(),
+            crate::state::ConnectionStatus::Connecting => get_connecting_icon(),
+            crate::state::ConnectionStatus::Connected => get_connected_icon(),
+        };
+        let _ = tray.set_icon(Some(icon));
+
         if let Ok(menu) = build_tray_menu(app) {
             let _ = tray.set_menu(Some(menu));
         }
     }
+}
+
+/// Alias for backward compatibility
+pub fn update_tray_menu(app: &AppHandle) {
+    update_tray(app);
 }

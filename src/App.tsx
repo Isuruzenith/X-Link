@@ -25,6 +25,7 @@ export default function App() {
 
   // ── APP CORE STATE ─────────────────────────────────────────────────────────
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected');
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [uptime, setUptime] = useState(0);
   const [httpPort, setHttpPort] = useState(7890);
@@ -186,6 +187,7 @@ export default function App() {
 
     const unlistenTerm = listen<number | null>('sing-box-terminated', (e) => {
       setIsConnected(false);
+      setConnectionStatus('disconnected');
       setActiveProfileId(null);
       pushSystemLog(`sing-box terminated (code ${e.payload ?? 'None'})`);
     });
@@ -227,9 +229,10 @@ export default function App() {
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
-        const status = await invoke<{ status: string; activeProfileId: string | null; httpPort: number; socksPort: number; mixedPort: number; tunEnabled: boolean; uptime: number }>('get_proxy_status');
+        const status = await invoke<{ status: 'connected' | 'connecting' | 'disconnected'; activeProfileId: string | null; httpPort: number; socksPort: number; mixedPort: number; tunEnabled: boolean; uptime: number }>('get_proxy_status');
         const active = status.status === 'connected';
         setIsConnected(active);
+        setConnectionStatus(status.status);
         setActiveProfileId(status.activeProfileId);
         setUptime(status.uptime);
         if (active) {
@@ -271,10 +274,12 @@ export default function App() {
 
   // ── ACTIONS ────────────────────────────────────────────────────────────────
   const handleToggleConnect = async () => {
-    if (isConnected) {
+    if (connectionStatus !== 'disconnected') {
       try {
+        setConnectionStatus('disconnected');
+        setIsConnected(false);
         const result = await invoke<string>('toggle_proxy', { start: false, profileId: '' });
-        if (result === 'stopped') { setIsConnected(false); setActiveProfileId(null); pushSystemLog('Proxy tunnels stopped.'); }
+        if (result === 'stopped') { setActiveProfileId(null); pushSystemLog('Proxy tunnels stopped.'); }
       } catch (e) { pushSystemLog(`Error stopping proxy: ${e}`); }
     } else {
       if (!selectedProfileId) { pushSystemLog('Error: Select or import a profile first.'); setActiveTab('profiles'); return; }
@@ -284,13 +289,19 @@ export default function App() {
       } catch { }
       const target = profiles.find((p) => p.id === selectedProfileId);
       pushSystemLog(`Booting X-Link Core using profile "${target?.name || 'Default'}"...`);
+      setConnectionStatus('connecting');
       try {
         const result = await invoke<string>('toggle_proxy', { start: true, profileId: selectedProfileId });
         if (result === 'started') {
-          setIsConnected(true); setActiveProfileId(selectedProfileId);
+          setIsConnected(true);
+          setConnectionStatus('connected');
+          setActiveProfileId(selectedProfileId);
           pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);
         }
-      } catch (e) { pushSystemLog(`Startup error: ${e}`); }
+      } catch (e) {
+        setConnectionStatus('disconnected');
+        pushSystemLog(`Startup error: ${e}`);
+      }
     }
   };
 
@@ -612,7 +623,7 @@ export default function App() {
       <NavRail
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        isConnected={isConnected}
+        connectionStatus={connectionStatus}
         singboxVersion={singboxVersion}
       />
 
@@ -620,6 +631,7 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <DashboardView
             isConnected={isConnected}
+            connectionStatus={connectionStatus}
             activeProfileId={activeProfileId}
             uptime={uptime}
             httpPort={httpPort}

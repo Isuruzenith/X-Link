@@ -7,7 +7,7 @@ export type TabId = 'dashboard' | 'profiles' | 'routing' | 'dns' | 'logs' | 'set
 interface NavRailProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
-  isConnected: boolean;
+  connectionStatus: 'connected' | 'connecting' | 'disconnected';
   singboxVersion: string;
 }
 
@@ -20,9 +20,13 @@ const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
   ['settings',  Settings,  'Settings'],
 ];
 
-export function NavRail({ activeTab, onTabChange, isConnected, singboxVersion }: NavRailProps) {
+export function NavRail({ activeTab, onTabChange, connectionStatus, singboxVersion }: NavRailProps) {
   const versionMatch = singboxVersion?.match(/(?:v|version\s+)?([\d.]+)/i);
   const versionShort = versionMatch ? `v${versionMatch[1]}` : (singboxVersion || '—');
+
+  const statusClass = connectionStatus === 'connected' ? 'ok' : connectionStatus === 'connecting' ? 'connecting' : 'idle';
+  const statusLabelText = connectionStatus === 'connected' ? 'Active' : connectionStatus === 'connecting' ? 'Connecting' : 'Idle';
+  const statusTitleText = connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Idle';
 
   return (
     <aside className="nav-rail">
@@ -51,14 +55,14 @@ export function NavRail({ activeTab, onTabChange, isConnected, singboxVersion }:
 
       {/* Footer */}
       <div className="rail-footer">
-        <div className="rail-status-card" title={`System Status: ${isConnected ? 'Connected' : 'Idle'} (${versionShort})`}>
+        <div className="rail-status-card" title={`System Status: ${statusTitleText} (${versionShort})`}>
           <div className="status-indicator">
-            <span className={`status-dot ${isConnected ? 'ok' : 'idle'}`} />
-            <span className={`status-ring ${isConnected ? 'ok' : 'idle'}`} />
+            <span className={`status-dot ${statusClass}`} />
+            <span className={`status-ring ${statusClass}`} />
           </div>
           <div className="rail-status-info">
-            <span className={`status-label ${isConnected ? 'ok' : 'idle'}`}>
-              System {isConnected ? 'Active' : 'Idle'}
+            <span className={`status-label ${statusClass}`}>
+              System {statusLabelText}
             </span>
           </div>
         </div>

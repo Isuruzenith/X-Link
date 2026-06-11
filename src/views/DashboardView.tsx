@@ -27,6 +27,7 @@ const formatUptime = (seconds: number): string => {
 
 interface DashboardViewProps {
   isConnected: boolean;
+  connectionStatus: 'connected' | 'connecting' | 'disconnected';
   activeProfileId: string | null;
   uptime: number;
   httpPort: number;
@@ -53,7 +54,7 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({
-  isConnected, activeProfileId, uptime, httpPort, socksPort, mixedPort,
+  isConnected, connectionStatus, activeProfileId, uptime, httpPort, socksPort, mixedPort,
   isElevated, uploadBytes, downloadBytes, uploadSpeed,
   downloadSpeed, activeConnections, speedHistory, profiles, settings,
   selectedProfileId, profileOutbounds, selectedOutboundTag,
@@ -81,16 +82,20 @@ export function DashboardView({
           {/* Connect Panel */}
           <div className="glass-panel connect-panel">
             <div className="power-button-container">
-              <div className={`power-button-outer ${isConnected ? 'connected' : ''}`} />
-              <button className={`power-button ${isConnected ? 'connected' : ''}`} onClick={onToggleConnect}>
+              <div className={`power-button-outer ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} />
+              <button className={`power-button ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} onClick={onToggleConnect}>
                 <Power size={28} />
               </button>
             </div>
-            <h3 className="connect-status-label">{isConnected ? 'Connected' : 'Disconnected'}</h3>
+            <h3 className="connect-status-label">
+              {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+            </h3>
             <p className="connect-status-sub">
-              {isConnected
+              {connectionStatus === 'connected'
                 ? `${profiles.find((p) => p.id === activeProfileId)?.name || 'Default'}`
-                : 'Toggle power to start proxy'}
+                : connectionStatus === 'connecting'
+                  ? 'Establishing secure tunnels...'
+                  : 'Toggle power to start proxy'}
             </p>
             {isConnected && (
               <div className="connect-mode-badge">

@@ -19,7 +19,7 @@ pub struct TrafficStats {
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyStateSerialized {
-    pub status: String,
+    pub status: crate::state::ConnectionStatus,
     pub active_profile_id: Option<String>,
     pub http_port: u16,
     pub socks_port: u16,
@@ -37,8 +37,7 @@ static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> = std
 
 #[tauri::command]
 pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<ProxyStateSerialized, String> {
-    let is_running = state.is_running();
-    let status = if is_running { "connected" } else { "idle" };
+    let status = state.get_status();
     let active_profile = ACTIVE_PROFILE_ID.lock().unwrap().clone();
     let uptime = if let Some(start) = *CONNECTION_START_TIME.lock().unwrap() {
         start.elapsed().as_secs()
@@ -47,7 +46,7 @@ pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<Pr
     };
 
     Ok(ProxyStateSerialized {
-        status: status.to_string(),
+        status,
         active_profile_id: active_profile,
         http_port: *state.http_port.lock().unwrap(),
         socks_port: *state.socks_port.lock().unwrap(),
@@ -87,6 +86,7 @@ pub async fn toggle_proxy(
 ) -> Result<String, String> {
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
+        state.set_status(crate::state::ConnectionStatus::Disconnected);
         {
             let mut process_lock = state.child_process.lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
@@ -115,13 +115,15 @@ pub async fn toggle_proxy(
         if let Ok(mut down_s) = state.download_speed.lock() { *down_s = 0; }
         if let Ok(mut conn) = state.active_connections.lock() { *conn = 0; }
 
-        // Sync native system tray menu
-        crate::tray::update_tray_menu(&app);
+        // Sync native system tray
+        crate::tray::update_tray(&app);
         
         return Ok("stopped".into());
     }
 
     // ── START PATH ───────────────────────────────────────────────────────────
+    state.set_status(crate::state::ConnectionStatus::Connecting);
+    crate::tray::update_tray(&app);
     // Forcefully kill any existing sing-box processes system-wide before starting
     #[cfg(target_os = "windows")]
     {
@@ -403,10 +405,11 @@ pub async fn toggle_proxy(
                     }
                     
                     // Clear global state & restore OS system proxy
+                    state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
                     *ACTIVE_PROFILE_ID.lock().unwrap() = None;
                     *CONNECTION_START_TIME.lock().unwrap() = None;
                     crate::tray::perform_clean_cleanup(&app_for_logs);
-                    crate::tray::update_tray_menu(&app_for_logs);
+                    crate::tray::update_tray(&app_for_logs);
                     
                     break;
                 }
@@ -421,7 +424,8 @@ pub async fn toggle_proxy(
     // Check if the sidecar process exited prematurely
     match term_rx.try_recv() {
         Ok(code) => {
-            let state = app.state::<crate::state::ProxyState>();
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();
             return Err(format!(
@@ -429,7 +433,8 @@ pub async fn toggle_proxy(
             ));
         }
         Err(oneshot::error::TryRecvError::Closed) => {
-            let state = app.state::<crate::state::ProxyState>();
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();
             return Err("spawn_failed: child process terminated unexpectedly during startup".into());
@@ -546,11 +551,12 @@ pub async fn toggle_proxy(
     }
 
     // Set connection global states
+    state.set_status(crate::state::ConnectionStatus::Connected);
     *ACTIVE_PROFILE_ID.lock().unwrap() = Some(profile_id);
     *CONNECTION_START_TIME.lock().unwrap() = Some(std::time::Instant::now());
 
-    // Sync native system tray menu
-    crate::tray::update_tray_menu(&app);
+    // Sync native system tray
+    crate::tray::update_tray(&app);
 
     Ok("started".into())
 }
