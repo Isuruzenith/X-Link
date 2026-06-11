@@ -1,10 +1,11 @@
 import React from 'react';
 import {
   Settings as SettingsIcon, Network, Eye, Layers2, Code2,
-  Info, AlertTriangle, Cpu, CheckCircle2, ExternalLink
+  Info, AlertTriangle, CheckCircle2, ExternalLink
 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import type { Settings } from '../utils/store';
+import xLinkLogo from '../assets/X-Link-logo.png';
 
 const Inp = ({ value, onChange, placeholder, mono = false }: {
   value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean;
@@ -61,7 +62,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
-  settings, settingsTab, conflictingPorts, isElevated, singboxVersion, appVersion,
+  settings, settingsTab, conflictingPorts, isElevated, appVersion,
   httpPort, socksPort, mixedPort, isConnected,
   onSetSettingsTab, onSaveSettings, onSetHttpPort, onSetSocksPort, onSetMixedPort,
 }: SettingsViewProps) {
@@ -92,13 +93,19 @@ export function SettingsView({
           {settingsTab === 'general' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="grid-2">
-                <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div className="settings-section-heading">Proxy Behavior</div>
-                  <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => onSaveSettings({ closeToTray: v })} />
-                  <SwitchRow title="Autostart with Windows" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => onSaveSettings({ autostart: v })} />
-                  <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => onSaveSettings({ wifiSharing: v })} />
-                  <SwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy). TUN mode captures all system traffic but requires Administrator."
-                    checked={settings.proxyMode === 'tun'} onChange={(v) => onSaveSettings({ proxyMode: v ? 'tun' : 'system' })} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="settings-section-heading">Proxy Mode</div>
+                    <SwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy). TUN mode captures all system traffic but requires Administrator."
+                      checked={settings.proxyMode === 'tun'} onChange={(v) => onSaveSettings({ proxyMode: v ? 'tun' : 'system' })} />
+                  </div>
+
+                  <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="settings-section-heading">App Preferences</div>
+                    <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => onSaveSettings({ closeToTray: v })} />
+                    <SwitchRow title="Autostart with Windows" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => onSaveSettings({ autostart: v })} />
+                    <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => onSaveSettings({ wifiSharing: v })} />
+                  </div>
                 </div>
 
                 <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -134,18 +141,16 @@ export function SettingsView({
                 </div>
               </div>
 
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '20px', padding: '20px 24px' }}>
-                <div className="metric-icon-box" style={{ width: '52px', height: '52px', borderRadius: '14px', background: 'rgba(168,85,247,0.05)', color: 'var(--accent-secondary)', borderColor: 'rgba(168,85,247,0.15)', flexShrink: 0 }}>
-                  <Cpu size={22} />
-                </div>
+              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 20px', borderLeft: '4px solid var(--accent-secondary)' }}>
+                <img src={xLinkLogo} alt="X-Link" style={{ width: '40px', height: '40px', borderRadius: '8px', flexShrink: 0 }} />
                 <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-high)' }}>X-Link Engine</h4>
-                  <p style={{ fontSize: '12px', color: 'var(--text-med)', marginTop: '2px' }}>
-                    sing-box: <strong style={{ color: 'var(--text-high)', fontFamily: 'var(--font-mono)' }}>{singboxVersion.split('\n')[0]}</strong>
+                  <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-high)' }}>X-Link</h4>
+                  <p style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '1px' }}>
+                    Empowered by sing-box
                   </p>
                 </div>
-                <div style={{ marginLeft: 'auto', textAlign: 'right', fontSize: '12px', color: 'var(--text-low)' }}>
-                  App v{appVersion}
+                <div style={{ marginLeft: 'auto' }}>
+                  <span className="chip success" style={{ textTransform: 'none', fontSize: '10px', padding: '2px 8px' }}>v{appVersion}</span>
                 </div>
               </div>
             </div>

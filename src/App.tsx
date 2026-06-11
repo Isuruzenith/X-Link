@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { NavRail } from './components/NavRail';
 import type { TabId } from './components/NavRail';
 import { DashboardView } from './views/DashboardView';
@@ -403,6 +404,17 @@ export default function App() {
   };
 
   const handleSaveSettings = async (updates: Partial<Settings>) => {
+    if (updates.proxyMode !== undefined) {
+      const modeName = updates.proxyMode === 'tun' ? 'Virtual TUN Interface' : 'System Proxy';
+      const confirmed = await ask(
+        `Are you sure you want to switch the routing mode to ${modeName}? This will restart your active proxy connections.`,
+        { title: 'Confirm Routing Mode Change', kind: 'warning' }
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
     const next = { ...settings, ...updates };
     setSettings(next);
     await storeHelper.saveSettings(updates);
