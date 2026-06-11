@@ -13,11 +13,20 @@ dist-ssr
 *.local
 pkg
 geosite.db
-src-tauri/target
-src-tauri/gen/schemas
+src-tauri/target/
+src-tauri/gen/
 .env
 .env.*
 !.env.example
+
+# OS metadata files
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Build and linter caches
+.eslintcache
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*
