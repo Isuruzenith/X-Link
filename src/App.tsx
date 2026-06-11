@@ -156,7 +156,6 @@ export default function App() {
       const [
         elevated,
         version,
-        singboxVer,
         savedSettings,
         savedProfiles,
         savedRoutingRules,
@@ -165,7 +164,6 @@ export default function App() {
       ] = await Promise.all([
         invoke<boolean>('check_tun_support').catch(() => false),
         invoke<string>('get_app_version').catch(() => '0.1.0'),
-        invoke<string>('get_singbox_version').catch(() => 'Unknown'),
         storeHelper.getSettings(),
         storeHelper.getProfiles(),
         storeHelper.getRoutingRules(),
@@ -175,7 +173,6 @@ export default function App() {
 
       setIsElevated(elevated);
       setAppVersion(version);
-      setSingboxVersion(singboxVer);
 
       setSettings(savedSettings);
       setHttpPort(savedSettings.httpPort);
@@ -191,6 +188,11 @@ export default function App() {
 
       // Show the window now that the UI is fully initialized
       await invoke('show_window').catch(() => {});
+
+      // Fetch the slower sidecar version asynchronously in the background
+      invoke<string>('get_singbox_version')
+        .then((ver) => setSingboxVersion(ver))
+        .catch(() => setSingboxVersion('Unknown'));
     })();
 
     pushSystemLog('X-Link Core initialized.');
@@ -289,8 +291,9 @@ export default function App() {
   }, [profiles, selectedProfileId]);
 
   // ── HELPERS ────────────────────────────────────────────────────────────────
-  const pushSystemLog = (text: string) =>
+  function pushSystemLog(text: string) {
     setLogs((prev) => [...prev, { type: 'system' as const, text: `[System] ${text}` }].slice(-500));
+  }
 
   // ── ACTIONS ────────────────────────────────────────────────────────────────
   const handleToggleConnect = async () => {
