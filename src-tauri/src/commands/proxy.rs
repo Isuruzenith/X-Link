@@ -172,7 +172,7 @@ pub async fn toggle_proxy(
 
     let (dns_address, sni_host, wifi_sharing, api_port, api_secret, api_cors) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         let mut api_port = 9090u16;
         let mut api_secret = "".to_string();

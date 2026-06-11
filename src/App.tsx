@@ -72,7 +72,7 @@ export default function App() {
     fakeipRange: '198.18.0.0/15', fakeipFilter: 'geosite:private',
     dnsLeakProtection: true, dnsCaching: true,
     finalOutbound: 'proxy', bypassLan: true, bypassChina: false,
-    dnsAddress: '', sniHost: 'aka.ms',
+    dnsAddress: '', sniHost: '',
   });
   const [conflictingPorts, setConflictingPorts] = useState<number[]>([]);
   const [settingsTab, setSettingsTab] = useState<'general' | 'tun' | 'sniff' | 'mux' | 'api'>('general');

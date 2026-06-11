@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Settings as SettingsIcon, Network, Eye, Layers2, Code2, Shield,
+  Settings as SettingsIcon, Network, Eye, Layers2, Code2,
   Info, AlertTriangle, Cpu, CheckCircle2, ExternalLink
 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
@@ -131,25 +131,6 @@ export function SettingsView({
                       value={mixedPort} onChange={(e) => { const v = parseInt(e.target.value) || 0; onSetMixedPort(v); onSaveSettings({ mixedPort: v }); }} />
                   </div>
                   <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>Port changes take effect on next connection restart.</p>
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <Shield size={16} style={{ color: 'var(--accent-primary)' }} />
-                  <div className="settings-section-heading" style={{ margin: 0 }}>SNI Bypass & Legacy DNS</div>
-                </div>
-                <div className="grid-2">
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">SNI Bypass Hostname</label>
-                    <Inp value={settings.sniHost} onChange={(v) => onSaveSettings({ sniHost: v })} placeholder="aka.ms" />
-                    <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>Spoofs TLS SNI to bypass ISP throttling.</span>
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Direct DNS Server Override</label>
-                    <Inp value={settings.dnsAddress} onChange={(v) => onSaveSettings({ dnsAddress: v })} placeholder="Auto (system DNS)" />
-                    <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>Leave empty to use system DNS.</span>
-                  </div>
                 </div>
               </div>
 

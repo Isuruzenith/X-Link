@@ -74,7 +74,7 @@ pub async fn import_subscription(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -177,7 +177,7 @@ pub async fn import_file(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -279,7 +279,7 @@ pub async fn import_from_clipboard(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");

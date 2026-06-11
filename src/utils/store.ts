@@ -171,7 +171,7 @@ const DEFAULT_SETTINGS: Settings = {
   bypassChina: false,
 
   dnsAddress: '',
-  sniHost: 'aka.ms',
+  sniHost: '',
 };
 
 const DEFAULT_ROUTING_RULES: RoutingRule[] = [
