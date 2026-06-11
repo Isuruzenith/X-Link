@@ -66,10 +66,10 @@ export function DashboardView({
       actions={
         <div className="flex-row">
           {isElevated ? (
-            <div className="elev-badge"><Shield size={14} /><span>Elevated</span></div>
+            <div className="tun-shield-badge"><Shield size={14} /><span>TUN: Active</span></div>
           ) : (
-            <button className="btn secondary sm" onClick={onRequestElevation}>
-              <ShieldAlert size={14} className="text-danger" /><span>Run as Admin</span>
+            <button className="tun-shield-btn" onClick={onRequestElevation}>
+              <ShieldAlert size={14} /><span>TUN: Elevation Required</span>
             </button>
           )}
         </div>

@@ -789,6 +789,41 @@ body {
 /* ── ELEV / MODE BADGE ─────────────────────────────────────────────────────── */
 .elev-badge { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); color: var(--status-ok); font-size: 12px; font-weight: 500; }
 
+.tun-shield-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: var(--status-err);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.tun-shield-btn:hover {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.45);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+}
+
+.tun-shield-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--status-ok);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+
 /* ── CONNECT MODE BADGE ────────────────────────────────────────────────────── */
 .connect-mode-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--r-pill); background: var(--accent-primary-dim); border: 1px solid var(--border-accent-dim); color: var(--accent-primary); font-size: 11px; margin-top: var(--sp-2); }
 
@@ -845,3 +880,43 @@ body {
 /* ── SPIN ANIMATION ────────────────────────────────────────────────────────── */
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .spin { animation: spin 0.8s linear infinite; }
+
+/* ── TUN SHIELD BUTTON / BADGE ─────────────────────────────────────────────── */
+.tun-shield-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--status-err-dim);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--status-err);
+  transition: all 140ms ease;
+  box-shadow: 0 0 10px var(--status-err-dim);
+}
+.tun-shield-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: var(--status-err);
+  box-shadow: 0 0 14px var(--status-err-glow);
+  color: #ff6b6b;
+}
+
+.tun-shield-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--status-ok-dim);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: var(--status-ok);
+  box-shadow: 0 0 10px var(--status-ok-dim);
+}
+

@@ -58,7 +58,7 @@ export default function App() {
 
   // ── SETTINGS ───────────────────────────────────────────────────────────────
   const [settings, setSettings] = useState<Settings>({
-    proxyMode: 'system', closeToTray: true, autostart: false,
+    proxyMode: 'tun', closeToTray: true, autostart: false,
     httpPort: 7890, socksPort: 7891, mixedPort: 7892, wifiSharing: false,
     tunAutoRoute: true, tunAutoRedirect: false, tunStrictRoute: true,
     tunStack: 'mixed', tunMtu: 9000, tunEndpointIndependentNat: false,
@@ -370,6 +370,13 @@ export default function App() {
     const next = { ...settings, ...updates };
     setSettings(next);
     await storeHelper.saveSettings(updates);
+    if (updates.proxyMode !== undefined) {
+      if (updates.proxyMode === 'tun' && isElevated) {
+        try { await invoke('set_runas_admin', { enabled: true }); } catch { }
+      } else if (updates.proxyMode === 'system') {
+        try { await invoke('set_runas_admin', { enabled: false }); } catch { }
+      }
+    }
     if (updates.autostart !== undefined) {
       try { await invoke('set_autostart', { enabled: updates.autostart }); } catch { }
     }

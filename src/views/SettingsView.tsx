@@ -97,9 +97,8 @@ export function SettingsView({
                   <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => onSaveSettings({ closeToTray: v })} />
                   <SwitchRow title="Autostart with Windows" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => onSaveSettings({ autostart: v })} />
                   <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => onSaveSettings({ wifiSharing: v })} />
-                  <SwitchRow title="Virtual TUN Interface" desc="Route all traffic natively. Requires Administrator."
-                    checked={settings.proxyMode === 'tun'} onChange={(v) => onSaveSettings({ proxyMode: v ? 'tun' : 'system' })}
-                    disabled={!isElevated && settings.proxyMode !== 'tun'} />
+                  <SwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy). TUN mode captures all system traffic but requires Administrator."
+                    checked={settings.proxyMode === 'tun'} onChange={(v) => onSaveSettings({ proxyMode: v ? 'tun' : 'system' })} />
                 </div>
 
                 <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>

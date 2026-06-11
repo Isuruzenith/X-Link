@@ -120,7 +120,7 @@ export interface Settings {
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  proxyMode: 'system',
+  proxyMode: 'tun',
   closeToTray: true,
   autostart: false,
   httpPort: 7890,
