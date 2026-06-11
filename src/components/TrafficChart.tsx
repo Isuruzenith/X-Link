@@ -111,7 +111,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
 
       // 1. Draw area gradient fill under curve
       ctx.beginPath();
-      let firstPt = getCoordinates(0, data[0]);
+      const firstPt = getCoordinates(0, data[0]);
       ctx.moveTo(firstPt.x, firstPt.y);
 
       for (let i = 0; i < data.length - 1; i++) {
