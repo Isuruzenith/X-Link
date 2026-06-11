@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   DownloadCloud, UploadCloud, Clock, Server, Power,
   Shield, ShieldAlert, Network, Wifi, Edit3
@@ -6,7 +5,6 @@ import {
 import { TrafficChart } from '../components/TrafficChart';
 import { ViewShell } from '../components/ViewShell';
 import type { Profile, Settings } from '../utils/store';
-import type { OutboundAction } from '../utils/store';
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -56,7 +54,7 @@ interface DashboardViewProps {
 
 export function DashboardView({
   isConnected, activeProfileId, uptime, httpPort, socksPort, mixedPort,
-  isElevated, singboxVersion, appVersion, uploadBytes, downloadBytes, uploadSpeed,
+  isElevated, uploadBytes, downloadBytes, uploadSpeed,
   downloadSpeed, activeConnections, speedHistory, profiles, settings,
   selectedProfileId, profileOutbounds, selectedOutboundTag,
   onToggleConnect, onRequestElevation, onSelectOutbound, onOpenEditor,

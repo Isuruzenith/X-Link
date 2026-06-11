@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -15,7 +15,6 @@ import { NodeEditor } from './components/domain/NodeEditor';
 import { storeHelper } from './utils/store';
 import type {
   Profile, Settings, RoutingRule, RuleSet, DnsRule,
-  RoutingRuleType, OutboundAction, DnsRuleType,
 } from './utils/store';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -108,7 +107,7 @@ export default function App() {
   const [editFlow, setEditFlow] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editMethod, setEditMethod] = useState('aes-256-gcm');
-  const [editNetwork, setEditNetwork] = useState<'tcp'|'ws'|'grpc'|'quic'|'http'|'httpupgrade'>('tcp');
+  const [editNetwork, setEditNetwork] = useState<string>('tcp');
   const [editHeaderType, setEditHeaderType] = useState('');
   const [editPath, setEditPath] = useState('');
   const [editHost, setEditHost] = useState('');
@@ -176,7 +175,7 @@ export default function App() {
       setDnsRules(await storeHelper.getDnsRules());
     })();
 
-    pushSystemLog('TunX Core Engine initialized.');
+    pushSystemLog('X-Link Core initialized.');
     pushSystemLog('Ready to establish proxy tunnels.');
 
     const unlistenLog = listen<string>('sing-box-log', (e) => {
@@ -287,7 +286,7 @@ export default function App() {
         if (conflict) { pushSystemLog(`Error: Port ${conflict} is in use.`); setActiveTab('settings'); return; }
       } catch { }
       const target = profiles.find((p) => p.id === selectedProfileId);
-      pushSystemLog(`Booting TunX Core using profile "${target?.name || 'Default'}"...`);
+      pushSystemLog(`Booting X-Link Core using profile "${target?.name || 'Default'}"...`);
       try {
         const result = await invoke<string>('toggle_proxy', { start: true, profileId: selectedProfileId });
         if (result === 'started') {

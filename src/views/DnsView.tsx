@@ -1,4 +1,3 @@
-import React from 'react';
 import { Plus, Trash2, Edit3, X, Dna, Server, Filter, Info, ShieldCheck, Database, Ghost } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import type { DnsRule, Settings, DnsRuleType, DnsMode, DnsStrategy } from '../utils/store';
@@ -47,7 +46,7 @@ export function DnsView({
   const serverColor = (s: string) =>
     s === 'direct' ? 'var(--status-ok)' : s === 'block' ? 'var(--status-err)' : 'var(--accent-primary)';
   const serverBg = (s: string) =>
-    s === 'direct' ? 'rgba(34,197,94,0.1)' : s === 'block' ? 'rgba(239,68,68,0.1)' : 'rgba(102,252,241,0.1)';
+    s === 'direct' ? 'rgba(34,197,94,0.1)' : s === 'block' ? 'rgba(239,68,68,0.1)' : 'rgba(74,158,255,0.1)';
 
   return (
     <ViewShell

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Activity, Layers, Route, Dna, Terminal, Settings, Zap } from 'lucide-react';
+import { Activity, Layers, Route, Dna, Terminal, Settings } from 'lucide-react';
+import xLinkLogo from '../assets/X-Link-logo.png';
 
 export type TabId = 'dashboard' | 'profiles' | 'routing' | 'dns' | 'logs' | 'settings';
 
@@ -28,9 +29,9 @@ export function NavRail({ activeTab, onTabChange, isConnected, errorLogCount, si
       {/* Logo */}
       <div className="rail-logo">
         <div className="rail-logo-icon">
-          <Zap size={14} color="#0b0c10" strokeWidth={3} />
+          <img src={xLinkLogo} alt="X-Link" style={{ width: '28px', height: '28px', borderRadius: 'var(--r-md)' }} />
         </div>
-        <span className="rail-logo-wordmark">TunX</span>
+        <span className="rail-logo-wordmark">X-Link</span>
       </div>
 
       {/* Navigation */}

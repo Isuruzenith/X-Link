@@ -159,7 +159,7 @@ export function SettingsView({
                   <Cpu size={22} />
                 </div>
                 <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-high)' }}>TunX Engine</h4>
+                  <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-high)' }}>X-Link Engine</h4>
                   <p style={{ fontSize: '12px', color: 'var(--text-med)', marginTop: '2px' }}>
                     sing-box: <strong style={{ color: 'var(--text-high)', fontFamily: 'var(--font-mono)' }}>{singboxVersion.split('\n')[0]}</strong>
                   </p>

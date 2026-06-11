@@ -120,7 +120,7 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
         "Disconnected".to_string()
     };
 
-    let info_text = format!("TunX — {}", profile_name);
+    let info_text = format!("X-Link — {}", profile_name);
     let toggle_text = if is_running { "Disconnect" } else { "Connect" };
 
     let menu = Menu::new(app).map_err(|e| e.to_string())?;

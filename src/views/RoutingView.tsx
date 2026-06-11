@@ -1,11 +1,10 @@
-import React from 'react';
 import { Plus, Trash2, Edit3, X, Database, Filter, GitFork, Download, Info } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import type { RoutingRule, RuleSet, Settings, RoutingRuleType, OutboundAction } from '../utils/store';
 
 const OUTBOUND_COLORS: Record<OutboundAction, string> = {
-  proxy: 'var(--accent-cyan)', direct: 'var(--status-ok)',
-  block: 'var(--status-err)', dns: 'var(--accent-purple)',
+  proxy: 'var(--accent-primary)', direct: 'var(--status-ok)',
+  block: 'var(--status-err)', dns: 'var(--accent-secondary)',
 };
 
 const BadgeOutbound = ({ action }: { action: OutboundAction }) => (
