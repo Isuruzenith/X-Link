@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 use super::adapters::SingBoxOutbound;
 use super::build_route_exclude_addresses;
+use super::resolve_server_ips;
 use super::build_route_rules;
 use super::resolve_dns_address;
 
@@ -13,6 +14,16 @@ pub fn generate_singbox_config(
     sni_host: &str,
     listen_address: &str,
 ) -> Result<String, String> {
+    let mut server_hosts = Vec::new();
+    for outbound in &outbounds {
+        if let Some(server_val) = outbound.fields.get("server") {
+            if let Some(server_str) = server_val.as_str() {
+                server_hosts.push(server_str.to_string());
+            }
+        }
+    }
+    let server_ips = resolve_server_ips(&server_hosts);
+
     let mut node_tags: Vec<String> = outbounds.iter().map(|n| n.tag.clone()).collect();
 
     // Create the outbounds array
@@ -66,7 +77,7 @@ pub fn generate_singbox_config(
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
     // Construct the dynamic inbounds array
-    let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address);
+    let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address, &server_ips);
     let mut inbounds = vec![
         serde_json::json!({
             "type": "mixed",

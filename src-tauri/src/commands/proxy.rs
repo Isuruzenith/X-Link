@@ -211,8 +211,6 @@ pub async fn toggle_proxy(
     };
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
-    let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address);
-
     let config_path = crate::config::get_config_path(&app, &profile_id)?;
     
     // Write a default valid config if the file doesn't exist
@@ -255,6 +253,17 @@ pub async fn toggle_proxy(
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let mut server_hosts = Vec::new();
+                if let Some(outbounds) = config_val.get("outbounds").and_then(|o| o.as_array()) {
+                    for outbound in outbounds {
+                        if let Some(server) = outbound.get("server").and_then(|s| s.as_str()) {
+                            server_hosts.push(server.to_string());
+                        }
+                    }
+                }
+                let server_ips = crate::config::resolve_server_ips(&server_hosts);
+                let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address, &server_ips);
+
                 let proxy_mode = {
                     let mut mode = "system".to_string();
                     if let Ok(mut path) = app.path().app_data_dir() {
