@@ -301,7 +301,7 @@ pub async fn toggle_proxy(
                     inbounds.push(serde_json::json!({
                         "type": "tun",
                         "tag": "tun-in",
-                        "interface_name": "tun0",
+                        "interface_name": "X-Link",
                         "address": [
                             "172.19.0.1/30",
                             "fdfe:dcba:9876::1/126"
