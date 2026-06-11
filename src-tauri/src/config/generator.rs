@@ -6,7 +6,6 @@ use super::build_route_rules;
 use super::resolve_dns_address;
 
 pub fn generate_singbox_config(
-    _app: &tauri::AppHandle,
     mixed_port: u16,
     outbounds: Vec<SingBoxOutbound>,
     proxy_mode: &str,
@@ -122,4 +121,50 @@ pub fn generate_singbox_config(
 
     serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to generate pretty JSON config: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_singbox_config_listen_addresses() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "direct".to_string(),
+            tag: "direct".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        // Case 1: Wifi sharing is disabled -> binds to 127.0.0.1
+        let config_str_local = generate_singbox_config(
+            7890,
+            outbounds.clone(),
+            "system",
+            "1.1.1.1",
+            "",
+            "127.0.0.1",
+        ).unwrap();
+        let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
+        let inbounds_local = config_local["inbounds"].as_array().unwrap();
+        assert!(!inbounds_local.is_empty());
+        let mixed_inbound_local = &inbounds_local[0];
+        assert_eq!(mixed_inbound_local["listen"].as_str().unwrap(), "127.0.0.1");
+        assert_eq!(mixed_inbound_local["listen_port"].as_u64().unwrap(), 7890);
+
+        // Case 2: Wifi sharing is enabled -> binds to 0.0.0.0
+        let config_str_wifi = generate_singbox_config(
+            7890,
+            outbounds.clone(),
+            "system",
+            "1.1.1.1",
+            "",
+            "0.0.0.0",
+        ).unwrap();
+        let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
+        let inbounds_wifi = config_wifi["inbounds"].as_array().unwrap();
+        assert!(!inbounds_wifi.is_empty());
+        let mixed_inbound_wifi = &inbounds_wifi[0];
+        assert_eq!(mixed_inbound_wifi["listen"].as_str().unwrap(), "0.0.0.0");
+        assert_eq!(mixed_inbound_wifi["listen_port"].as_u64().unwrap(), 7890);
+    }
 }
