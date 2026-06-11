@@ -643,8 +643,6 @@ export default function App() {
       <NavRail
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        connectionStatus={connectionStatus}
-        singboxVersion={singboxVersion}
       />
 
       <div className="view-host">
