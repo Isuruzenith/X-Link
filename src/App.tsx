@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { NavRail } from './components/NavRail';
 import type { TabId } from './components/NavRail';
@@ -47,11 +46,8 @@ export default function App() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [profileOutbounds, setProfileOutbounds] = useState<any[]>([]);
   const [selectedOutboundTag, setSelectedOutboundTag] = useState<string | null>(null);
-  const [importTab, setImportTab] = useState<'url' | 'file' | 'clipboard'>('url');
   const [importName, setImportName] = useState('');
-  const [importUrl, setImportUrl] = useState('');
   const [importContent, setImportContent] = useState('');
-  const [importFilePath, setImportFilePath] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -322,44 +318,84 @@ export default function App() {
     } catch (err) { pushSystemLog(`Failed to switch node: ${err}`); }
   };
 
-  const handlePickFile = async () => {
-    try {
-      const selected = await open({ multiple: false, filters: [{ name: 'Configs', extensions: ['json', 'yaml', 'yml', 'txt'] }] });
-      if (selected) {
-        setImportFilePath(selected as string);
-        if (!importName) setImportName(((selected as string).split(/[\\/]/).pop() || '').replace(/\.[^/.]+$/, ''));
-      }
-    } catch { }
-  };
-
   const handlePasteClipboard = async () => {
     try {
       const text = await readText();
-      if (text) { setImportContent(text); pushSystemLog('Pasted config from clipboard.'); }
+      if (text) {
+        setImportContent(text);
+        pushSystemLog('Pasted config from clipboard.');
+        
+        // Auto-detect profile name from URI fragment
+        if (!importName.trim()) {
+          const trimmedText = text.trim();
+          if (trimmedText.startsWith('vless://') || trimmedText.startsWith('vmess://') || trimmedText.startsWith('trojan://') || trimmedText.startsWith('ss://')) {
+            let tagPart = '';
+            if (trimmedText.startsWith('vmess://')) {
+              try {
+                let b64 = trimmedText.replace('vmess://', '').trim();
+                while (b64.length % 4 !== 0) { b64 += '='; }
+                const decoded = atob(b64);
+                const parsed = JSON.parse(decoded);
+                if (parsed.ps) {
+                  tagPart = parsed.ps;
+                }
+              } catch {}
+            } else {
+              const parts = trimmedText.split('#');
+              if (parts.length > 1) {
+                tagPart = decodeURIComponent(parts[1].trim());
+              }
+            }
+            if (tagPart) {
+              setImportName(tagPart);
+            }
+          }
+        }
+      }
       else setImportError('Clipboard is empty.');
     } catch { setImportError('Failed to read clipboard.'); }
+  };
+
+  const handleImportContentChange = (val: string) => {
+    setImportContent(val);
+    if (!importName.trim()) {
+      const trimmedText = val.trim();
+      if (trimmedText.startsWith('vless://') || trimmedText.startsWith('vmess://') || trimmedText.startsWith('trojan://') || trimmedText.startsWith('ss://')) {
+        let tagPart = '';
+        if (trimmedText.startsWith('vmess://')) {
+          try {
+            let b64 = trimmedText.replace('vmess://', '').trim();
+            while (b64.length % 4 !== 0) { b64 += '='; }
+            const decoded = atob(b64);
+            const parsed = JSON.parse(decoded);
+            if (parsed.ps) {
+              tagPart = parsed.ps;
+            }
+          } catch {}
+        } else {
+          const parts = trimmedText.split('#');
+          if (parts.length > 1) {
+            tagPart = decodeURIComponent(parts[1].trim());
+          }
+        }
+        if (tagPart) {
+          setImportName(tagPart);
+        }
+      }
+    }
   };
 
   const handleImportProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setImportError(null); setImportSuccess(false); setIsImporting(true);
     if (!importName.trim()) { setImportError('Please enter a profile name.'); setIsImporting(false); return; }
+    if (!importContent.trim()) { setImportError('Please paste config content.'); setIsImporting(false); return; }
     try {
-      let imported: Profile;
-      if (importTab === 'url') {
-        if (!importUrl.trim()) { setImportError('Please provide a subscription URL.'); setIsImporting(false); return; }
-        imported = await invoke<Profile>('import_subscription', { url: importUrl, name: importName });
-      } else if (importTab === 'file') {
-        if (!importFilePath.trim()) { setImportError('Please select a config file.'); setIsImporting(false); return; }
-        imported = await invoke<Profile>('import_file', { filePath: importFilePath, name: importName });
-      } else {
-        if (!importContent.trim()) { setImportError('Please paste config content.'); setIsImporting(false); return; }
-        imported = await invoke<Profile>('import_from_clipboard', { content: importContent, name: importName });
-      }
+      const imported = await invoke<Profile>('import_from_clipboard', { content: importContent, name: importName });
       await storeHelper.addProfile(imported);
       const reloaded = await storeHelper.getProfiles();
       setProfiles(reloaded); setSelectedProfileId(imported.id);
-      setImportSuccess(true); setImportName(''); setImportUrl(''); setImportContent(''); setImportFilePath('');
+      setImportSuccess(true); setImportName(''); setImportContent('');
       pushSystemLog(`Profile "${imported.name}" imported! ${imported.nodeCount} nodes.`);
       setTimeout(() => setImportSuccess(false), 3000);
     } catch (err) { setImportError(String(err)); }
@@ -604,21 +640,15 @@ export default function App() {
             selectedProfileId={selectedProfileId}
             activeProfileId={activeProfileId}
             isConnected={isConnected}
-            importTab={importTab}
             importName={importName}
-            importUrl={importUrl}
             importContent={importContent}
-            importFilePath={importFilePath}
             importError={importError}
             importSuccess={importSuccess}
             isImporting={isImporting}
             onSelectProfile={setSelectedProfileId}
             onDeleteProfile={handleDeleteProfile}
-            onSetImportTab={setImportTab}
             onSetImportName={setImportName}
-            onSetImportUrl={setImportUrl}
-            onSetImportContent={setImportContent}
-            onPickFile={handlePickFile}
+            onSetImportContent={handleImportContentChange}
             onPasteClipboard={handlePasteClipboard}
             onImportProfile={handleImportProfile}
           />
