@@ -152,25 +152,45 @@ export default function App() {
   // ── INITIALIZATION ─────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
-      try {
-        setIsElevated(await invoke<boolean>('check_tun_support'));
-        setAppVersion(await invoke<string>('get_app_version'));
-        setSingboxVersion(await invoke<string>('get_singbox_version'));
-      } catch { }
+      // Fetch all independent data in parallel instead of sequentially
+      const [
+        elevated,
+        version,
+        singboxVer,
+        savedSettings,
+        savedProfiles,
+        savedRoutingRules,
+        savedRuleSets,
+        savedDnsRules,
+      ] = await Promise.all([
+        invoke<boolean>('check_tun_support').catch(() => false),
+        invoke<string>('get_app_version').catch(() => '0.1.0'),
+        invoke<string>('get_singbox_version').catch(() => 'Unknown'),
+        storeHelper.getSettings(),
+        storeHelper.getProfiles(),
+        storeHelper.getRoutingRules(),
+        storeHelper.getRuleSets(),
+        storeHelper.getDnsRules(),
+      ]);
 
-      const savedSettings = await storeHelper.getSettings();
+      setIsElevated(elevated);
+      setAppVersion(version);
+      setSingboxVersion(singboxVer);
+
       setSettings(savedSettings);
       setHttpPort(savedSettings.httpPort);
       setSocksPort(savedSettings.socksPort);
       setMixedPort(savedSettings.mixedPort);
 
-      const savedProfiles = await storeHelper.getProfiles();
       setProfiles(savedProfiles);
       if (savedProfiles.length > 0) setSelectedProfileId(savedProfiles[0].id);
 
-      setRoutingRules(await storeHelper.getRoutingRules());
-      setRuleSets(await storeHelper.getRuleSets());
-      setDnsRules(await storeHelper.getDnsRules());
+      setRoutingRules(savedRoutingRules);
+      setRuleSets(savedRuleSets);
+      setDnsRules(savedDnsRules);
+
+      // Show the window now that the UI is fully initialized
+      await invoke('show_window').catch(() => {});
     })();
 
     pushSystemLog('X-Link Core initialized.');

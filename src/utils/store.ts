@@ -221,10 +221,12 @@ export const storeHelper = {
   async getSettings(): Promise<Settings> {
     try {
       const store = await getSettingsStore();
+      const entries = await store.entries<unknown>();
       const saved: Partial<Settings> = {};
-      for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]) {
-        const val = await store.get<Settings[typeof key]>(key as string);
-        if (val !== null && val !== undefined) (saved as any)[key] = val;
+      for (const [key, val] of entries) {
+        if (key in DEFAULT_SETTINGS && val !== null && val !== undefined) {
+          (saved as any)[key] = val;
+        }
       }
       return { ...DEFAULT_SETTINGS, ...saved };
     } catch {
@@ -235,9 +237,10 @@ export const storeHelper = {
   async saveSettings(settings: Partial<Settings>): Promise<void> {
     try {
       const store = await getSettingsStore();
-      for (const [key, value] of Object.entries(settings)) {
-        if (value !== undefined) await store.set(key, value);
-      }
+      const setOps = Object.entries(settings)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => store.set(key, value));
+      await Promise.all(setOps);
       await store.save();
     } catch (e) {
       console.error('Failed to save settings:', e);

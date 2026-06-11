@@ -1,7 +1,19 @@
+use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
+use crate::state::ProxyState;
 
 #[tauri::command]
-pub async fn get_singbox_version(app: tauri::AppHandle) -> Result<String, String> {
+pub async fn get_singbox_version(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, ProxyState>,
+) -> Result<String, String> {
+    // Return cached version if available
+    if let Ok(guard) = state.singbox_version.lock() {
+        if let Some(ref cached) = *guard {
+            return Ok(cached.clone());
+        }
+    }
+
     let sidecar = app.shell().sidecar("sing-box")
         .map_err(|e| format!("Failed to find sing-box sidecar: {}", e))?;
     
@@ -12,6 +24,10 @@ pub async fn get_singbox_version(app: tauri::AppHandle) -> Result<String, String
     
     if output.status.success() {
         let version_str = String::from_utf8_lossy(&output.stdout).into_owned();
+        // Cache the result
+        if let Ok(mut guard) = state.singbox_version.lock() {
+            *guard = Some(version_str.clone());
+        }
         Ok(version_str)
     } else {
         let err_str = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -22,6 +38,15 @@ pub async fn get_singbox_version(app: tauri::AppHandle) -> Result<String, String
 #[tauri::command]
 pub fn get_app_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub fn show_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.show().map_err(|e| format!("Failed to show window: {}", e))?;
+        window.set_focus().map_err(|e| format!("Failed to focus window: {}", e))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

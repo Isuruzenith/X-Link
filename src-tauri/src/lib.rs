@@ -6,6 +6,7 @@ pub mod tray;
 
 use state::ProxyState;
 use tauri::Manager;
+use tauri_plugin_shell::ShellExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +26,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_singbox_version,
             commands::system::get_app_version,
+            commands::system::show_window,
             commands::system::check_port_conflict,
             commands::system::set_autostart,
             commands::system::check_tun_support,
@@ -69,12 +71,37 @@ pub fn run() {
             }
 
             // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
+            // Run in a background thread to avoid blocking the setup hook
             if is_elevated::is_elevated() && proxy_mode == "tun" {
-                let _ = crate::commands::system::set_runas_admin(true);
+                std::thread::spawn(|| {
+                    let _ = crate::commands::system::set_runas_admin(true);
+                });
             }
 
             // Copy wintun.dll next to sing-box sidecar dynamically on boot to ensure TUN mode works
-            copy_wintun_dll_to_sidecar_dir(app.handle());
+            // Run in a background thread to avoid blocking the setup hook with filesystem scans
+            let handle_for_wintun = app.handle().clone();
+            std::thread::spawn(move || {
+                copy_wintun_dll_to_sidecar_dir(&handle_for_wintun);
+            });
+
+            // Pre-fetch and cache the sing-box version in the background
+            let handle_for_version = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(sidecar) = handle_for_version.shell().sidecar("sing-box") {
+                    if let Ok(output) = sidecar.args(["version"]).output().await {
+                        if output.status.success() {
+                            let version = String::from_utf8_lossy(&output.stdout).into_owned();
+                            {
+                                let state = handle_for_version.state::<ProxyState>();
+                                if let Ok(mut guard) = state.singbox_version.lock() {
+                                    *guard = Some(version);
+                                };
+                            }
+                        }
+                    }
+                }
+            });
 
             // Programmatically initialize the system tray helper
             let _ = crate::tray::create_tray(app.handle())?;
