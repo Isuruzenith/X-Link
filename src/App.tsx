@@ -550,15 +550,6 @@ export default function App() {
     finally { setIsSavingConfig(false); }
   };
 
-  const handleApplyPreset = () => {
-    setEditTag('zoom-One-Piece'); setEditAddress('azureedge.duckdns.org'); setEditPort(443);
-    setEditProtocol('vless'); setEditUuid('a20d4836-4634-471b-b6c3-2f48acb0e9a5');
-    setEditFlow(''); setEditNetwork('tcp'); setEditTlsEnabled(true); setEditRealityEnabled(true);
-    setEditServerName('aka.ms'); setEditFingerprint('chrome');
-    setEditPublicKey('kovJ2h9HyJoofO83M00dYx8hzqeTBKyGQ3fs4Y2nMSE'); setEditShortId('97c4e5fcb1e8');
-    setEditAllowInsecure(true); setEditorSection('basic');
-    pushSystemLog('Applied VLESS+REALITY preset template.');
-  };
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
@@ -707,7 +698,7 @@ export default function App() {
         saveError={editSaveError}
         section={editorSection}
         onSectionChange={setEditorSection}
-        onApplyPreset={handleApplyPreset}
+
         editTag={editTag} setEditTag={setEditTag}
         editAddress={editAddress} setEditAddress={setEditAddress}
         editPort={editPort} setEditPort={setEditPort}

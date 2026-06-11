@@ -15,7 +15,6 @@ interface NodeEditorProps {
   saveError: string | null;
   section: 'basic' | 'transport' | 'tls';
   onSectionChange: (s: 'basic' | 'transport' | 'tls') => void;
-  onApplyPreset: () => void;
   // All the edit state
   editTag: string; setEditTag: (v: string) => void;
   editAddress: string; setEditAddress: (v: string) => void;
@@ -482,9 +481,6 @@ export function NodeEditor(props: NodeEditorProps) {
 
         {/* Footer */}
         <div className="drawer-footer">
-          <button className="btn secondary sm" onClick={props.onApplyPreset} style={{ marginRight: 'auto' }}>
-            Preset
-          </button>
           <button className="btn secondary" onClick={props.onClose}>Cancel</button>
           <button className="btn primary" onClick={props.onSave} disabled={props.isSaving} style={{ minWidth: '90px' }}>
             {props.isSaving ? <><RefreshCw size={14} className="spin" /> Saving…</> : 'Save Node'}
