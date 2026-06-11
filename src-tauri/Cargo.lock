@@ -3929,6 +3929,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "image",
  "jni",
  "libc",
  "log 0.4.30",
@@ -4677,32 +4678,6 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
-
-[[package]]
-name = "tunx"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "is_elevated",
- "log 0.4.30",
- "percent-encoding",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_yaml",
- "sysproxy",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tauri-plugin-single-instance",
- "tauri-plugin-store",
- "tokio",
- "url",
- "uuid",
- "windows 0.58.0",
-]
 
 [[package]]
 name = "typeid"
@@ -5973,6 +5948,32 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "xlink"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "is_elevated",
+ "log 0.4.30",
+ "percent-encoding",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sysproxy",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-store",
+ "tokio",
+ "url",
+ "uuid",
+ "windows 0.58.0",
+]
 
 [[package]]
 name = "yoke"

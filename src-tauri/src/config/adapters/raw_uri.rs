@@ -58,6 +58,37 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
     None
 }
 
+fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Value> {
+    let transport_type = query_params.get("type").map(|t| t.as_str()).unwrap_or("");
+    if transport_type.is_empty() || transport_type == "tcp" {
+        return None;
+    }
+
+    let mut transport = HashMap::new();
+    transport.insert("type".to_string(), Value::String(transport_type.to_string()));
+
+    match transport_type {
+        "ws" | "httpupgrade" => {
+            if let Some(path) = query_params.get("path") {
+                transport.insert("path".to_string(), Value::String(path.to_string()));
+            }
+            if let Some(host) = query_params.get("host") {
+                let mut headers = HashMap::new();
+                headers.insert("Host".to_string(), Value::String(host.to_string()));
+                transport.insert("headers".to_string(), Value::Object(headers.into_iter().collect()));
+            }
+        }
+        "grpc" => {
+            if let Some(service_name) = query_params.get("serviceName").or_else(|| query_params.get("servicename")) {
+                transport.insert("service_name".to_string(), Value::String(service_name.to_string()));
+            }
+        }
+        _ => {}
+    }
+
+    Some(Value::Object(transport.into_iter().collect()))
+}
+
 pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
     let raw_str = String::from_utf8_lossy(raw);
     let mut outbounds = Vec::new();
@@ -211,6 +242,10 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                     fields.insert("tls".to_string(), tls);
                 }
 
+                if let Some(transport) = parse_transport_settings(&query_params) {
+                    fields.insert("transport".to_string(), transport);
+                }
+
                 outbounds.push(SingBoxOutbound {
                     outbound_type: "vless".to_string(),
                     tag,
@@ -225,6 +260,10 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 let query_params: HashMap<String, String> = url.query_pairs().into_owned().collect();
                 if let Some(tls) = parse_tls_settings(&query_params) {
                     fields.insert("tls".to_string(), tls);
+                }
+
+                if let Some(transport) = parse_transport_settings(&query_params) {
+                    fields.insert("transport".to_string(), transport);
                 }
 
                 outbounds.push(SingBoxOutbound {
@@ -267,6 +306,31 @@ mod tests {
         assert_eq!(vless_node.fields.get("server_port").and_then(|v| v.as_u64()).unwrap(), 443);
         assert_eq!(vless_node.fields.get("uuid").and_then(|v| v.as_str()).unwrap(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
         assert_eq!(vless_node.fields.get("flow").and_then(|v| v.as_str()).unwrap(), "xtls-rprx-vision");
+    }
+
+    #[test]
+    fn test_adapt_raw_uris_transport() {
+        let uris = "vless://f47ac10b-58cc-4372-a567-0e02b2c3d479@4.5.6.7:443?type=ws&path=%2Fchat&host=cloudflare.com#Vless%20WS\ntrojan://mypass@4.5.6.7:443?type=grpc&serviceName=grpc-test#Trojan%20gRPC";
+        let res = adapt(uris.as_bytes()).unwrap();
+        assert_eq!(res.len(), 2);
+
+        // VLESS WS check
+        let vless_ws = &res[0];
+        assert_eq!(vless_ws.outbound_type, "vless");
+        assert_eq!(vless_ws.tag, "Vless WS");
+        let transport = vless_ws.fields.get("transport").unwrap().as_object().unwrap();
+        assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
+        assert_eq!(transport.get("path").unwrap().as_str().unwrap(), "/chat");
+        let headers = transport.get("headers").unwrap().as_object().unwrap();
+        assert_eq!(headers.get("Host").unwrap().as_str().unwrap(), "cloudflare.com");
+
+        // Trojan gRPC check
+        let trojan_grpc = &res[1];
+        assert_eq!(trojan_grpc.outbound_type, "trojan");
+        assert_eq!(trojan_grpc.tag, "Trojan gRPC");
+        let transport_grpc = trojan_grpc.fields.get("transport").unwrap().as_object().unwrap();
+        assert_eq!(transport_grpc.get("type").unwrap().as_str().unwrap(), "grpc");
+        assert_eq!(transport_grpc.get("service_name").unwrap().as_str().unwrap(), "grpc-test");
     }
 }
 

@@ -47,9 +47,9 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         
         let cmd = if enabled {
-            format!("reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v TunX /t REG_SZ /d \"\\\"{}\\\" --minimized\" /f", exe_str)
+            format!("reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v X-Link /t REG_SZ /d \"\\\"{}\\\" --minimized\" /f", exe_str)
         } else {
-            "reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v TunX /f".to_string()
+            "reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v X-Link /f".to_string()
         };
 
         let output = std::process::Command::new("cmd")
@@ -116,6 +116,46 @@ pub fn request_elevation() -> Result<(), String> {
     {
         Err("Elevation is only supported on Windows".to_string())
     }
+}
+
+#[tauri::command]
+pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        let exe_str = exe_path.to_str()
+            .ok_or_else(|| "Failed to convert executable path to string".to_string())?;
+
+        let cmd = if enabled {
+            format!(
+                "reg add \"HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers\" /v \"{}\" /t REG_SZ /d \"~ RUNASADMIN\" /f",
+                exe_str
+            )
+        } else {
+            format!(
+                "reg delete \"HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers\" /v \"{}\" /f",
+                exe_str
+            )
+        };
+
+        let output = std::process::Command::new("cmd")
+            .args(["/C", &cmd])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| format!("Registry exec failed: {}", e))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).to_string();
+            if enabled || !err.contains("unable to find the specified registry key") {
+                return Err(format!("Registry runas_admin command failed: {}", err.trim()));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

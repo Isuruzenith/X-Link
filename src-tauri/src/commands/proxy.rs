@@ -19,7 +19,7 @@ pub struct TrafficStats {
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyStateSerialized {
-    pub status: String,
+    pub status: crate::state::ConnectionStatus,
     pub active_profile_id: Option<String>,
     pub http_port: u16,
     pub socks_port: u16,
@@ -37,8 +37,7 @@ static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> = std
 
 #[tauri::command]
 pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<ProxyStateSerialized, String> {
-    let is_running = state.is_running();
-    let status = if is_running { "connected" } else { "idle" };
+    let status = state.get_status();
     let active_profile = ACTIVE_PROFILE_ID.lock().unwrap().clone();
     let uptime = if let Some(start) = *CONNECTION_START_TIME.lock().unwrap() {
         start.elapsed().as_secs()
@@ -47,7 +46,7 @@ pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<Pr
     };
 
     Ok(ProxyStateSerialized {
-        status: status.to_string(),
+        status,
         active_profile_id: active_profile,
         http_port: *state.http_port.lock().unwrap(),
         socks_port: *state.socks_port.lock().unwrap(),
@@ -69,43 +68,12 @@ pub async fn get_traffic_stats(state: State<'_, crate::state::ProxyState>) -> Re
         });
     }
 
-    // Try to fetch traffic stats from sing-box REST API at 127.0.0.1:9090/api/traffic
-    // If it fails, return mocked values that increment over time to show charts working!
-    let client = reqwest::Client::new();
-    match client.get("http://127.0.0.1:9090/api/traffic").send().await {
-        Ok(resp) => {
-            #[derive(serde::Deserialize)]
-            struct SingboxTraffic {
-                up: u64,
-                down: u64,
-            }
-            if let Ok(traffic) = resp.json::<SingboxTraffic>().await {
-                // Return stats
-                return Ok(TrafficStats {
-                    upload_bytes: traffic.up,
-                    download_bytes: traffic.down,
-                    upload_speed: 1024,
-                    download_speed: 2048,
-                    active_connections: 5,
-                });
-            }
-        }
-        Err(_) => {}
-    }
-
-    // Mock fallback when REST API isn't responding or loaded yet
-    static MOCK_UP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(102400);
-    static MOCK_DOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(409600);
-    
-    let up = MOCK_UP.fetch_add(51200, std::sync::atomic::Ordering::Relaxed);
-    let down = MOCK_DOWN.fetch_add(153600, std::sync::atomic::Ordering::Relaxed);
-
     Ok(TrafficStats {
-        upload_bytes: up,
-        download_bytes: down,
-        upload_speed: 51200,
-        download_speed: 153600,
-        active_connections: 3,
+        upload_bytes: *state.upload_bytes.lock().map_err(|e| e.to_string())?,
+        download_bytes: *state.download_bytes.lock().map_err(|e| e.to_string())?,
+        upload_speed: *state.upload_speed.lock().map_err(|e| e.to_string())?,
+        download_speed: *state.download_speed.lock().map_err(|e| e.to_string())?,
+        active_connections: *state.active_connections.lock().map_err(|e| e.to_string())?,
     })
 }
 
@@ -118,6 +86,7 @@ pub async fn toggle_proxy(
 ) -> Result<String, String> {
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
+        state.set_status(crate::state::ConnectionStatus::Disconnected);
         {
             let mut process_lock = state.child_process.lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
@@ -141,13 +110,20 @@ pub async fn toggle_proxy(
         *ACTIVE_PROFILE_ID.lock().unwrap() = None;
         *CONNECTION_START_TIME.lock().unwrap() = None;
 
-        // Sync native system tray menu
-        crate::tray::update_tray_menu(&app);
+        // Reset bandwidth metrics
+        if let Ok(mut up_s) = state.upload_speed.lock() { *up_s = 0; }
+        if let Ok(mut down_s) = state.download_speed.lock() { *down_s = 0; }
+        if let Ok(mut conn) = state.active_connections.lock() { *conn = 0; }
+
+        // Sync native system tray
+        crate::tray::update_tray(&app);
         
         return Ok("stopped".into());
     }
 
     // ── START PATH ───────────────────────────────────────────────────────────
+    state.set_status(crate::state::ConnectionStatus::Connecting);
+    crate::tray::update_tray(&app);
     // Forcefully kill any existing sing-box processes system-wide before starting
     #[cfg(target_os = "windows")]
     {
@@ -196,10 +172,13 @@ pub async fn toggle_proxy(
         }
     }
 
-    let (dns_address, sni_host, wifi_sharing) = {
+    let (dns_address, sni_host, wifi_sharing, api_port, api_secret, api_cors) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
+        let mut api_port = 9090u16;
+        let mut api_secret = "".to_string();
+        let mut api_cors = true;
         if let Ok(mut path) = app.path().app_data_dir() {
             path.push("settings.json");
             if path.exists() {
@@ -216,17 +195,24 @@ pub async fn toggle_proxy(
                         if let Some(w) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
                         }
+                        if let Some(p) = val.get("apiPort").and_then(|v| v.as_u64()) {
+                            api_port = p as u16;
+                        }
+                        if let Some(s) = val.get("apiSecret").and_then(|v| v.as_str()) {
+                            api_secret = s.to_string();
+                        }
+                        if let Some(c) = val.get("apiCors").and_then(|v| v.as_bool()) {
+                            api_cors = c;
+                        }
                     }
                 }
             }
         }
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, wifi)
+        (resolved_dns, sni, wifi, api_port, api_secret, api_cors)
     };
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
-    let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address);
-
     let config_path = crate::config::get_config_path(&app, &profile_id)?;
     
     // Write a default valid config if the file doesn't exist
@@ -246,18 +232,17 @@ pub async fn toggle_proxy(
     }}
   ],
   "outbounds": [
-    {{ "type": "direct", "tag": "direct" }},
-    {{ "type": "block", "tag": "block" }}
+    {{ "type": "direct", "tag": "direct" }}
   ],
   "route": {{
     "rules": [
-      {{ "geoip": "private", "outbound": "direct" }}
+      {{ "geoip": "private", "action": "direct" }}
     ],
     "final": "direct",
     "auto_detect_interface": true
   }},
   "experimental": {{
-    "rest_api": {{
+    "clash_api": {{
       "external_controller": "127.0.0.1:9090"
     }}
   }}
@@ -270,6 +255,17 @@ pub async fn toggle_proxy(
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let mut server_hosts = Vec::new();
+                if let Some(outbounds) = config_val.get("outbounds").and_then(|o| o.as_array()) {
+                    for outbound in outbounds {
+                        if let Some(server) = outbound.get("server").and_then(|s| s.as_str()) {
+                            server_hosts.push(server.to_string());
+                        }
+                    }
+                }
+                let server_ips = crate::config::resolve_server_ips(&server_hosts);
+                let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address, &server_ips);
+
                 let proxy_mode = {
                     let mut mode = "system".to_string();
                     if let Ok(mut path) = app.path().app_data_dir() {
@@ -302,7 +298,7 @@ pub async fn toggle_proxy(
                     inbounds.push(serde_json::json!({
                         "type": "tun",
                         "tag": "tun-in",
-                        "interface_name": "tun0",
+                        "interface_name": "X-Link",
                         "address": [
                             "172.19.0.1/30",
                             "fdfe:dcba:9876::1/126"
@@ -334,6 +330,20 @@ pub async fn toggle_proxy(
                     "rules": route_rules,
                     "final": "proxy",
                     "auto_detect_interface": true
+                });
+
+                // Patch experimental clash_api configuration
+                let mut clash_api = serde_json::json!({
+                    "external_controller": format!("127.0.0.1:{}", api_port)
+                });
+                if !api_secret.is_empty() {
+                    clash_api["secret"] = serde_json::Value::String(api_secret.clone());
+                }
+                if api_cors {
+                    clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
+                }
+                config_val["experimental"] = serde_json::json!({
+                    "clash_api": clash_api
                 });
 
                 // Patch outbounds with dynamic SNI host from settings
@@ -395,10 +405,11 @@ pub async fn toggle_proxy(
                     }
                     
                     // Clear global state & restore OS system proxy
+                    state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
                     *ACTIVE_PROFILE_ID.lock().unwrap() = None;
                     *CONNECTION_START_TIME.lock().unwrap() = None;
                     crate::tray::perform_clean_cleanup(&app_for_logs);
-                    crate::tray::update_tray_menu(&app_for_logs);
+                    crate::tray::update_tray(&app_for_logs);
                     
                     break;
                 }
@@ -413,7 +424,8 @@ pub async fn toggle_proxy(
     // Check if the sidecar process exited prematurely
     match term_rx.try_recv() {
         Ok(code) => {
-            let state = app.state::<crate::state::ProxyState>();
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();
             return Err(format!(
@@ -421,7 +433,8 @@ pub async fn toggle_proxy(
             ));
         }
         Err(oneshot::error::TryRecvError::Closed) => {
-            let state = app.state::<crate::state::ProxyState>();
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();
             return Err("spawn_failed: child process terminated unexpectedly during startup".into());
@@ -430,6 +443,89 @@ pub async fn toggle_proxy(
             // Process is healthy and still running successfully!
         }
     }
+
+    // Spawn background traffic monitoring task
+    let app_handle = app.clone();
+    let api_secret_clone = api_secret.clone();
+    tokio::spawn(async move {
+        let state_clone = app_handle.state::<crate::state::ProxyState>();
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/connections", api_port);
+        let mut prev_upload = 0u64;
+        let mut prev_download = 0u64;
+        let mut consecutive_failures = 0;
+
+        loop {
+            if !state_clone.is_running() {
+                break;
+            }
+
+            let mut req = client.get(&url);
+            if !api_secret_clone.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", api_secret_clone));
+            }
+
+            match req.send().await {
+                Ok(resp) => {
+                    #[derive(serde::Deserialize)]
+                    struct ConnectionsResponse {
+                        #[serde(rename = "uploadTotal")]
+                        upload_total: u64,
+                        #[serde(rename = "downloadTotal")]
+                        download_total: u64,
+                        connections: Vec<serde_json::Value>,
+                    }
+
+                    if let Ok(data) = resp.json::<ConnectionsResponse>().await {
+                        consecutive_failures = 0;
+                        let mut up_speed = 0u64;
+                        let mut down_speed = 0u64;
+
+                        if prev_upload > 0 && data.upload_total >= prev_upload {
+                            up_speed = data.upload_total - prev_upload;
+                        }
+                        if prev_download > 0 && data.download_total >= prev_download {
+                            down_speed = data.download_total - prev_download;
+                        }
+
+                        prev_upload = data.upload_total;
+                        prev_download = data.download_total;
+
+                        if let Ok(mut up_b) = state_clone.upload_bytes.lock() {
+                            *up_b = data.upload_total;
+                        }
+                        if let Ok(mut down_b) = state_clone.download_bytes.lock() {
+                            *down_b = data.download_total;
+                        }
+                        if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+                            *up_s = up_speed;
+                        }
+                        if let Ok(mut down_s) = state_clone.download_speed.lock() {
+                            *down_s = down_speed;
+                        }
+                        if let Ok(mut conn) = state_clone.active_connections.lock() {
+                            *conn = data.connections.len() as u32;
+                        }
+                    } else {
+                        consecutive_failures += 1;
+                    }
+                }
+                Err(_) => {
+                    consecutive_failures += 1;
+                }
+            }
+
+            if consecutive_failures > 5 {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+
+        if let Ok(mut up_s) = state_clone.upload_speed.lock() { *up_s = 0; };
+        if let Ok(mut down_s) = state_clone.download_speed.lock() { *down_s = 0; };
+        if let Ok(mut conn) = state_clone.active_connections.lock() { *conn = 0; };
+    });
 
     // Enable system proxy ONLY if proxyMode is 'system'
     let proxy_mode = {
@@ -455,11 +551,12 @@ pub async fn toggle_proxy(
     }
 
     // Set connection global states
+    state.set_status(crate::state::ConnectionStatus::Connected);
     *ACTIVE_PROFILE_ID.lock().unwrap() = Some(profile_id);
     *CONNECTION_START_TIME.lock().unwrap() = Some(std::time::Instant::now());
 
-    // Sync native system tray menu
-    crate::tray::update_tray_menu(&app);
+    // Sync native system tray
+    crate::tray::update_tray(&app);
 
     Ok("started".into())
 }

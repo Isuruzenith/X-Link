@@ -120,7 +120,7 @@ export interface Settings {
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  proxyMode: 'system',
+  proxyMode: 'tun',
   closeToTray: true,
   autostart: false,
   httpPort: 7890,
@@ -171,7 +171,7 @@ const DEFAULT_SETTINGS: Settings = {
   bypassChina: false,
 
   dnsAddress: '',
-  sniHost: 'aka.ms',
+  sniHost: '',
 };
 
 const DEFAULT_ROUTING_RULES: RoutingRule[] = [

@@ -23,7 +23,7 @@ pub fn get_config_path(app: &AppHandle, profile_id: &str) -> Result<PathBuf, Str
     Ok(path)
 }
 
-pub fn build_route_exclude_addresses(dns_address: &str) -> Vec<String> {
+pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -> Vec<String> {
     let mut addresses = vec![
         "10.0.0.0/8".to_string(),
         "172.16.0.0/12".to_string(),
@@ -41,13 +41,58 @@ pub fn build_route_exclude_addresses(dns_address: &str) -> Vec<String> {
         }
     }
 
+    for ip in server_ips {
+        if !addresses.contains(ip) {
+            addresses.push(ip.clone());
+        }
+    }
+
     addresses
+}
+
+pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
+    use std::net::ToSocketAddrs;
+    let mut ip_strings = Vec::new();
+    for server in servers {
+        let trimmed = server.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Ok(ip) = trimmed.parse::<IpAddr>() {
+            match ip {
+                IpAddr::V4(addr) => ip_strings.push(format!("{}/32", addr)),
+                IpAddr::V6(addr) => ip_strings.push(format!("{}/128", addr)),
+            }
+        } else {
+            let host_port = format!("{}:443", trimmed);
+            if let Ok(addrs) = host_port.to_socket_addrs() {
+                for addr in addrs {
+                    match addr.ip() {
+                        IpAddr::V4(a) => {
+                            let cidr = format!("{}/32", a);
+                            if !ip_strings.contains(&cidr) {
+                                ip_strings.push(cidr);
+                            }
+                        }
+                        IpAddr::V6(a) => {
+                            let cidr = format!("{}/128", a);
+                            if !ip_strings.contains(&cidr) {
+                                ip_strings.push(cidr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ip_strings
 }
 
 pub fn build_route_rules() -> Vec<Value> {
     vec![
-        serde_json::json!({ "protocol": "dns", "outbound": "dns-out" }),
-        serde_json::json!({ "geoip": "private", "outbound": "direct" }),
+        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
+        serde_json::json!({ "geoip": "private", "action": "direct" }),
     ]
 }
 
@@ -95,7 +140,10 @@ fn get_system_dns_address() -> Option<String> {
 
         if in_dns_block {
             if let Some(ip) = extract_ip_from_line(line) {
-                return Some(ip);
+                // Ignore X-Link TUN virtual DNS address to prevent circular routing loops
+                if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
+                    return Some(ip);
+                }
             }
 
             if !line.starts_with(' ') && !line.starts_with('\t') && !line.contains("DNS Servers") {

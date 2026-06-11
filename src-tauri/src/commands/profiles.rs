@@ -74,7 +74,7 @@ pub async fn import_subscription(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -100,7 +100,7 @@ pub async fn import_subscription(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(&app, mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -177,7 +177,7 @@ pub async fn import_file(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -203,7 +203,7 @@ pub async fn import_file(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(&app, mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -279,7 +279,7 @@ pub async fn import_from_clipboard(
     let mixed_port = *state.mixed_port.lock().unwrap();
     let (dns_address, sni_host, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "aka.ms".to_string();
+        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -305,7 +305,7 @@ pub async fn import_from_clipboard(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(&app, mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);

@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use serde_json::Value;
 use super::adapters::SingBoxOutbound;
 use super::build_route_exclude_addresses;
+use super::resolve_server_ips;
 use super::build_route_rules;
 use super::resolve_dns_address;
-use tauri::Manager;
 
 pub fn generate_singbox_config(
-    _app: &tauri::AppHandle,
     mixed_port: u16,
     outbounds: Vec<SingBoxOutbound>,
     proxy_mode: &str,
@@ -15,9 +14,23 @@ pub fn generate_singbox_config(
     sni_host: &str,
     listen_address: &str,
 ) -> Result<String, String> {
+    let mut server_hosts = Vec::new();
+    for outbound in &outbounds {
+        if let Some(server_val) = outbound.fields.get("server") {
+            if let Some(server_str) = server_val.as_str() {
+                server_hosts.push(server_str.to_string());
+            }
+        }
+    }
+    let server_ips = resolve_server_ips(&server_hosts);
+
     let mut node_tags: Vec<String> = outbounds.iter().map(|n| n.tag.clone()).collect();
+
+    // Create the outbounds array
+    let mut final_outbounds = Vec::new();
+
+    // Fallback if no outbounds imported yet
     if node_tags.is_empty() {
-        // Fallback if no outbounds imported yet
         node_tags.push("direct".to_string());
     }
 
@@ -27,8 +40,6 @@ pub fn generate_singbox_config(
     selector.insert("tag".to_string(), Value::String("proxy".to_string()));
     selector.insert("outbounds".to_string(), Value::Array(node_tags.into_iter().map(Value::String).collect()));
 
-    // Create the outbounds array
-    let mut final_outbounds = Vec::new();
     // First, push our custom selector outbound
     final_outbounds.push(Value::Object(selector.into_iter().collect()));
 
@@ -57,26 +68,16 @@ pub fn generate_singbox_config(
         final_outbounds.push(Value::Object(obj));
     }
 
-    // Push direct, block, dns outbounds
+    // Unconditionally push the standard direct outbound (required for dns detour)
     let mut direct = HashMap::new();
     direct.insert("type".to_string(), Value::String("direct".to_string()));
     direct.insert("tag".to_string(), Value::String("direct".to_string()));
     final_outbounds.push(Value::Object(direct.into_iter().collect()));
 
-    let mut block = HashMap::new();
-    block.insert("type".to_string(), Value::String("block".to_string()));
-    block.insert("tag".to_string(), Value::String("block".to_string()));
-    final_outbounds.push(Value::Object(block.into_iter().collect()));
-
-    let mut dns_out = HashMap::new();
-    dns_out.insert("type".to_string(), Value::String("dns".to_string()));
-    dns_out.insert("tag".to_string(), Value::String("dns-out".to_string()));
-    final_outbounds.push(Value::Object(dns_out.into_iter().collect()));
-
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
     // Construct the dynamic inbounds array
-    let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address);
+    let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address, &server_ips);
     let mut inbounds = vec![
         serde_json::json!({
             "type": "mixed",
@@ -90,7 +91,7 @@ pub fn generate_singbox_config(
         inbounds.push(serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
-            "interface_name": "tun0",
+            "interface_name": "X-Link",
             "address": [
                 "172.19.0.1/30",
                 "fdfe:dcba:9876::1/126"
@@ -131,4 +132,50 @@ pub fn generate_singbox_config(
 
     serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to generate pretty JSON config: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_singbox_config_listen_addresses() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "direct".to_string(),
+            tag: "direct".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        // Case 1: Wifi sharing is disabled -> binds to 127.0.0.1
+        let config_str_local = generate_singbox_config(
+            7890,
+            outbounds.clone(),
+            "system",
+            "1.1.1.1",
+            "",
+            "127.0.0.1",
+        ).unwrap();
+        let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
+        let inbounds_local = config_local["inbounds"].as_array().unwrap();
+        assert!(!inbounds_local.is_empty());
+        let mixed_inbound_local = &inbounds_local[0];
+        assert_eq!(mixed_inbound_local["listen"].as_str().unwrap(), "127.0.0.1");
+        assert_eq!(mixed_inbound_local["listen_port"].as_u64().unwrap(), 7890);
+
+        // Case 2: Wifi sharing is enabled -> binds to 0.0.0.0
+        let config_str_wifi = generate_singbox_config(
+            7890,
+            outbounds.clone(),
+            "system",
+            "1.1.1.1",
+            "",
+            "0.0.0.0",
+        ).unwrap();
+        let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
+        let inbounds_wifi = config_wifi["inbounds"].as_array().unwrap();
+        assert!(!inbounds_wifi.is_empty());
+        let mixed_inbound_wifi = &inbounds_wifi[0];
+        assert_eq!(mixed_inbound_wifi["listen"].as_str().unwrap(), "0.0.0.0");
+        assert_eq!(mixed_inbound_wifi["listen_port"].as_u64().unwrap(), 7890);
+    }
 }

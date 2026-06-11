@@ -1,19 +1,19 @@
 [package]
-name = "tunx"
+name = "xlink"
 version = "0.1.0"
-description = "TunX Desktop Proxy Client"
+description = "X-Link Desktop Proxy Client"
 authors = ["Antigravity"]
 edition = "2021"
 
 [lib]
-name = "tunx_lib"
+name = "xlink_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-store = "2"
 tauri-plugin-single-instance = "2"

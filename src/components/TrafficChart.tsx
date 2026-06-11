@@ -111,7 +111,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
 
       // 1. Draw area gradient fill under curve
       ctx.beginPath();
-      let firstPt = getCoordinates(0, data[0]);
+      const firstPt = getCoordinates(0, data[0]);
       ctx.moveTo(firstPt.x, firstPt.y);
 
       for (let i = 0; i < data.length - 1; i++) {
@@ -167,19 +167,19 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     // Create Gradients
     // Download (Teal glow)
     const downGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    downGrad.addColorStop(0, 'rgba(102, 252, 241, 0.25)');
-    downGrad.addColorStop(1, 'rgba(102, 252, 241, 0.00)');
+    downGrad.addColorStop(0, 'rgba(74, 158, 255, 0.25)');
+    downGrad.addColorStop(1, 'rgba(74, 158, 255, 0.00)');
 
     // Upload (Purple/Violet glow)
     const upGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    upGrad.addColorStop(0, 'rgba(168, 85, 247, 0.25)');
-    upGrad.addColorStop(1, 'rgba(168, 85, 247, 0.00)');
+    upGrad.addColorStop(0, 'rgba(124, 141, 255, 0.25)');
+    upGrad.addColorStop(1, 'rgba(124, 141, 255, 0.00)');
 
     // Draw Download Curve first (background)
-    drawCurve(paddedDown, '#66FCF1', downGrad, 'rgba(102, 252, 241, 0.5)');
+    drawCurve(paddedDown, '#4A9EFF', downGrad, 'rgba(74, 158, 255, 0.5)');
 
     // Draw Upload Curve second (foreground)
-    drawCurve(paddedUp, '#A855F7', upGrad, 'rgba(168, 85, 247, 0.5)');
+    drawCurve(paddedUp, '#7C8DFF', upGrad, 'rgba(124, 141, 255, 0.5)');
 
     // Draw X-axis line (subtle)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
