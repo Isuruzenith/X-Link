@@ -69,43 +69,12 @@ pub async fn get_traffic_stats(state: State<'_, crate::state::ProxyState>) -> Re
         });
     }
 
-    // Try to fetch traffic stats from sing-box REST API at 127.0.0.1:9090/api/traffic
-    // If it fails, return mocked values that increment over time to show charts working!
-    let client = reqwest::Client::new();
-    match client.get("http://127.0.0.1:9090/api/traffic").send().await {
-        Ok(resp) => {
-            #[derive(serde::Deserialize)]
-            struct SingboxTraffic {
-                up: u64,
-                down: u64,
-            }
-            if let Ok(traffic) = resp.json::<SingboxTraffic>().await {
-                // Return stats
-                return Ok(TrafficStats {
-                    upload_bytes: traffic.up,
-                    download_bytes: traffic.down,
-                    upload_speed: 1024,
-                    download_speed: 2048,
-                    active_connections: 5,
-                });
-            }
-        }
-        Err(_) => {}
-    }
-
-    // Mock fallback when REST API isn't responding or loaded yet
-    static MOCK_UP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(102400);
-    static MOCK_DOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(409600);
-    
-    let up = MOCK_UP.fetch_add(51200, std::sync::atomic::Ordering::Relaxed);
-    let down = MOCK_DOWN.fetch_add(153600, std::sync::atomic::Ordering::Relaxed);
-
     Ok(TrafficStats {
-        upload_bytes: up,
-        download_bytes: down,
-        upload_speed: 51200,
-        download_speed: 153600,
-        active_connections: 3,
+        upload_bytes: *state.upload_bytes.lock().map_err(|e| e.to_string())?,
+        download_bytes: *state.download_bytes.lock().map_err(|e| e.to_string())?,
+        upload_speed: *state.upload_speed.lock().map_err(|e| e.to_string())?,
+        download_speed: *state.download_speed.lock().map_err(|e| e.to_string())?,
+        active_connections: *state.active_connections.lock().map_err(|e| e.to_string())?,
     })
 }
 
@@ -140,6 +109,11 @@ pub async fn toggle_proxy(
         // Clear global state
         *ACTIVE_PROFILE_ID.lock().unwrap() = None;
         *CONNECTION_START_TIME.lock().unwrap() = None;
+
+        // Reset bandwidth metrics
+        if let Ok(mut up_s) = state.upload_speed.lock() { *up_s = 0; }
+        if let Ok(mut down_s) = state.download_speed.lock() { *down_s = 0; }
+        if let Ok(mut conn) = state.active_connections.lock() { *conn = 0; }
 
         // Sync native system tray menu
         crate::tray::update_tray_menu(&app);
@@ -196,10 +170,13 @@ pub async fn toggle_proxy(
         }
     }
 
-    let (dns_address, sni_host, wifi_sharing) = {
+    let (dns_address, sni_host, wifi_sharing, api_port, api_secret, api_cors) = {
         let mut dns: Option<String> = None;
         let mut sni = "aka.ms".to_string();
         let mut wifi = false;
+        let mut api_port = 9090u16;
+        let mut api_secret = "".to_string();
+        let mut api_cors = true;
         if let Ok(mut path) = app.path().app_data_dir() {
             path.push("settings.json");
             if path.exists() {
@@ -216,12 +193,21 @@ pub async fn toggle_proxy(
                         if let Some(w) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
                         }
+                        if let Some(p) = val.get("apiPort").and_then(|v| v.as_u64()) {
+                            api_port = p as u16;
+                        }
+                        if let Some(s) = val.get("apiSecret").and_then(|v| v.as_str()) {
+                            api_secret = s.to_string();
+                        }
+                        if let Some(c) = val.get("apiCors").and_then(|v| v.as_bool()) {
+                            api_cors = c;
+                        }
                     }
                 }
             }
         }
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, wifi)
+        (resolved_dns, sni, wifi, api_port, api_secret, api_cors)
     };
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
@@ -256,7 +242,7 @@ pub async fn toggle_proxy(
     "auto_detect_interface": true
   }},
   "experimental": {{
-    "rest_api": {{
+    "clash_api": {{
       "external_controller": "127.0.0.1:9090"
     }}
   }}
@@ -333,6 +319,20 @@ pub async fn toggle_proxy(
                     "rules": route_rules,
                     "final": "proxy",
                     "auto_detect_interface": true
+                });
+
+                // Patch experimental clash_api configuration
+                let mut clash_api = serde_json::json!({
+                    "external_controller": format!("127.0.0.1:{}", api_port)
+                });
+                if !api_secret.is_empty() {
+                    clash_api["secret"] = serde_json::Value::String(api_secret.clone());
+                }
+                if api_cors {
+                    clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
+                }
+                config_val["experimental"] = serde_json::json!({
+                    "clash_api": clash_api
                 });
 
                 // Patch outbounds with dynamic SNI host from settings
@@ -429,6 +429,89 @@ pub async fn toggle_proxy(
             // Process is healthy and still running successfully!
         }
     }
+
+    // Spawn background traffic monitoring task
+    let app_handle = app.clone();
+    let api_secret_clone = api_secret.clone();
+    tokio::spawn(async move {
+        let state_clone = app_handle.state::<crate::state::ProxyState>();
+        let client = reqwest::Client::new();
+        let url = format!("http://127.0.0.1:{}/connections", api_port);
+        let mut prev_upload = 0u64;
+        let mut prev_download = 0u64;
+        let mut consecutive_failures = 0;
+
+        loop {
+            if !state_clone.is_running() {
+                break;
+            }
+
+            let mut req = client.get(&url);
+            if !api_secret_clone.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", api_secret_clone));
+            }
+
+            match req.send().await {
+                Ok(resp) => {
+                    #[derive(serde::Deserialize)]
+                    struct ConnectionsResponse {
+                        #[serde(rename = "uploadTotal")]
+                        upload_total: u64,
+                        #[serde(rename = "downloadTotal")]
+                        download_total: u64,
+                        connections: Vec<serde_json::Value>,
+                    }
+
+                    if let Ok(data) = resp.json::<ConnectionsResponse>().await {
+                        consecutive_failures = 0;
+                        let mut up_speed = 0u64;
+                        let mut down_speed = 0u64;
+
+                        if prev_upload > 0 && data.upload_total >= prev_upload {
+                            up_speed = data.upload_total - prev_upload;
+                        }
+                        if prev_download > 0 && data.download_total >= prev_download {
+                            down_speed = data.download_total - prev_download;
+                        }
+
+                        prev_upload = data.upload_total;
+                        prev_download = data.download_total;
+
+                        if let Ok(mut up_b) = state_clone.upload_bytes.lock() {
+                            *up_b = data.upload_total;
+                        }
+                        if let Ok(mut down_b) = state_clone.download_bytes.lock() {
+                            *down_b = data.download_total;
+                        }
+                        if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+                            *up_s = up_speed;
+                        }
+                        if let Ok(mut down_s) = state_clone.download_speed.lock() {
+                            *down_s = down_speed;
+                        }
+                        if let Ok(mut conn) = state_clone.active_connections.lock() {
+                            *conn = data.connections.len() as u32;
+                        }
+                    } else {
+                        consecutive_failures += 1;
+                    }
+                }
+                Err(_) => {
+                    consecutive_failures += 1;
+                }
+            }
+
+            if consecutive_failures > 5 {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+
+        if let Ok(mut up_s) = state_clone.upload_speed.lock() { *up_s = 0; };
+        if let Ok(mut down_s) = state_clone.download_speed.lock() { *down_s = 0; };
+        if let Ok(mut conn) = state_clone.active_connections.lock() { *conn = 0; };
+    });
 
     // Enable system proxy ONLY if proxyMode is 'system'
     let proxy_mode = {

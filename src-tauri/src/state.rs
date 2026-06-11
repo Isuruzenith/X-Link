@@ -16,6 +16,12 @@ pub struct ProxyState {
     pub http_port: Mutex<u16>,
     pub socks_port: Mutex<u16>,
     pub mixed_port: Mutex<u16>,
+    /// Live bandwidth statistics
+    pub upload_bytes: Mutex<u64>,
+    pub download_bytes: Mutex<u64>,
+    pub upload_speed: Mutex<u64>,
+    pub download_speed: Mutex<u64>,
+    pub active_connections: Mutex<u32>,
 }
 
 impl ProxyState {
@@ -27,6 +33,11 @@ impl ProxyState {
             http_port: Mutex::new(http_port),
             socks_port: Mutex::new(socks_port),
             mixed_port: Mutex::new(mixed_port),
+            upload_bytes: Mutex::new(0),
+            download_bytes: Mutex::new(0),
+            upload_speed: Mutex::new(0),
+            download_speed: Mutex::new(0),
+            active_connections: Mutex::new(0),
         }
     }
 
