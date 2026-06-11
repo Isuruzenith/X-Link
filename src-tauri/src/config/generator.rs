@@ -4,7 +4,6 @@ use super::adapters::SingBoxOutbound;
 use super::build_route_exclude_addresses;
 use super::build_route_rules;
 use super::resolve_dns_address;
-use tauri::Manager;
 
 pub fn generate_singbox_config(
     _app: &tauri::AppHandle,
@@ -16,8 +15,12 @@ pub fn generate_singbox_config(
     listen_address: &str,
 ) -> Result<String, String> {
     let mut node_tags: Vec<String> = outbounds.iter().map(|n| n.tag.clone()).collect();
+
+    // Create the outbounds array
+    let mut final_outbounds = Vec::new();
+
+    // Fallback if no outbounds imported yet
     if node_tags.is_empty() {
-        // Fallback if no outbounds imported yet
         node_tags.push("direct".to_string());
     }
 
@@ -27,8 +30,6 @@ pub fn generate_singbox_config(
     selector.insert("tag".to_string(), Value::String("proxy".to_string()));
     selector.insert("outbounds".to_string(), Value::Array(node_tags.into_iter().map(Value::String).collect()));
 
-    // Create the outbounds array
-    let mut final_outbounds = Vec::new();
     // First, push our custom selector outbound
     final_outbounds.push(Value::Object(selector.into_iter().collect()));
 
@@ -57,21 +58,11 @@ pub fn generate_singbox_config(
         final_outbounds.push(Value::Object(obj));
     }
 
-    // Push direct, block, dns outbounds
+    // Unconditionally push the standard direct outbound (required for dns detour)
     let mut direct = HashMap::new();
     direct.insert("type".to_string(), Value::String("direct".to_string()));
     direct.insert("tag".to_string(), Value::String("direct".to_string()));
     final_outbounds.push(Value::Object(direct.into_iter().collect()));
-
-    let mut block = HashMap::new();
-    block.insert("type".to_string(), Value::String("block".to_string()));
-    block.insert("tag".to_string(), Value::String("block".to_string()));
-    final_outbounds.push(Value::Object(block.into_iter().collect()));
-
-    let mut dns_out = HashMap::new();
-    dns_out.insert("type".to_string(), Value::String("dns".to_string()));
-    dns_out.insert("tag".to_string(), Value::String("dns-out".to_string()));
-    final_outbounds.push(Value::Object(dns_out.into_iter().collect()));
 
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 

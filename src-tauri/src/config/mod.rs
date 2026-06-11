@@ -46,8 +46,8 @@ pub fn build_route_exclude_addresses(dns_address: &str) -> Vec<String> {
 
 pub fn build_route_rules() -> Vec<Value> {
     vec![
-        serde_json::json!({ "protocol": "dns", "outbound": "dns-out" }),
-        serde_json::json!({ "geoip": "private", "outbound": "direct" }),
+        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
+        serde_json::json!({ "geoip": "private", "action": "direct" }),
     ]
 }
 

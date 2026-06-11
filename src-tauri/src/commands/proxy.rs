@@ -246,12 +246,11 @@ pub async fn toggle_proxy(
     }}
   ],
   "outbounds": [
-    {{ "type": "direct", "tag": "direct" }},
-    {{ "type": "block", "tag": "block" }}
+    {{ "type": "direct", "tag": "direct" }}
   ],
   "route": {{
     "rules": [
-      {{ "geoip": "private", "outbound": "direct" }}
+      {{ "geoip": "private", "action": "direct" }}
     ],
     "final": "direct",
     "auto_detect_interface": true
