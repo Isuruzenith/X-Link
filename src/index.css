@@ -271,31 +271,83 @@ body {
 
 /* RAIL FOOTER */
 .rail-footer {
-  display: flex; flex-direction: column; gap: var(--sp-2);
+  display: flex; flex-direction: column;
   padding: var(--sp-3) var(--sp-3);
   border-top: 1px solid var(--border-subtle);
-  margin-top: var(--sp-3); overflow: hidden; white-space: nowrap;
+  margin-top: auto; overflow: hidden; white-space: nowrap;
 }
 
-.rail-status-row { display: flex; align-items: center; gap: var(--sp-2); height: 28px; }
+.rail-status-card {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: 38px; padding: 0 6px;
+  border-radius: var(--r-md);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  transition:
+    padding var(--sidebar-transition),
+    background-color 160ms ease,
+    border-color 160ms ease;
+  overflow: hidden;
+}
 
-.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.rail-status-card:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.nav-rail:hover .rail-status-card {
+  padding: 0 var(--sp-3);
+}
+
+/* STATUS INDICATOR */
+.status-indicator {
+  position: relative;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.status-dot { width: 8px; height: 8px; border-radius: 50%; z-index: 2; flex-shrink: 0; }
 .status-dot.ok   { background: var(--status-ok);   box-shadow: 0 0 6px var(--status-ok-glow); }
 .status-dot.idle { background: var(--status-warn);  box-shadow: 0 0 6px rgba(245,158,11,0.4); }
 .status-dot.err  { background: var(--status-err);   box-shadow: 0 0 6px var(--status-err-glow); }
 
-.rail-status-text {
-  font-size: 12px; font-weight: 500; text-transform: capitalize;
-  opacity: 0; transition: opacity 160ms ease calc(var(--sidebar-transition) / 3);
+.status-ring {
+  position: absolute;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  opacity: 0.3;
+  animation: status-pulse 2s infinite ease-in-out;
+  z-index: 1;
 }
-.nav-rail:hover .rail-status-text { opacity: 1; }
+.status-ring.ok   { background: var(--status-ok); }
+.status-ring.idle { background: var(--status-warn); }
+.status-ring.err  { background: var(--status-err); }
 
-.rail-version {
-  font-size: 10px; font-family: var(--font-mono); color: var(--text-low);
-  padding-left: 3px; opacity: 0;
-  transition: opacity 160ms ease calc(var(--sidebar-transition) / 3);
+@keyframes status-pulse {
+  0% { transform: scale(0.7); opacity: 0.5; }
+  70% { transform: scale(1.3); opacity: 0; }
+  100% { transform: scale(0.7); opacity: 0.5; }
 }
-.nav-rail:hover .rail-version { opacity: 1; }
+
+.rail-status-info {
+  display: flex; flex-direction: column; gap: 1px;
+  opacity: 0; transition: opacity 160ms ease calc(var(--sidebar-transition) / 3);
+  white-space: nowrap; overflow: hidden;
+}
+.nav-rail:hover .rail-status-info { opacity: 1; }
+
+.status-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+  text-transform: uppercase; color: var(--text-med);
+}
+.status-label.ok { color: var(--status-ok); }
+.status-label.idle { color: var(--status-warn); }
+.status-label.err { color: var(--status-err); }
+
+.status-sublabel {
+  font-size: 9px; font-family: var(--font-mono); color: var(--text-low);
+}
 
 /* ── BUTTON ────────────────────────────────────────────────────────────────── */
 .btn {

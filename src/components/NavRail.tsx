@@ -21,7 +21,8 @@ const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
 ];
 
 export function NavRail({ activeTab, onTabChange, isConnected, singboxVersion }: NavRailProps) {
-  const versionShort = singboxVersion?.match(/v[\d.]+/)?.[0] ?? '—';
+  const versionMatch = singboxVersion?.match(/(?:v|version\s+)?([\d.]+)/i);
+  const versionShort = versionMatch ? `v${versionMatch[1]}` : (singboxVersion || '—');
 
   return (
     <aside className="nav-rail">
@@ -50,16 +51,17 @@ export function NavRail({ activeTab, onTabChange, isConnected, singboxVersion }:
 
       {/* Footer */}
       <div className="rail-footer">
-        <div className="rail-status-row">
-          <div className={`status-dot ${isConnected ? 'ok' : 'idle'}`} />
-          <span
-            className="rail-status-text"
-            style={{ color: isConnected ? 'var(--status-ok)' : 'var(--status-warn)' }}
-          >
-            {isConnected ? 'connected' : 'idle'}
-          </span>
+        <div className="rail-status-card" title={`System Status: ${isConnected ? 'Connected' : 'Idle'} (${versionShort})`}>
+          <div className="status-indicator">
+            <span className={`status-dot ${isConnected ? 'ok' : 'idle'}`} />
+            <span className={`status-ring ${isConnected ? 'ok' : 'idle'}`} />
+          </div>
+          <div className="rail-status-info">
+            <span className={`status-label ${isConnected ? 'ok' : 'idle'}`}>
+              System {isConnected ? 'Active' : 'Idle'}
+            </span>
+          </div>
         </div>
-        <span className="rail-version">{versionShort}</span>
       </div>
     </aside>
   );
