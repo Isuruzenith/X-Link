@@ -32,6 +32,8 @@ pub struct ProxyState {
     pub upload_speed: Mutex<u64>,
     pub download_speed: Mutex<u64>,
     pub active_connections: Mutex<u32>,
+    /// Cached sing-box version string (pre-fetched at startup)
+    pub singbox_version: Mutex<Option<String>>,
 }
 
 impl ProxyState {
@@ -49,6 +51,7 @@ impl ProxyState {
             upload_speed: Mutex::new(0),
             download_speed: Mutex::new(0),
             active_connections: Mutex::new(0),
+            singbox_version: Mutex::new(None),
         }
     }
 
