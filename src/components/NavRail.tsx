@@ -8,7 +8,6 @@ interface NavRailProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
   isConnected: boolean;
-  errorLogCount: number;
   singboxVersion: string;
 }
 
@@ -21,7 +20,7 @@ const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
   ['settings',  Settings,  'Settings'],
 ];
 
-export function NavRail({ activeTab, onTabChange, isConnected, errorLogCount, singboxVersion }: NavRailProps) {
+export function NavRail({ activeTab, onTabChange, isConnected, singboxVersion }: NavRailProps) {
   const versionShort = singboxVersion?.match(/v[\d.]+/)?.[0] ?? '—';
 
   return (
@@ -45,9 +44,6 @@ export function NavRail({ activeTab, onTabChange, isConnected, errorLogCount, si
           >
             <Icon className="nav-icon" size={18} />
             <span className="nav-label">{label}</span>
-            {tab === 'logs' && errorLogCount > 0 && (
-              <span className="nav-badge err">{errorLogCount > 99 ? '99+' : errorLogCount}</span>
-            )}
           </div>
         ))}
       </nav>

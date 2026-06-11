@@ -184,7 +184,7 @@ export default function App() {
       let type: 'info' | 'warn' | 'error' | 'system' = 'info';
       if (line.toLowerCase().includes('warn')) type = 'warn';
       else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) type = 'error';
-      setLogs((prev) => [...prev, { type, text: line }]);
+      setLogs((prev) => [...prev, { type, text: line }].slice(-500));
     });
 
     const unlistenTerm = listen<number | null>('sing-box-terminated', (e) => {
@@ -202,7 +202,7 @@ export default function App() {
             if (line.toLowerCase().includes('warn')) type = 'warn';
             else if (line.toLowerCase().includes('err')) type = 'error';
             return { type, text: line };
-          })]);
+          })].slice(-500));
         }
       } catch { }
     })();
@@ -270,7 +270,7 @@ export default function App() {
 
   // ── HELPERS ────────────────────────────────────────────────────────────────
   const pushSystemLog = (text: string) =>
-    setLogs((prev) => [...prev, { type: 'system', text: `[System] ${text}` }]);
+    setLogs((prev) => [...prev, { type: 'system' as const, text: `[System] ${text}` }].slice(-500));
 
   // ── ACTIONS ────────────────────────────────────────────────────────────────
   const handleToggleConnect = async () => {
@@ -560,8 +560,6 @@ export default function App() {
     pushSystemLog('Applied VLESS+REALITY preset template.');
   };
 
-  const errorLogCount = logs.filter((l) => l.type === 'error').length;
-
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div className="app-root">
@@ -569,7 +567,6 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         isConnected={isConnected}
-        errorLogCount={errorLogCount}
         singboxVersion={singboxVersion}
       />
 
