@@ -92,7 +92,9 @@ export function ProfilesView({
                 </div>
                 <div className="profile-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   {swappingProfileId === p.id && (
-                    <RefreshCw size={14} className="spin" style={{ color: 'var(--text-med)' }} title="Connecting..." />
+                    <span title="Connecting..." style={{ display: 'flex' }}>
+                      <RefreshCw size={14} className="spin" style={{ color: 'var(--text-med)' }} />
+                    </span>
                   )}
                   {activeProfileId === p.id && isConnected && swappingProfileId !== p.id && (
                     <div title="Active Profile" style={{
