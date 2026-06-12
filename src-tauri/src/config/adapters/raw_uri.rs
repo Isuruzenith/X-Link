@@ -52,6 +52,11 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
             tls.insert("reality".to_string(), Value::Object(reality.into_iter().collect()));
         }
         
+        if let Some(alpn_str) = query_params.get("alpn") {
+            let alpn_list: Vec<Value> = alpn_str.split(',').map(|s| Value::String(s.to_string())).collect();
+            tls.insert("alpn".to_string(), Value::Array(alpn_list));
+        }
+
         return Some(Value::Object(tls.into_iter().collect()));
     }
     
@@ -318,8 +323,22 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 fields.insert("uuid".to_string(), Value::String(uuid));
 
                 let query_params: HashMap<String, String> = url.query_pairs().into_owned().collect();
-                if let Some(flow) = query_params.get("flow") {
-                    fields.insert("flow".to_string(), Value::String(flow.to_string()));
+                
+                let mut flow_val = query_params.get("flow").map(|s| s.to_string());
+                if flow_val.is_none() {
+                    let security = query_params.get("security").map(|s| s.as_str()).unwrap_or("");
+                    let net_type = query_params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
+                    if security == "reality" && net_type == "tcp" {
+                        flow_val = Some("xtls-rprx-vision".to_string());
+                    }
+                }
+                
+                if let Some(flow) = flow_val {
+                    fields.insert("flow".to_string(), Value::String(flow));
+                }
+                
+                if let Some(pe) = query_params.get("packetEncoding") {
+                    fields.insert("packet_encoding".to_string(), Value::String(pe.to_string()));
                 }
 
                 if let Some(tls) = parse_tls_settings(&query_params) {
