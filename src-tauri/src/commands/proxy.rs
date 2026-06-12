@@ -5,7 +5,14 @@ use tauri_plugin_shell::process::CommandEvent;
 use tauri::Emitter;
 use tokio::sync::oneshot;
 use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
+use std::sync::OnceLock;
 use crate::config::generator::TunSettings;
+
+fn get_toggle_lock() -> &'static AsyncMutex<()> {
+    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| AsyncMutex::new(()))
+}
 
 /// Read TUN and sniffing settings from the user's settings.json file.
 /// Falls back to safe defaults if the file is missing or any field is absent.
@@ -406,6 +413,8 @@ pub async fn toggle_proxy(
     start: bool,
     profile_id: String,
 ) -> Result<String, String> {
+    let _guard = get_toggle_lock().lock().await;
+
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
         state.set_status(crate::state::ConnectionStatus::Disconnected);

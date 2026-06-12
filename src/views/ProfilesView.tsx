@@ -7,6 +7,7 @@ interface ProfilesViewProps {
   profiles: Profile[];
   selectedProfileId: string | null;
   activeProfileId: string | null;
+  swappingProfileId: string | null;
   isConnected: boolean;
   importName: string;
   importContent: string;
@@ -26,7 +27,7 @@ interface ProfilesViewProps {
 }
 
 export function ProfilesView({
-  profiles, selectedProfileId, activeProfileId, isConnected,
+  profiles, selectedProfileId, activeProfileId, swappingProfileId, isConnected,
   importName, importContent, importError, importSuccess, isImporting,
   profileOutbounds, selectedOutboundTag,
   onSelectProfile, onDeleteProfile, onSetImportName, onSetImportContent,
@@ -90,7 +91,10 @@ export function ProfilesView({
                   </div>
                 </div>
                 <div className="profile-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {activeProfileId === p.id && isConnected && (
+                  {swappingProfileId === p.id && (
+                    <RefreshCw size={14} className="spin" style={{ color: 'var(--text-med)' }} title="Connecting..." />
+                  )}
+                  {activeProfileId === p.id && isConnected && swappingProfileId !== p.id && (
                     <div title="Active Profile" style={{
                       width: '8px',
                       height: '8px',

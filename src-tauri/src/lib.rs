@@ -47,37 +47,40 @@ pub fn run() {
         ])
         .setup(|app| {
             // Load saved ports from settings.json dynamically on boot
-            let state = app.state::<ProxyState>();
-            let mut proxy_mode = "tun".to_string();
-            if let Ok(mut path) = app.path().app_data_dir() {
-                path.push("settings.json");
-                if path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                            if let Some(p) = val.get("mixedPort").and_then(|v| v.as_u64()) {
-                                *state.mixed_port.lock().unwrap() = p as u16;
-                            }
-                            if let Some(p) = val.get("httpPort").and_then(|v| v.as_u64()) {
-                                *state.http_port.lock().unwrap() = p as u16;
-                            }
-                            if let Some(p) = val.get("socksPort").and_then(|v| v.as_u64()) {
-                                *state.socks_port.lock().unwrap() = p as u16;
-                            }
-                            if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
-                                proxy_mode = m.to_string();
+            // Run in a background thread to avoid blocking the app startup
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let state = app_handle.state::<ProxyState>();
+                let mut proxy_mode = "tun".to_string();
+                if let Ok(mut path) = app_handle.path().app_data_dir() {
+                    path.push("settings.json");
+                    if path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                                if let Some(p) = val.get("mixedPort").and_then(|v| v.as_u64()) {
+                                    *state.mixed_port.lock().unwrap() = p as u16;
+                                }
+                                if let Some(p) = val.get("httpPort").and_then(|v| v.as_u64()) {
+                                    *state.http_port.lock().unwrap() = p as u16;
+                                }
+                                if let Some(p) = val.get("socksPort").and_then(|v| v.as_u64()) {
+                                    *state.socks_port.lock().unwrap() = p as u16;
+                                }
+                                if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
+                                    proxy_mode = m.to_string();
+                                }
                             }
                         }
                     }
                 }
-            }
-
-            // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
-            // Run in a background thread to avoid blocking the setup hook
-            if is_elevated::is_elevated() && proxy_mode == "tun" {
-                std::thread::spawn(|| {
+                
+                // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
+                if is_elevated::is_elevated() && proxy_mode == "tun" {
                     let _ = crate::commands::system::set_runas_admin(true);
-                });
-            }
+                }
+            });
+
+
 
             // Copy wintun.dll next to sing-box sidecar dynamically on boot to ensure TUN mode works
             // Run in a background thread to avoid blocking the setup hook with filesystem scans

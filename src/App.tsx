@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
@@ -27,6 +27,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected');
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [swappingProfileId, setSwappingProfileId] = useState<string | null>(null);
   const [uptime, setUptime] = useState(0);
   const [httpPort, setHttpPort] = useState(7890);
   const [socksPort, setSocksPort] = useState(7891);
@@ -148,10 +149,14 @@ export default function App() {
   const [editSaveError, setEditSaveError] = useState<string | null>(null);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [editorSection, setEditorSection] = useState<'basic' | 'transport' | 'tls'>('basic');
+  const hasAutoConnected = useRef(false);
 
   // ── INITIALIZATION ─────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      // Show the window immediately for a faster perceived startup speed
+      invoke('show_window').catch(() => {});
+      
       // Fetch all independent data in parallel instead of sequentially
       const [
         elevated,
@@ -186,11 +191,9 @@ export default function App() {
       setRuleSets(savedRuleSets);
       setDnsRules(savedDnsRules);
 
-      // Show the window now that the UI is fully initialized
-      await invoke('show_window').catch(() => {});
-
       // Auto-connect if elevated (run in background to avoid blocking)
-      if (elevated && savedProfiles.length > 0) {
+      if (elevated && savedProfiles.length > 0 && !hasAutoConnected.current) {
+        hasAutoConnected.current = true;
         (async () => {
           try {
             const status = await invoke<{ status: string }>('get_proxy_status');
@@ -377,13 +380,17 @@ export default function App() {
   const handleSelectProfile = async (id: string) => {
     setSelectedProfileId(id);
     if (isConnected && activeProfileId && activeProfileId !== id) {
+      setSwappingProfileId(id);
       try {
         const target = profiles.find((p) => p.id === id);
         pushSystemLog(`Hot-swapping active profile to "${target?.name || 'Selected'}"...`);
         await invoke('reload_active_profile', { profileId: id });
+        setActiveProfileId(id);
         pushSystemLog(`Successfully hot-swapped to profile "${target?.name || 'Selected'}".`);
       } catch (err) {
         pushSystemLog(`Failed to hot-swap profile: ${err}`);
+      } finally {
+        setSwappingProfileId(null);
       }
     }
   };
@@ -736,6 +743,7 @@ export default function App() {
             profiles={profiles}
             selectedProfileId={selectedProfileId}
             activeProfileId={activeProfileId}
+            swappingProfileId={swappingProfileId}
             isConnected={isConnected}
             importName={importName}
             importContent={importContent}

@@ -14,9 +14,9 @@
       {
         "title": "X-Link",
         "width": 1000,
-        "height": 680,
+        "height": 640,
         "minWidth": 800,
-        "minHeight": 600,
+        "minHeight": 580,
         "decorations": true,
         "transparent": false,
         "visible": false
