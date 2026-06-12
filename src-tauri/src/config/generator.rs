@@ -5,6 +5,7 @@ use super::build_route_exclude_addresses;
 use super::resolve_server_ips;
 use super::build_route_rules;
 use super::resolve_dns_address;
+use std::net::ToSocketAddrs;
 
 /// User-configurable TUN and sniffing settings read from settings.json.
 #[derive(Debug, Clone)]
@@ -87,6 +88,35 @@ pub fn generate_singbox_config(
 
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
+
+        // Resolve domain to IP and replace 'server' field to prevent DNS deadlock.
+        // This allows the proxy domain itself to be resolved via the proxy-dns securely
+        // by the user's browser, without creating a routing loop for the proxy connection.
+        if let Some(server_val) = obj.get("server") {
+            if let Some(server_str) = server_val.as_str() {
+                let original_domain = server_str.to_string();
+                if original_domain.parse::<std::net::IpAddr>().is_err() {
+                    // Try to resolve using OS resolver
+                    if let Ok(mut addrs) = format!("{}:443", &original_domain).to_socket_addrs() {
+                        // Prefer IPv4
+                        let addr = addrs.find(|a| a.is_ipv4()).or_else(|| addrs.next());
+                        if let Some(addr) = addr {
+                            // Ensure tls.server_name is set before replacing server
+                            if let Some(tls) = obj.get_mut("tls") {
+                                if let Some(tls_obj) = tls.as_object_mut() {
+                                    if !tls_obj.contains_key("server_name") {
+                                        tls_obj.insert("server_name".to_string(), Value::String(original_domain.clone()));
+                                    }
+                                }
+                            }
+                            // Replace server with IP
+                            obj.insert("server".to_string(), Value::String(addr.ip().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+
         final_outbounds.push(Value::Object(obj));
     }
 
@@ -142,23 +172,9 @@ pub fn generate_singbox_config(
         serde_json::json!({ "outbound": "direct", "server": "local-dns" })
     ];
 
-    let mut server_domains = Vec::new();
-    for host in &server_hosts {
-        if host.parse::<std::net::IpAddr>().is_err() {
-            let trimmed = host.trim();
-            if !trimmed.is_empty() {
-                server_domains.push(trimmed.to_string());
-            }
-        }
-    }
-
-    if !server_domains.is_empty() {
-        dns_rules.insert(0, serde_json::json!({
-            "domain": server_domains,
-            "server": "local-dns"
-        }));
-    }
-
+    // We no longer need to force proxy server domains through local-dns,
+    // because we have replaced the 'server' field in outbounds with IPs!
+    // This safely delegates resolving the proxy domain in browsers to 'proxy-dns'.
     // In TUN mode, DNS must go through the proxy tunnel to avoid the strict_route WFP deadlock.
     // Two-server strategy:
     //   - proxy-dns: uses a PUBLIC DNS (not the user's local router IP which is unreachable
