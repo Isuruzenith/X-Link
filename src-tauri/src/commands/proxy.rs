@@ -357,8 +357,7 @@ pub async fn toggle_proxy(
                         "tag": "tun-in",
                         "interface_name": "X-Link",
                         "address": [
-                            "172.19.0.1/30",
-                            "fdfe:dcba:9876::1/126"
+                            "172.19.0.1/30"
                         ],
                         "auto_route": tun_settings.auto_route,
                         "strict_route": tun_settings.strict_route,
@@ -392,7 +391,7 @@ pub async fn toggle_proxy(
                         "rules": [
                             { "outbound": "any", "server": "local-dns" }
                         ],
-                        "strategy": "prefer_ipv4"
+                        "strategy": "ipv4_only"
                     });
                 } else {
                     config_val["dns"] = serde_json::json!({
@@ -428,6 +427,7 @@ pub async fn toggle_proxy(
                 });
 
                 // Patch outbounds with dynamic SNI host from settings
+                // Skip REALITY outbounds — their server_name is part of the protocol
                 if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
                     for outbound in outbounds.iter_mut() {
                         if let Some(outbound_obj) = outbound.as_object_mut() {
@@ -435,7 +435,14 @@ pub async fn toggle_proxy(
                                 if let Some(tls_val) = outbound_obj.get_mut("tls") {
                                     if let Some(tls_obj) = tls_val.as_object_mut() {
                                         if tls_obj.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
-                                            tls_obj.insert("server_name".to_string(), serde_json::Value::String(sni_host.clone()));
+                                            let is_reality = tls_obj.get("reality")
+                                                .and_then(|r| r.as_object())
+                                                .and_then(|r| r.get("enabled"))
+                                                .and_then(|e| e.as_bool())
+                                                .unwrap_or(false);
+                                            if !is_reality {
+                                                tls_obj.insert("server_name".to_string(), serde_json::Value::String(sni_host.clone()));
+                                            }
                                         }
                                     }
                                 }

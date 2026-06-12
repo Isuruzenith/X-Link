@@ -92,7 +92,17 @@ pub fn generate_singbox_config(
                 if let Some(tls_obj) = tls_val.as_object_mut() {
                     // Only override server_name if TLS is actually enabled
                     if tls_obj.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
-                        tls_obj.insert("server_name".to_string(), Value::String(sni_host.to_string()));
+                        // NEVER override server_name for REALITY outbounds — the REALITY
+                        // handshake requires server_name to match the server's configured
+                        // destination domain. Overriding it breaks the REALITY protocol.
+                        let is_reality = tls_obj.get("reality")
+                            .and_then(|r| r.as_object())
+                            .and_then(|r| r.get("enabled"))
+                            .and_then(|e| e.as_bool())
+                            .unwrap_or(false);
+                        if !is_reality {
+                            tls_obj.insert("server_name".to_string(), Value::String(sni_host.to_string()));
+                        }
                     }
                 }
             }
@@ -128,8 +138,7 @@ pub fn generate_singbox_config(
             "tag": "tun-in",
             "interface_name": "X-Link",
             "address": [
-                "172.19.0.1/30",
-                "fdfe:dcba:9876::1/126"
+                "172.19.0.1/30"
             ],
             "auto_route": tun_settings.auto_route,
             "strict_route": tun_settings.strict_route,
@@ -167,7 +176,7 @@ pub fn generate_singbox_config(
             "rules": [
                 { "outbound": "any", "server": "local-dns" }
             ],
-            "strategy": "prefer_ipv4"
+            "strategy": "ipv4_only"
         })
     } else {
         serde_json::json!({
