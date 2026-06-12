@@ -312,7 +312,7 @@ export default function App() {
         pushSystemLog('TUN mode requires Administrator privileges. Requesting elevation...');
         try {
           await invoke('request_elevation');
-        } catch (e) {
+        } catch {
           pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights.`);
         }
         return;
@@ -370,13 +370,7 @@ export default function App() {
     } catch (err) { pushSystemLog(`Failed to delete profile: ${err}`); }
   };
 
-  const handleClearSelection = () => {
-    setSelectedProfileId(null);
-    setImportName('');
-    setImportContent('');
-    setImportError(null);
-    setImportSuccess(false);
-  };
+
 
   const handleSelectOutbound = async (node: any) => {
     if (!selectedProfileId) return;
@@ -724,7 +718,6 @@ export default function App() {
             selectedOutboundTag={selectedOutboundTag}
             onSelectProfile={handleSelectProfile}
             onDeleteProfile={handleDeleteProfile}
-            onClearSelection={handleClearSelection}
             onSetImportName={setImportName}
             onSetImportContent={handleImportContentChange}
             onPasteClipboard={handlePasteClipboard}

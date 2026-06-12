@@ -1,6 +1,6 @@
 import {
   DownloadCloud, UploadCloud, Clock, Server, Power,
-  Shield, ShieldAlert, Network, Wifi, Edit3
+  Shield, ShieldAlert, Network, Wifi
 } from 'lucide-react';
 import { TrafficChart } from '../components/TrafficChart';
 import { ViewShell } from '../components/ViewShell';
@@ -44,7 +44,6 @@ interface DashboardViewProps {
   speedHistory: { up: number; down: number }[];
   profiles: Profile[];
   settings: Settings;
-  selectedProfileId: string | null;
   onToggleConnect: () => void;
   onRequestElevation: () => void;
 }
@@ -53,7 +52,6 @@ export function DashboardView({
   isConnected, connectionStatus, activeProfileId, uptime, httpPort, socksPort, mixedPort,
   isElevated, uploadBytes, downloadBytes, uploadSpeed,
   downloadSpeed, activeConnections, speedHistory, profiles, settings,
-  selectedProfileId,
   onToggleConnect, onRequestElevation,
 }: DashboardViewProps) {
   return (
