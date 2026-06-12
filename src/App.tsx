@@ -59,7 +59,7 @@ export default function App() {
     proxyMode: 'tun', closeToTray: true, autostart: false,
     httpPort: 7890, socksPort: 7891, mixedPort: 7892, wifiSharing: false,
     tunAutoRoute: true, tunAutoRedirect: false, tunStrictRoute: true,
-    tunStack: 'gvisor', tunMtu: 9000, tunEndpointIndependentNat: false,
+    tunStack: 'gvisor', tunMtu: 1500, tunEndpointIndependentNat: false,
     sniffEnabled: true, sniffHttp: true, sniffTls: true, sniffQuic: true, sniffOverrideDestination: false,
     muxEnabled: false, muxProtocol: 'h2mux', muxMaxConnections: 4,
     muxMinStreams: 4, muxMaxStreams: 0, muxPadding: false, muxBrutal: false,

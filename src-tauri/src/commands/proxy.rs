@@ -385,7 +385,7 @@ pub async fn toggle_proxy(
                 if proxy_mode == "tun" {
                     config_val["dns"] = serde_json::json!({
                         "servers": [
-                            { "tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy" },
+                            { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
                             { "tag": "local-dns", "address": dns_address, "detour": "direct" }
                         ],
                         "rules": [

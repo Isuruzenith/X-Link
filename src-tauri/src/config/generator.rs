@@ -29,7 +29,7 @@ impl Default for TunSettings {
             auto_redirect: false,
             strict_route: true,
             stack: "gvisor".to_string(),
-            mtu: 9000,
+            mtu: 1500,
             endpoint_independent_nat: false,
             sniff_enabled: true,
             sniff_http: true,
@@ -170,7 +170,7 @@ pub fn generate_singbox_config(
     let dns_section = if proxy_mode == "tun" {
         serde_json::json!({
             "servers": [
-                { "tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy" },
+                { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
                 { "tag": "local-dns", "address": resolved_dns_address, "detour": "direct" }
             ],
             "rules": [
