@@ -16,6 +16,8 @@ pub enum ConnectionStatus {
 pub struct ProxyState {
     /// The live sing-box child process, if running
     pub child_process: Mutex<Option<CommandChild>>,
+    /// Active session ID to prevent race conditions during restart/hot-swaps
+    pub active_session_id: Mutex<Option<String>>,
     /// Connection status
     pub connection_status: Mutex<ConnectionStatus>,
     /// Rust-side log ring buffer
@@ -38,6 +40,7 @@ impl ProxyState {
     pub fn new(http_port: u16, socks_port: u16, mixed_port: u16) -> Self {
         Self {
             child_process: Mutex::new(None),
+            active_session_id: Mutex::new(None),
             connection_status: Mutex::new(ConnectionStatus::Disconnected),
             log_buffer: Mutex::new(VecDeque::with_capacity(LOG_BUFFER_RUST_MAX)),
             http_port: Mutex::new(http_port),

@@ -424,6 +424,9 @@ pub async fn toggle_proxy(
         let _ = crate::os::disable_system_proxy();
         
         // Clear global state
+        if let Ok(mut session_lock) = state.active_session_id.lock() {
+            *session_lock = None;
+        }
         *ACTIVE_PROFILE_ID.lock().unwrap() = None;
         *CONNECTION_START_TIME.lock().unwrap() = None;
 
@@ -497,6 +500,13 @@ pub async fn toggle_proxy(
         }
     };
 
+    let session_id = uuid::Uuid::new_v4().to_string();
+    {
+        if let Ok(mut session_lock) = state.active_session_id.lock() {
+            *session_lock = Some(session_id.clone());
+        }
+    }
+
     let (mut rx, child) = match app
         .shell()
         .sidecar("sing-box")
@@ -511,6 +521,9 @@ pub async fn toggle_proxy(
         Ok(res) => res,
         Err(e) => {
             state.set_status(crate::state::ConnectionStatus::Disconnected);
+            if let Ok(mut session_lock) = state.active_session_id.lock() {
+                *session_lock = None;
+            }
             crate::tray::update_tray(&app);
             return Err(e);
         }
@@ -526,6 +539,7 @@ pub async fn toggle_proxy(
     let app_for_logs = app.clone();
     let (term_tx, mut term_rx) = oneshot::channel::<Option<i32>>();
     let term_tx = Arc::new(tokio::sync::Mutex::new(Some(term_tx)));
+    let session_id_clone = session_id.clone();
 
     tokio::spawn(async move {
         let state_for_logs = app_for_logs.state::<crate::state::ProxyState>();
@@ -543,12 +557,23 @@ pub async fn toggle_proxy(
                         let _ = tx.send(payload.code);
                     }
                     
-                    // Clear global state & restore OS system proxy
-                    state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
-                    *ACTIVE_PROFILE_ID.lock().unwrap() = None;
-                    *CONNECTION_START_TIME.lock().unwrap() = None;
-                    crate::tray::perform_clean_cleanup(&app_for_logs);
-                    crate::tray::update_tray(&app_for_logs);
+                    // Verify if this process termination corresponds to the active session
+                    let is_active = if let Ok(active_id_guard) = state_for_logs.active_session_id.lock() {
+                        active_id_guard.as_ref() == Some(&session_id_clone)
+                    } else {
+                        false
+                    };
+
+                    if is_active {
+                        // Clear global state & restore OS system proxy
+                        state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
+                        *ACTIVE_PROFILE_ID.lock().unwrap() = None;
+                        *CONNECTION_START_TIME.lock().unwrap() = None;
+                        crate::tray::perform_clean_cleanup(&app_for_logs);
+                        crate::tray::update_tray(&app_for_logs);
+                    } else {
+                        state_for_logs.push_log(format!("[System] Orphaned sing-box process (session {}) exited with code {:?}.", session_id_clone, payload.code));
+                    }
                     
                     break;
                 }
@@ -564,6 +589,9 @@ pub async fn toggle_proxy(
     match term_rx.try_recv() {
         Ok(code) => {
             state.set_status(crate::state::ConnectionStatus::Disconnected);
+            if let Ok(mut session_lock) = state.active_session_id.lock() {
+                *session_lock = None;
+            }
             crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();
@@ -573,6 +601,9 @@ pub async fn toggle_proxy(
         }
         Err(oneshot::error::TryRecvError::Closed) => {
             state.set_status(crate::state::ConnectionStatus::Disconnected);
+            if let Ok(mut session_lock) = state.active_session_id.lock() {
+                *session_lock = None;
+            }
             crate::tray::update_tray(&app);
             let mut lock = state.child_process.lock().map_err(|e| e.to_string())?;
             lock.take();

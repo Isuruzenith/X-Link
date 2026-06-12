@@ -14,8 +14,13 @@ pub fn perform_clean_cleanup(app: &AppHandle) {
             let _ = child.kill();
         }
     }
+
+    // 2. Clear active session ID
+    if let Ok(mut session_lock) = state.active_session_id.lock() {
+        *session_lock = None;
+    }
     
-    // 2. Clear OS proxy settings
+    // 3. Clear OS proxy settings
     let _ = crate::os::disable_system_proxy();
 }
 
