@@ -363,43 +363,31 @@ pub fn prepare_and_patch_config(
     Ok((config_path, proxy_mode, api_port, api_secret))
 }
 
-pub async fn try_reload_proxy_config(
-    app: &tauri::AppHandle,
-    state: &crate::state::ProxyState,
-    profile_id: &str,
-) -> Result<(), String> {
-    let (config_path, _, api_port, api_secret) = prepare_and_patch_config(app, state, profile_id)?;
+pub fn try_reload_proxy_config<'a>(
+    app: &'a tauri::AppHandle,
+    state: &'a crate::state::ProxyState,
+    profile_id: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    let app_handle = app.clone();
+    let state_handle = app.state::<crate::state::ProxyState>();
+    let pid = profile_id.to_string();
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
-
-    let url = format!("http://127.0.0.1:{}/configs?force=true", api_port);
-    let mut req = client.put(&url);
-    if !api_secret.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_secret));
-    }
-
-    let payload = serde_json::json!({
-        "path": config_path.to_string_lossy().to_string()
-    });
-
-    let resp = req.json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("HTTP reload request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let err_body = resp.text().await.unwrap_or_default();
-        return Err(format!("REST reload failed (HTTP {}): {}", status, err_body));
-    }
-
-    *ACTIVE_PROFILE_ID.lock().unwrap() = Some(profile_id.to_string());
-    crate::tray::update_tray(app);
-
-    Ok(())
+    Box::pin(async move {
+        let _ = prepare_and_patch_config(&app_handle, &state_handle, &pid)?;
+        
+        // Stop the proxy
+        let _ = toggle_proxy(app_handle.clone(), state_handle.clone(), false, "".to_string()).await;
+        
+        // Give it a brief moment to shut down gracefully
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        
+        // Start the proxy
+        let res = toggle_proxy(app_handle, state_handle, true, pid).await;
+        match res {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
+    })
 }
 
 #[tauri::command]
