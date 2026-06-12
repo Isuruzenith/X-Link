@@ -45,20 +45,16 @@ interface DashboardViewProps {
   profiles: Profile[];
   settings: Settings;
   selectedProfileId: string | null;
-  profileOutbounds: any[];
-  selectedOutboundTag: string | null;
   onToggleConnect: () => void;
   onRequestElevation: () => void;
-  onSelectOutbound: (node: any) => void;
-  onOpenEditor: (node: any) => void;
 }
 
 export function DashboardView({
   isConnected, connectionStatus, activeProfileId, uptime, httpPort, socksPort, mixedPort,
   isElevated, uploadBytes, downloadBytes, uploadSpeed,
   downloadSpeed, activeConnections, speedHistory, profiles, settings,
-  selectedProfileId, profileOutbounds, selectedOutboundTag,
-  onToggleConnect, onRequestElevation, onSelectOutbound, onOpenEditor,
+  selectedProfileId,
+  onToggleConnect, onRequestElevation,
 }: DashboardViewProps) {
   return (
     <ViewShell
@@ -159,40 +155,6 @@ export function DashboardView({
               )}
             </div>
           </div>
-        </div>
-
-        {/* Node selector */}
-        <div className="glass-panel">
-          <div className="flex-row-between" style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600 }}>Proxy Nodes</h3>
-            {selectedProfileId && (
-              <span style={{ fontSize: '12px', color: 'var(--text-low)' }}>
-                {profiles.find(p => p.id === selectedProfileId)?.name || 'Default'}
-              </span>
-            )}
-          </div>
-          {selectedProfileId ? (
-            profileOutbounds.length > 0 ? (
-              <div className="node-grid">
-                {profileOutbounds.map((node, i) => (
-                  <div key={i} className={`node-card ${selectedOutboundTag === node.tag ? 'active' : ''}`} onClick={() => onSelectOutbound(node)}>
-                    <span className="node-name" title={node.tag}>{node.tag}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className="node-type-badge">{node.type}</span>
-                      <button className="btn-icon-only" style={{ width: '22px', height: '22px', border: 'none', background: 'transparent', color: 'var(--text-low)' }}
-                        onClick={(e) => { e.stopPropagation(); onOpenEditor(node); }} title="Edit node">
-                        <Edit3 size={11} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: '13px', color: 'var(--text-low)' }}>No customizable outbounds. All traffic handled by profile rules.</p>
-            )
-          ) : (
-            <p style={{ fontSize: '13px', color: 'var(--text-low)' }}>No profile selected. Go to Profiles to add one.</p>
-          )}
         </div>
       </div>
     </ViewShell>

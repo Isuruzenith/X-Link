@@ -370,6 +370,14 @@ export default function App() {
     } catch (err) { pushSystemLog(`Failed to delete profile: ${err}`); }
   };
 
+  const handleClearSelection = () => {
+    setSelectedProfileId(null);
+    setImportName('');
+    setImportContent('');
+    setImportError(null);
+    setImportSuccess(false);
+  };
+
   const handleSelectOutbound = async (node: any) => {
     if (!selectedProfileId) return;
     try {
@@ -696,12 +704,8 @@ export default function App() {
             profiles={profiles}
             settings={settings}
             selectedProfileId={selectedProfileId}
-            profileOutbounds={profileOutbounds}
-            selectedOutboundTag={selectedOutboundTag}
             onToggleConnect={handleToggleConnect}
             onRequestElevation={handleRequestElevation}
-            onSelectOutbound={handleSelectOutbound}
-            onOpenEditor={handleOpenEditor}
           />
         )}
 
@@ -716,12 +720,17 @@ export default function App() {
             importError={importError}
             importSuccess={importSuccess}
             isImporting={isImporting}
+            profileOutbounds={profileOutbounds}
+            selectedOutboundTag={selectedOutboundTag}
             onSelectProfile={handleSelectProfile}
             onDeleteProfile={handleDeleteProfile}
+            onClearSelection={handleClearSelection}
             onSetImportName={setImportName}
             onSetImportContent={handleImportContentChange}
             onPasteClipboard={handlePasteClipboard}
             onImportProfile={handleImportProfile}
+            onSelectOutbound={handleSelectOutbound}
+            onOpenEditor={handleOpenEditor}
           />
         )}
 
