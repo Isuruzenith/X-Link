@@ -71,17 +71,36 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
         
-        let cmd = if enabled {
-            format!("reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v X-Link /t REG_SZ /d \"\\\"{}\\\" --minimized\" /f", exe_str)
+        let output = if enabled {
+            let value = format!("\"{}\" --minimized", exe_str);
+            std::process::Command::new("reg")
+                .args([
+                    "add",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v",
+                    "X-Link",
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &value,
+                    "/f",
+                ])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()
+                .map_err(|e| format!("Failed to execute autostart registration: {}", e))?
         } else {
-            "reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v X-Link /f".to_string()
+            std::process::Command::new("reg")
+                .args([
+                    "delete",
+                    "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    "/v",
+                    "X-Link",
+                    "/f",
+                ])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()
+                .map_err(|e| format!("Failed to execute autostart deletion: {}", e))?
         };
-
-        let output = std::process::Command::new("cmd")
-            .args(["/C", &cmd])
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .output()
-            .map_err(|e| format!("Failed to execute autostart registration: {}", e))?;
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr).to_string();

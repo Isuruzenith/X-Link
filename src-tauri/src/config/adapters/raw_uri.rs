@@ -89,6 +89,84 @@ fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Va
     Some(Value::Object(transport.into_iter().collect()))
 }
 
+fn parse_shadowsocks_uri(trimmed: &str) -> Option<(String, String, String, String, u16)> {
+    if !trimmed.starts_with("ss://") {
+        return None;
+    }
+    let s = &trimmed[5..];
+    
+    // Split fragment (#tag)
+    let parts: Vec<&str> = s.split('#').collect();
+    let main_with_query = parts[0];
+    let tag = parts.get(1)
+        .map(|f| percent_encoding::percent_decode_str(f).decode_utf8_lossy().into_owned())
+        .unwrap_or_else(|| "Shadowsocks Proxy".to_string());
+
+    // Split query (?plugin=...)
+    let main = main_with_query.split('?').next().unwrap_or(main_with_query);
+
+    if main.contains('@') {
+        // SIP002 Format
+        let at_parts: Vec<&str> = main.splitn(2, '@').collect();
+        let userinfo_part = at_parts[0];
+        let server_part = at_parts[1];
+
+        let (method, password) = if let Ok(decoded_userinfo) = decode_base64_padded(userinfo_part) {
+            let userinfo_str = String::from_utf8_lossy(&decoded_userinfo).into_owned();
+            let colon_parts: Vec<&str> = userinfo_str.splitn(2, ':').collect();
+            if colon_parts.len() == 2 {
+                (colon_parts[0].to_string(), colon_parts[1].to_string())
+            } else {
+                return None;
+            }
+        } else {
+            // Plain userinfo
+            let userinfo_dec = percent_encoding::percent_decode_str(userinfo_part).decode_utf8_lossy().into_owned();
+            let colon_parts: Vec<&str> = userinfo_dec.splitn(2, ':').collect();
+            if colon_parts.len() == 2 {
+                (colon_parts[0].to_string(), colon_parts[1].to_string())
+            } else {
+                return None;
+            }
+        };
+
+        // Parse host:port
+        let server_clean = server_part.trim_end_matches('/');
+        let colon_idx = server_clean.rfind(':')?;
+        let host = server_clean[..colon_idx].to_string();
+        let port_str = &server_clean[colon_idx + 1..];
+        let port = port_str.parse::<u16>().ok()?;
+
+        Some((tag, method, password, host, port))
+    } else {
+        // Legacy Format (entire main is base64 encoded)
+        let decoded_bytes = decode_base64_padded(main).ok()?;
+        let decoded_str = String::from_utf8_lossy(&decoded_bytes).into_owned();
+        if !decoded_str.contains('@') {
+            return None;
+        }
+        let at_parts: Vec<&str> = decoded_str.splitn(2, '@').collect();
+        let userinfo_part = at_parts[0];
+        let server_part = at_parts[1];
+
+        let colon_parts: Vec<&str> = userinfo_part.splitn(2, ':').collect();
+        if colon_parts.len() != 2 {
+            return None;
+        }
+        let method = colon_parts[0].to_string();
+        let password = colon_parts[1].to_string();
+
+        // Parse host:port
+        let server_clean = server_part.trim_end_matches('/');
+        let colon_idx = server_clean.rfind(':')?;
+        let host = server_clean[..colon_idx].to_string();
+        let port_str = &server_clean[colon_idx + 1..];
+        let port = port_str.parse::<u16>().ok()?;
+
+        Some((tag, method, password, host, port))
+    }
+}
+
 pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
     let raw_str = String::from_utf8_lossy(raw);
     let mut outbounds = Vec::new();
@@ -102,7 +180,12 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         // ── VMESS PARSING ────────────────────────────────────────────────────
         if trimmed.starts_with("vmess://") {
             let b64_part = &trimmed[8..];
-            let decoded_b64 = percent_encoding::percent_decode_str(b64_part).decode_utf8_lossy();
+            let parts: Vec<&str> = b64_part.split('#').collect();
+            let b64_clean = parts[0];
+            let fragment_tag = parts.get(1)
+                .map(|t| percent_encoding::percent_decode_str(t).decode_utf8_lossy().into_owned());
+
+            let decoded_b64 = percent_encoding::percent_decode_str(b64_clean).decode_utf8_lossy();
             // Decode base64 JSON
             let decoded = match decode_base64_padded(&decoded_b64) {
                 Ok(bytes) => bytes,
@@ -114,7 +197,11 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 Err(_) => continue,
             };
 
-            let tag = json.get("ps").and_then(|t| t.as_str()).unwrap_or("VMess Proxy").to_string();
+            let tag = json.get("ps")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+                .or(fragment_tag)
+                .unwrap_or_else(|| "VMess Proxy".to_string());
             let server = json.get("add").and_then(|s| s.as_str()).unwrap_or("").to_string();
             
             let port = match json.get("port") {
@@ -190,7 +277,24 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             continue;
         }
 
-        // ── OTHER URIs (SS, VLESS, TROJAN) ───────────────────────────────────
+        // ── SHADOWSOCKS PARSING ──────────────────────────────────────────────
+        if trimmed.starts_with("ss://") {
+            if let Some((tag, method, password, host, port)) = parse_shadowsocks_uri(trimmed) {
+                let mut fields = HashMap::new();
+                fields.insert("server".to_string(), Value::String(host));
+                fields.insert("server_port".to_string(), Value::Number(port.into()));
+                fields.insert("method".to_string(), Value::String(method));
+                fields.insert("password".to_string(), Value::String(password));
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "shadowsocks".to_string(),
+                    tag,
+                    fields,
+                });
+            }
+            continue;
+        }
+
+        // ── OTHER URIs (VLESS, TROJAN) ───────────────────────────────────────
         let url = match Url::parse(trimmed) {
             Ok(u) => u,
             Err(_) => continue,
@@ -208,27 +312,6 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         fields.insert("server_port".to_string(), Value::Number(port.into()));
 
         match url.scheme() {
-            "ss" => {
-                // ss://[base64_userinfo]@host:port#tag
-                let user_info = url.username();
-                let decoded_userinfo = match decode_base64_padded(user_info) {
-                    Ok(bytes) => bytes,
-                    Err(_) => continue,
-                };
-
-                let userinfo_str = String::from_utf8_lossy(&decoded_userinfo);
-                let parts: Vec<&str> = userinfo_str.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    fields.insert("method".to_string(), Value::String(parts[0].to_string()));
-                    fields.insert("password".to_string(), Value::String(parts[1].to_string()));
-                    
-                    outbounds.push(SingBoxOutbound {
-                        outbound_type: "shadowsocks".to_string(),
-                        tag,
-                        fields,
-                    });
-                }
-            }
             "vless" => {
                 // vless://[uuid]@host:port?query#tag
                 let uuid = url.username().to_string();
@@ -362,6 +445,51 @@ mod tests {
         let res_percent = adapt(uri_percent.as_bytes()).unwrap();
         assert_eq!(res_percent.len(), 1);
         assert_eq!(res_percent[0].tag, "AB");
+    }
+
+    #[test]
+    fn test_adapt_raw_vmess_with_fragment() {
+        // vmess with trailing fragment: #MyVmessNode
+        let uri = "vmess://eyJwcyI6IlZNZXNzIFRlc3QiLCJhZGQiOiIxLjIuMy40IiwicG9ydCI6NDQzLCJpZCI6InV1aWQiLCJhaWQiOjB9#MyVmessNode";
+        let res = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].tag, "VMess Test"); // ps from JSON takes precedence
+
+        // vmess with trailing fragment and missing ps
+        let uri_no_ps = "vmess://eyJhZGQiOiIxLjIuMy40IiwicG9ydCI6NDQzLCJpZCI6InV1aWQiLCJhaWQiOjB9#My%20Custom%20Node";
+        let res_no_ps = adapt(uri_no_ps.as_bytes()).unwrap();
+        assert_eq!(res_no_ps.len(), 1);
+        assert_eq!(res_no_ps[0].tag, "My Custom Node"); // falls back to percent-decoded fragment
+    }
+
+    #[test]
+    fn test_adapt_legacy_shadowsocks() {
+        // ss://aes-128-cfb:password@1.2.3.4:8388 in legacy base64: ss://YWVzLTEyOC1jZmI6cGFzc3dvcmRAMS4yLjMuNDo4Mzg4#Legacy%20Node
+        let uri = "ss://YWVzLTEyOC1jZmI6cGFzc3dvcmRAMS4yLjMuNDo4Mzg4#Legacy%20Node";
+        let res = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+        let node = &res[0];
+        assert_eq!(node.outbound_type, "shadowsocks");
+        assert_eq!(node.tag, "Legacy Node");
+        assert_eq!(node.fields.get("server").unwrap().as_str().unwrap(), "1.2.3.4");
+        assert_eq!(node.fields.get("server_port").unwrap().as_u64().unwrap(), 8388);
+        assert_eq!(node.fields.get("method").unwrap().as_str().unwrap(), "aes-128-cfb");
+        assert_eq!(node.fields.get("password").unwrap().as_str().unwrap(), "password");
+    }
+
+    #[test]
+    fn test_adapt_plain_userinfo_shadowsocks() {
+        // ss://2022-blake3-aes-128-gcm:password_string@192.168.1.100:8888#Plain%20Node
+        let uri = "ss://2022-blake3-aes-128-gcm:password_string@192.168.1.100:8888#Plain%20Node";
+        let res = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+        let node = &res[0];
+        assert_eq!(node.outbound_type, "shadowsocks");
+        assert_eq!(node.tag, "Plain Node");
+        assert_eq!(node.fields.get("server").unwrap().as_str().unwrap(), "192.168.1.100");
+        assert_eq!(node.fields.get("server_port").unwrap().as_u64().unwrap(), 8888);
+        assert_eq!(node.fields.get("method").unwrap().as_str().unwrap(), "2022-blake3-aes-128-gcm");
+        assert_eq!(node.fields.get("password").unwrap().as_str().unwrap(), "password_string");
     }
 }
 
