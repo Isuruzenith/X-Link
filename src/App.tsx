@@ -186,6 +186,33 @@ export default function App() {
       setRuleSets(savedRuleSets);
       setDnsRules(savedDnsRules);
 
+      // Auto-connect if elevated
+      if (elevated && savedProfiles.length > 0) {
+        try {
+          const status = await invoke<{ status: string }>('get_proxy_status');
+          if (status.status === 'disconnected') {
+            const conflict = await invoke<number | null>('check_port_conflict', { ports: [savedSettings.httpPort, savedSettings.socksPort, savedSettings.mixedPort] });
+            if (!conflict) {
+              pushSystemLog('Administrator privileges detected. Auto-connecting to the selected profile...');
+              setConnectionStatus('connecting');
+              const result = await invoke<string>('toggle_proxy', { start: true, profileId: savedProfiles[0].id });
+              if (result === 'started') {
+                setIsConnected(true);
+                setConnectionStatus('connected');
+                setActiveProfileId(savedProfiles[0].id);
+                pushSystemLog(`sing-box established automatically on Mixed port ${savedSettings.mixedPort}.`);
+              } else {
+                setConnectionStatus('disconnected');
+              }
+            } else {
+               pushSystemLog(`Auto-connect skipped: Port ${conflict} is in use.`);
+            }
+          }
+        } catch (e) {
+          pushSystemLog(`Auto-connect error: ${e}`);
+        }
+      }
+
       // Show the window now that the UI is fully initialized
       await invoke('show_window').catch(() => {});
 
@@ -697,7 +724,6 @@ export default function App() {
             speedHistory={speedHistory}
             profiles={profiles}
             settings={settings}
-            selectedProfileId={selectedProfileId}
             onToggleConnect={handleToggleConnect}
             onRequestElevation={handleRequestElevation}
           />
