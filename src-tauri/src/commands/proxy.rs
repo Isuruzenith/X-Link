@@ -456,14 +456,24 @@ pub async fn toggle_proxy(
         }
     }
 
-    let (mut rx, child) = app
+    let (mut rx, child) = match app
         .shell()
         .sidecar("sing-box")
-        .map_err(|e| format!("Failed to initialize sidecar: {}", e))?
-        .args(["run", "-c", config_path.to_str().unwrap()])
-        .env("ENABLE_DEPRECATED_GEOSITE", "true")
-        .spawn()
-        .map_err(|e| format!("spawn_failed: {}", e))?;
+        .map_err(|e| format!("Failed to initialize sidecar: {}", e))
+        .and_then(|s| {
+            s.args(["run", "-c", config_path.to_str().unwrap()])
+                .env("ENABLE_DEPRECATED_GEOSITE", "true")
+                .spawn()
+                .map_err(|e| format!("spawn_failed: {}", e))
+        })
+    {
+        Ok(res) => res,
+        Err(e) => {
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
+            return Err(e);
+        }
+    };
 
     {
         let mut process_lock = state.child_process.lock()
@@ -635,7 +645,12 @@ pub async fn toggle_proxy(
 
     if proxy_mode == "system" {
         let mixed_port = *state.mixed_port.lock().unwrap();
-        crate::os::enable_system_proxy("127.0.0.1", mixed_port)?;
+        if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", mixed_port) {
+            crate::tray::perform_clean_cleanup(&app);
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
+            return Err(e);
+        }
     }
 
     // Set connection global states

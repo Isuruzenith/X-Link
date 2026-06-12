@@ -185,8 +185,6 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn smoke_test_singbox_version() {
         // Simple assertion just to verify test suite functions
