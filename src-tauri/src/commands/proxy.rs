@@ -82,7 +82,7 @@ pub fn get_proxy_status(app: tauri::AppHandle, state: State<'_, crate::state::Pr
 
     // Derive tun_enabled dynamically: true when connected AND proxyMode is 'tun'
     let tun_enabled = if status == crate::state::ConnectionStatus::Connected {
-        let mut mode = "system".to_string();
+        let mut mode = "tun".to_string();
         if let Ok(mut path) = app.path().app_data_dir() {
             path.push("settings.json");
             if path.exists() {
@@ -163,7 +163,7 @@ pub fn prepare_and_patch_config(
         let mut api_port = 9090u16;
         let mut api_secret = "".to_string();
         let mut api_cors = true;
-        let mut mode = "system".to_string();
+        let mut mode = "tun".to_string();
         if let Ok(mut path) = app.path().app_data_dir() {
             path.push("settings.json");
             if path.exists() {
@@ -713,7 +713,7 @@ pub async fn toggle_proxy(
 
     // Enable system proxy ONLY if proxyMode is 'system'
     let proxy_mode = {
-        let mut mode = "system".to_string();
+        let mut mode = "tun".to_string();
         if let Ok(mut path) = app.path().app_data_dir() {
             path.push("settings.json");
             if path.exists() {

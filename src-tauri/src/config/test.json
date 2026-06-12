@@ -1,0 +1,1 @@
+{ "inbounds": [ { "type": "tun", "tag": "tun-in", "interface_name": "X-Link", "inet4_address": ["172.19.0.1/30"] } ], "outbounds": [ { "type": "direct", "tag": "direct" } ] }
