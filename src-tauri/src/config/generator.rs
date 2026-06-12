@@ -45,7 +45,6 @@ pub fn generate_singbox_config(
     outbounds: Vec<SingBoxOutbound>,
     proxy_mode: &str,
     dns_address: &str,
-    sni_host: &str,
     listen_address: &str,
     tun_settings: &TunSettings,
 ) -> Result<String, String> {
@@ -85,28 +84,6 @@ pub fn generate_singbox_config(
             .as_object()
             .unwrap()
             .clone();
-        
-        // If an SNI host is configured, inject/override the TLS server_name with the allowed SNI
-        if !sni_host.is_empty() {
-            if let Some(tls_val) = obj.get_mut("tls") {
-                if let Some(tls_obj) = tls_val.as_object_mut() {
-                    // Only override server_name if TLS is actually enabled
-                    if tls_obj.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
-                        // NEVER override server_name for REALITY outbounds — the REALITY
-                        // handshake requires server_name to match the server's configured
-                        // destination domain. Overriding it breaks the REALITY protocol.
-                        let is_reality = tls_obj.get("reality")
-                            .and_then(|r| r.as_object())
-                            .and_then(|r| r.get("enabled"))
-                            .and_then(|e| e.as_bool())
-                            .unwrap_or(false);
-                        if !is_reality {
-                            tls_obj.insert("server_name".to_string(), Value::String(sni_host.to_string()));
-                        }
-                    }
-                }
-            }
-        }
 
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
@@ -229,7 +206,6 @@ mod tests {
             outbounds.clone(),
             "system",
             "1.1.1.1",
-            "",
             "127.0.0.1",
             &tun,
         ).unwrap();
@@ -246,7 +222,6 @@ mod tests {
             outbounds.clone(),
             "system",
             "1.1.1.1",
-            "",
             "0.0.0.0",
             &tun,
         ).unwrap();

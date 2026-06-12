@@ -102,8 +102,9 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         // ── VMESS PARSING ────────────────────────────────────────────────────
         if trimmed.starts_with("vmess://") {
             let b64_part = &trimmed[8..];
+            let decoded_b64 = percent_encoding::percent_decode_str(b64_part).decode_utf8_lossy();
             // Decode base64 JSON
-            let decoded = match decode_base64_padded(b64_part) {
+            let decoded = match decode_base64_padded(&decoded_b64) {
                 Ok(bytes) => bytes,
                 Err(_) => continue, // skip invalid vmess URIs
             };
@@ -331,6 +332,36 @@ mod tests {
         let transport_grpc = trojan_grpc.fields.get("transport").unwrap().as_object().unwrap();
         assert_eq!(transport_grpc.get("type").unwrap().as_str().unwrap(), "grpc");
         assert_eq!(transport_grpc.get("service_name").unwrap().as_str().unwrap(), "grpc-test");
+    }
+
+    #[test]
+    fn test_adapt_raw_vmess() {
+        // vmess JSON: {"ps":"VMess Test Node","add":"1.2.3.4","port":443,"id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","aid":0,"tls":"tls","net":"ws","path":"/path","host":"sni.host"}
+        let uri = "vmess://eyJwcyI6IlZNZXNzIFRlc3QgTm9kZSIsImFkZCI6IjEuMi4zLjQiLCJwb3J0Ijo0NDMsImlkIjoiZjQ3YWMxMGItNThjYy00MzcyLWE1NjctMGUwMmIyYzNkNDc5IiwiYWlkIjowLCJ0bHMiOiJ0bHMiLCJuZXQiOiJ3cyIsInBhdGgiOiIvcGF0aCIsImhvc3QiOiJzbmkuaG9zdCJ9";
+        let res = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+        let vmess = &res[0];
+        assert_eq!(vmess.outbound_type, "vmess");
+        assert_eq!(vmess.tag, "VMess Test Node");
+        assert_eq!(vmess.fields.get("server").unwrap().as_str().unwrap(), "1.2.3.4");
+        assert_eq!(vmess.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
+        assert_eq!(vmess.fields.get("uuid").unwrap().as_str().unwrap(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
+        
+        let tls = vmess.fields.get("tls").unwrap().as_object().unwrap();
+        assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "sni.host");
+
+        let transport = vmess.fields.get("transport").unwrap().as_object().unwrap();
+        assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
+        assert_eq!(transport.get("path").unwrap().as_str().unwrap(), "/path");
+        let headers = transport.get("headers").unwrap().as_object().unwrap();
+        assert_eq!(headers.get("Host").unwrap().as_str().unwrap(), "sni.host");
+
+        // Test with percent encoded padding: eyJwcyI6IkFCIiwiYWRkIjoiMS4yLjMuNCIsInBvcnQiOjQ0MywiaWQiOiJ1dWlkIiwiYWlkIjowfQ%3D%3D
+        let uri_percent = "vmess://eyJwcyI6IkFCIiwiYWRkIjoiMS4yLjMuNCIsInBvcnQiOjQ0MywiaWQiOiJ1dWlkIiwiYWlkIjowfQ%3D%3D";
+        let res_percent = adapt(uri_percent.as_bytes()).unwrap();
+        assert_eq!(res_percent.len(), 1);
+        assert_eq!(res_percent[0].tag, "AB");
     }
 }
 

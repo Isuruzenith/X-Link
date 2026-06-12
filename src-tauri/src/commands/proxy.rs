@@ -220,9 +220,8 @@ pub async fn toggle_proxy(
         }
     }
 
-    let (dns_address, sni_host, wifi_sharing, api_port, api_secret, api_cors) = {
+    let (dns_address, wifi_sharing, api_port, api_secret, api_cors) = {
         let mut dns: Option<String> = None;
-        let mut sni = "".to_string();
         let mut wifi = false;
         let mut api_port = 9090u16;
         let mut api_secret = "".to_string();
@@ -236,9 +235,6 @@ pub async fn toggle_proxy(
                             if !d.trim().is_empty() {
                                 dns = Some(d.to_string());
                             }
-                        }
-                        if let Some(s) = val.get("sniHost").and_then(|v| v.as_str()) {
-                            sni = s.to_string();
                         }
                         if let Some(w) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
@@ -257,7 +253,7 @@ pub async fn toggle_proxy(
             }
         }
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, wifi, api_port, api_secret, api_cors)
+        (resolved_dns, wifi, api_port, api_secret, api_cors)
     };
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
@@ -425,32 +421,6 @@ pub async fn toggle_proxy(
                 config_val["experimental"] = serde_json::json!({
                     "clash_api": clash_api
                 });
-
-                // Patch outbounds with dynamic SNI host from settings
-                // Skip REALITY outbounds — their server_name is part of the protocol
-                if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
-                    for outbound in outbounds.iter_mut() {
-                        if let Some(outbound_obj) = outbound.as_object_mut() {
-                            if !sni_host.is_empty() {
-                                if let Some(tls_val) = outbound_obj.get_mut("tls") {
-                                    if let Some(tls_obj) = tls_val.as_object_mut() {
-                                        if tls_obj.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false) {
-                                            let is_reality = tls_obj.get("reality")
-                                                .and_then(|r| r.as_object())
-                                                .and_then(|r| r.get("enabled"))
-                                                .and_then(|e| e.as_bool())
-                                                .unwrap_or(false);
-                                            if !is_reality {
-                                                tls_obj.insert("server_name".to_string(), serde_json::Value::String(sni_host.clone()));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 let _ = std::fs::write(&config_path, serde_json::to_string_pretty(&config_val).unwrap());
             }
         }

@@ -73,9 +73,8 @@ pub async fn import_subscription(
     };
 
     let mixed_port = *state.mixed_port.lock().unwrap();
-    let (dns_address, sni_host, listen_address) = {
+    let (dns_address, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -87,9 +86,6 @@ pub async fn import_subscription(
                                 dns = Some(d.to_string());
                             }
                         }
-                        if let Some(s) = val2.get("sniHost").and_then(|v| v.as_str()) {
-                            sni = s.to_string();
-                        }
                         if let Some(w) = val2.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
                         }
@@ -99,10 +95,10 @@ pub async fn import_subscription(
         }
         let addr = if wifi { "0.0.0.0".to_string() } else { "127.0.0.1".to_string() };
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, addr)
+        (resolved_dns, addr)
     };
     let tun_settings = load_tun_settings(&app);
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -177,9 +173,8 @@ pub async fn import_file(
     };
 
     let mixed_port = *state.mixed_port.lock().unwrap();
-    let (dns_address, sni_host, listen_address) = {
+    let (dns_address, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -191,9 +186,6 @@ pub async fn import_file(
                                 dns = Some(d.to_string());
                             }
                         }
-                        if let Some(s) = val2.get("sniHost").and_then(|v| v.as_str()) {
-                            sni = s.to_string();
-                        }
                         if let Some(w) = val2.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
                         }
@@ -203,10 +195,10 @@ pub async fn import_file(
         }
         let addr = if wifi { "0.0.0.0".to_string() } else { "127.0.0.1".to_string() };
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, addr)
+        (resolved_dns, addr)
     };
     let tun_settings = load_tun_settings(&app);
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -280,9 +272,8 @@ pub async fn import_from_clipboard(
     };
 
     let mixed_port = *state.mixed_port.lock().unwrap();
-    let (dns_address, sni_host, listen_address) = {
+    let (dns_address, listen_address) = {
         let mut dns: Option<String> = None;
-        let mut sni = "".to_string();
         let mut wifi = false;
         if let Ok(mut path2) = app.path().app_data_dir() {
             path2.push("settings.json");
@@ -294,9 +285,6 @@ pub async fn import_from_clipboard(
                                 dns = Some(d.to_string());
                             }
                         }
-                        if let Some(s) = val2.get("sniHost").and_then(|v| v.as_str()) {
-                            sni = s.to_string();
-                        }
                         if let Some(w) = val2.get("wifiSharing").and_then(|v| v.as_bool()) {
                             wifi = w;
                         }
@@ -306,10 +294,10 @@ pub async fn import_from_clipboard(
         }
         let addr = if wifi { "0.0.0.0".to_string() } else { "127.0.0.1".to_string() };
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, sni, addr)
+        (resolved_dns, addr)
     };
     let tun_settings = load_tun_settings(&app);
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);

@@ -43,18 +43,18 @@ pub fn detect_format(raw: &[u8]) -> SubscriptionFormat {
 }
 
 pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
-    // Attempt base64 decode first (supporting unpadded base64)
-    let raw_trimmed = raw.trim_ascii();
-    let mut raw_str = String::from_utf8_lossy(raw_trimmed).into_owned();
-    while raw_str.len() % 4 != 0 {
-        raw_str.push('=');
+    // Attempt base64 decode first (supporting unpadded base64 and stripping internal whitespace)
+    let raw_str = String::from_utf8_lossy(raw);
+    let mut base64_candidate = raw_str.replace(|c: char| c.is_ascii_whitespace(), "");
+    while base64_candidate.len() % 4 != 0 {
+        base64_candidate.push('=');
     }
 
-    let decoded_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, raw_str.as_bytes()) {
+    let decoded_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_candidate.as_bytes()) {
         Ok(decoded) => decoded,
         Err(_) => {
             // Also try URL-safe base64
-            match base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, raw_str.as_bytes()) {
+            match base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, base64_candidate.as_bytes()) {
                 Ok(decoded) => decoded,
                 Err(_) => raw.to_vec(),
             }
@@ -84,5 +84,21 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             let limit = std::cmp::min(100, hint.len());
             Err(format!("subscription_format_unknown: {}", &hint[0..limit]))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_adapt_multiline_base64() {
+        // Base64 for: ss://YWVzLTI1Ni1nY206c2VjcmV0cGFzc3dvcmQ@1.2.3.4:8388#Shadowsocks%20Node
+        // split with newlines and carriage returns
+        let multiline_b64 = "c3M6Ly9ZV1Z6TFRJMU5pMW5ZMjA2\r\nY2JWamNtVjBjR0Z6YzNkdmNtU\n\tUAxLjIuMy40OjgzODgjU2hhZG93c29ja3MlMjBOb2Rl";
+        let res = adapt(multiline_b64.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(res[0].outbound_type, "shadowsocks");
+        assert_eq!(res[0].tag, "Shadowsocks Node");
     }
 }
