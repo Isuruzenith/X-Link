@@ -295,6 +295,27 @@ pub fn prepare_and_patch_config(
 
     config_val["inbounds"] = serde_json::to_value(inbounds).unwrap();
 
+    let mut dns_rules = vec![
+        serde_json::json!({ "outbound": "direct", "server": "local-dns" })
+    ];
+
+    let mut server_domains = Vec::new();
+    for host in &server_hosts {
+        if host.parse::<std::net::IpAddr>().is_err() {
+            let trimmed = host.trim();
+            if !trimmed.is_empty() {
+                server_domains.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if !server_domains.is_empty() {
+        dns_rules.insert(0, serde_json::json!({
+            "domain": server_domains,
+            "server": "local-dns"
+        }));
+    }
+
     // Patch DNS section with dynamic dnsAddress from settings
     if proxy_mode == "tun" {
         config_val["dns"] = serde_json::json!({
@@ -302,9 +323,7 @@ pub fn prepare_and_patch_config(
                 { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
                 { "tag": "local-dns", "address": dns_address, "detour": "direct" }
             ],
-            "rules": [
-                { "outbound": "any", "server": "local-dns" }
-            ],
+            "rules": dns_rules,
             "strategy": "ipv4_only"
         });
     } else {
@@ -312,9 +331,7 @@ pub fn prepare_and_patch_config(
             "servers": [
                 { "tag": "local-dns", "address": dns_address, "detour": "direct" }
             ],
-            "rules": [
-                { "outbound": "any", "server": "local-dns" }
-            ]
+            "rules": dns_rules
         });
     }
 

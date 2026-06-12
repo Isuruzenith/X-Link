@@ -138,21 +138,40 @@ pub fn generate_singbox_config(
 
     let route_rules = build_route_rules();
 
+    let mut dns_rules = vec![
+        serde_json::json!({ "outbound": "direct", "server": "local-dns" })
+    ];
+
+    let mut server_domains = Vec::new();
+    for host in &server_hosts {
+        if host.parse::<std::net::IpAddr>().is_err() {
+            let trimmed = host.trim();
+            if !trimmed.is_empty() {
+                server_domains.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if !server_domains.is_empty() {
+        dns_rules.insert(0, serde_json::json!({
+            "domain": server_domains,
+            "server": "local-dns"
+        }));
+    }
+
     // In TUN mode, DNS must go through the proxy tunnel to avoid the strict_route WFP deadlock.
     // Two-server strategy:
     //   - proxy-dns: uses a PUBLIC DNS (not the user's local router IP which is unreachable
     //     from the remote proxy server). Routes through the proxy tunnel.
     //   - local-dns: uses the system/local resolver via direct detour, only for resolving
-    //     the proxy server's own hostname (triggered by the "outbound: any" rule).
+    //     the proxy server's own hostname and direct connections.
     let dns_section = if proxy_mode == "tun" {
         serde_json::json!({
             "servers": [
                 { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
                 { "tag": "local-dns", "address": resolved_dns_address, "detour": "direct" }
             ],
-            "rules": [
-                { "outbound": "any", "server": "local-dns" }
-            ],
+            "rules": dns_rules,
             "strategy": "ipv4_only"
         })
     } else {
@@ -160,9 +179,7 @@ pub fn generate_singbox_config(
             "servers": [
                 { "tag": "local-dns", "address": resolved_dns_address, "detour": "direct" }
             ],
-            "rules": [
-                { "outbound": "any", "server": "local-dns" }
-            ]
+            "rules": dns_rules
         })
     };
 
