@@ -141,7 +141,7 @@ export function SettingsView({
                 </div>
               </div>
 
-              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 20px', borderLeft: '4px solid var(--accent-secondary)' }}>
+              <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px 20px' }}>
                 <img src={xLinkLogo} alt="X-Link" style={{ width: '40px', height: '40px', borderRadius: '8px', flexShrink: 0 }} />
                 <div>
                   <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-high)' }}>X-Link</h4>

@@ -89,9 +89,15 @@ export function ProfilesView({
                     </div>
                   </div>
                 </div>
-                <div className="profile-actions">
+                <div className="profile-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   {activeProfileId === p.id && isConnected && (
-                    <span className="active-badge">ACTIVE</span>
+                    <div title="Active Profile" style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: 'var(--status-ok)',
+                      boxShadow: '0 0 8px rgba(46, 213, 115, 0.6)'
+                    }} />
                   )}
                   <button className="btn-icon-only danger" onClick={(e) => onDeleteProfile(p.id, e)} title="Delete">
                     <Trash2 size={14} />
@@ -145,7 +151,12 @@ export function ProfilesView({
                           <Server size={14} style={{ color: selectedOutboundTag === node.tag ? 'var(--accent-primary)' : 'var(--text-low)' }} />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
                             <span className="node-name" title={node.tag}>{node.tag}</span>
-                            <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
+                              {activeProfileId === selectedProfileId && isConnected && selectedOutboundTag === node.tag && (
+                                <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <button className="btn-icon-only" style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', flexShrink: 0, borderRadius: '6px' }}
