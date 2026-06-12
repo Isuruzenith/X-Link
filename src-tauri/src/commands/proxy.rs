@@ -125,6 +125,266 @@ pub async fn get_traffic_stats(state: State<'_, crate::state::ProxyState>) -> Re
     })
 }
 
+pub fn prepare_and_patch_config(
+    app: &tauri::AppHandle,
+    state: &crate::state::ProxyState,
+    profile_id: &str,
+) -> Result<(std::path::PathBuf, String, u16, String), String> {
+    // Synchronize Rust state ports with user's settings.json configuration dynamically
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("settings.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(p) = val.get("mixedPort").and_then(|v| v.as_u64()) {
+                        *state.mixed_port.lock().unwrap() = p as u16;
+                    }
+                    if let Some(p) = val.get("httpPort").and_then(|v| v.as_u64()) {
+                        *state.http_port.lock().unwrap() = p as u16;
+                    }
+                    if let Some(p) = val.get("socksPort").and_then(|v| v.as_u64()) {
+                        *state.socks_port.lock().unwrap() = p as u16;
+                    }
+                }
+            }
+        }
+    }
+
+    let (dns_address, wifi_sharing, api_port, api_secret, api_cors, proxy_mode) = {
+        let mut dns: Option<String> = None;
+        let mut wifi = false;
+        let mut api_port = 9090u16;
+        let mut api_secret = "".to_string();
+        let mut api_cors = true;
+        let mut mode = "system".to_string();
+        if let Ok(mut path) = app.path().app_data_dir() {
+            path.push("settings.json");
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(d) = val.get("dnsAddress").and_then(|v| v.as_str()) {
+                            if !d.trim().is_empty() {
+                                dns = Some(d.to_string());
+                            }
+                        }
+                        if let Some(w) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
+                            wifi = w;
+                        }
+                        if let Some(p) = val.get("apiPort").and_then(|v| v.as_u64()) {
+                            api_port = p as u16;
+                        }
+                        if let Some(s) = val.get("apiSecret").and_then(|v| v.as_str()) {
+                            api_secret = s.to_string();
+                        }
+                        if let Some(c) = val.get("apiCors").and_then(|v| v.as_bool()) {
+                            api_cors = c;
+                        }
+                        if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
+                            mode = m.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
+        (resolved_dns, wifi, api_port, api_secret, api_cors, mode)
+    };
+
+    let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
+    let config_path = crate::config::get_config_path(app, profile_id)?;
+
+    // Write a default valid config if the file doesn't exist
+    if !config_path.exists() {
+        let mixed_port = *state.mixed_port.lock().unwrap();
+        let default_config = format!(r#"{{
+  "log": {{
+    "level": "info",
+    "timestamp": true
+  }},
+  "inbounds": [
+    {{
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": {}
+    }}
+  ],
+  "outbounds": [
+    {{ "type": "direct", "tag": "direct" }}
+  ],
+  "route": {{
+    "rules": [
+      {{ "geoip": "private", "outbound": "direct" }}
+    ],
+    "final": "direct",
+    "auto_detect_interface": true
+  }},
+  "experimental": {{
+    "clash_api": {{
+      "external_controller": "127.0.0.1:9090"
+    }}
+  }}
+}}"#, mixed_port);
+        std::fs::write(&config_path, default_config)
+            .map_err(|e| format!("Failed to write default config: {}", e))?;
+    }
+
+    // Dynamically patch inbounds array to match user's active settings.json (ports & proxyMode)
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config file: {}", e))?;
+    let mut config_val = serde_json::from_str::<serde_json::Value>(&content)
+        .map_err(|e| format!("Failed to parse config JSON: {}", e))?;
+
+    // Self-heal: strip deprecated block/dns special outbounds from old config files
+    if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+        outbounds.retain(|o| {
+            let t = o.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            t != "block" && t != "dns"
+        });
+    }
+
+    let mut server_hosts = Vec::new();
+    if let Some(outbounds) = config_val.get("outbounds").and_then(|o| o.as_array()) {
+        for outbound in outbounds {
+            if let Some(server) = outbound.get("server").and_then(|s| s.as_str()) {
+                server_hosts.push(server.to_string());
+            }
+        }
+    }
+    let server_ips = crate::config::resolve_server_ips(&server_hosts);
+    let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address, &server_ips);
+
+    let mixed_port = *state.mixed_port.lock().unwrap();
+
+    let mut inbounds = vec![
+        serde_json::json!({
+            "type": "mixed",
+            "tag": "mixed-in",
+            "listen": listen_address,
+            "listen_port": mixed_port
+        })
+    ];
+
+    if proxy_mode == "tun" {
+        let tun_settings = load_tun_settings(app);
+        let mut tun_inbound = serde_json::json!({
+            "type": "tun",
+            "tag": "tun-in",
+            "interface_name": "X-Link",
+            "address": [
+                "172.19.0.1/30"
+            ],
+            "auto_route": tun_settings.auto_route,
+            "strict_route": tun_settings.strict_route,
+            "stack": tun_settings.stack,
+            "route_exclude_address": route_exclude_addresses,
+            "sniff": tun_settings.sniff_enabled,
+            "sniff_override_destination": tun_settings.sniff_override_destination
+        });
+        if tun_settings.mtu != 0 {
+            tun_inbound["mtu"] = serde_json::json!(tun_settings.mtu);
+        }
+        if tun_settings.auto_redirect {
+            tun_inbound["auto_redirect"] = serde_json::json!(true);
+        }
+        if tun_settings.endpoint_independent_nat {
+            tun_inbound["endpoint_independent_nat"] = serde_json::json!(true);
+        }
+        inbounds.push(tun_inbound);
+    }
+
+    config_val["inbounds"] = serde_json::to_value(inbounds).unwrap();
+
+    // Patch DNS section with dynamic dnsAddress from settings
+    if proxy_mode == "tun" {
+        config_val["dns"] = serde_json::json!({
+            "servers": [
+                { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
+                { "tag": "local-dns", "address": dns_address, "detour": "direct" }
+            ],
+            "rules": [
+                { "outbound": "any", "server": "local-dns" }
+            ],
+            "strategy": "ipv4_only"
+        });
+    } else {
+        config_val["dns"] = serde_json::json!({
+            "servers": [
+                { "tag": "local-dns", "address": dns_address, "detour": "direct" }
+            ],
+            "rules": [
+                { "outbound": "any", "server": "local-dns" }
+            ]
+        });
+    }
+
+    // Patch routing rules to keep public traffic on the proxy
+    let route_rules = crate::config::build_route_rules();
+    config_val["route"] = serde_json::json!({
+        "rules": route_rules,
+        "final": "proxy",
+        "auto_detect_interface": true
+    });
+
+    // Patch experimental clash_api configuration
+    let mut clash_api = serde_json::json!({
+        "external_controller": format!("127.0.0.1:{}", api_port)
+    });
+    if !api_secret.is_empty() {
+        clash_api["secret"] = serde_json::Value::String(api_secret.clone());
+    }
+    if api_cors {
+        clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
+    }
+    config_val["experimental"] = serde_json::json!({
+        "clash_api": clash_api
+    });
+
+    std::fs::write(&config_path, serde_json::to_string_pretty(&config_val).unwrap())
+        .map_err(|e| format!("Failed to write patched config: {}", e))?;
+
+    Ok((config_path, proxy_mode, api_port, api_secret))
+}
+
+pub async fn try_reload_proxy_config(
+    app: &tauri::AppHandle,
+    state: &crate::state::ProxyState,
+    profile_id: &str,
+) -> Result<(), String> {
+    let (config_path, _, api_port, api_secret) = prepare_and_patch_config(app, state, profile_id)?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    let url = format!("http://127.0.0.1:{}/configs?force=true", api_port);
+    let mut req = client.put(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    let payload = serde_json::json!({
+        "path": config_path.to_string_lossy().to_string()
+    });
+
+    let resp = req.json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP reload request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_body = resp.text().await.unwrap_or_default();
+        return Err(format!("REST reload failed (HTTP {}): {}", status, err_body));
+    }
+
+    *ACTIVE_PROFILE_ID.lock().unwrap() = Some(profile_id.to_string());
+    crate::tray::update_tray(app);
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn toggle_proxy(
     app: tauri::AppHandle,
@@ -170,6 +430,25 @@ pub async fn toggle_proxy(
     }
 
     // ── START PATH ───────────────────────────────────────────────────────────
+    if start && state.get_status() == crate::state::ConnectionStatus::Connected {
+        if let Some(active_id) = get_active_profile_id() {
+            if active_id != profile_id {
+                let result = try_reload_proxy_config(&app, &state, &profile_id).await;
+                match result {
+                    Ok(_) => {
+                        state.push_log(format!("[System] Dynamic config hot-reload to profile \"{}\" succeeded.", profile_id));
+                        return Ok("started".into());
+                    }
+                    Err(e) => {
+                        state.push_log(format!("[System] Dynamic config reload failed: {}. Falling back to clean restart...", e));
+                    }
+                }
+            } else {
+                return Ok("started".into());
+            }
+        }
+    }
+
     state.set_status(crate::state::ConnectionStatus::Connecting);
     crate::tray::update_tray(&app);
     // Forcefully kill any existing sing-box processes system-wide before starting
@@ -200,231 +479,14 @@ pub async fn toggle_proxy(
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 
-    // Synchronize Rust state ports with user's settings.json configuration dynamically
-    if let Ok(mut path) = app.path().app_data_dir() {
-        path.push("settings.json");
-        if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(p) = val.get("mixedPort").and_then(|v| v.as_u64()) {
-                        *state.mixed_port.lock().unwrap() = p as u16;
-                    }
-                    if let Some(p) = val.get("httpPort").and_then(|v| v.as_u64()) {
-                        *state.http_port.lock().unwrap() = p as u16;
-                    }
-                    if let Some(p) = val.get("socksPort").and_then(|v| v.as_u64()) {
-                        *state.socks_port.lock().unwrap() = p as u16;
-                    }
-                }
-            }
+    let (config_path, _proxy_mode, api_port, api_secret) = match prepare_and_patch_config(&app, &state, &profile_id) {
+        Ok(res) => res,
+        Err(e) => {
+            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
+            return Err(e);
         }
-    }
-
-    let (dns_address, wifi_sharing, api_port, api_secret, api_cors) = {
-        let mut dns: Option<String> = None;
-        let mut wifi = false;
-        let mut api_port = 9090u16;
-        let mut api_secret = "".to_string();
-        let mut api_cors = true;
-        if let Ok(mut path) = app.path().app_data_dir() {
-            path.push("settings.json");
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(d) = val.get("dnsAddress").and_then(|v| v.as_str()) {
-                            if !d.trim().is_empty() {
-                                dns = Some(d.to_string());
-                            }
-                        }
-                        if let Some(w) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
-                            wifi = w;
-                        }
-                        if let Some(p) = val.get("apiPort").and_then(|v| v.as_u64()) {
-                            api_port = p as u16;
-                        }
-                        if let Some(s) = val.get("apiSecret").and_then(|v| v.as_str()) {
-                            api_secret = s.to_string();
-                        }
-                        if let Some(c) = val.get("apiCors").and_then(|v| v.as_bool()) {
-                            api_cors = c;
-                        }
-                    }
-                }
-            }
-        }
-        let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
-        (resolved_dns, wifi, api_port, api_secret, api_cors)
     };
-
-    let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
-    let config_path = crate::config::get_config_path(&app, &profile_id)?;
-    
-    // Write a default valid config if the file doesn't exist
-    if !config_path.exists() {
-        let mixed_port = *state.mixed_port.lock().unwrap();
-        let default_config = format!(r#"{{
-  "log": {{
-    "level": "info",
-    "timestamp": true
-  }},
-  "inbounds": [
-    {{
-      "type": "mixed",
-      "tag": "mixed-in",
-      "listen": "127.0.0.1",
-      "listen_port": {}
-    }}
-  ],
-  "outbounds": [
-    {{ "type": "direct", "tag": "direct" }}
-  ],
-  "route": {{
-    "rules": [
-      {{ "geoip": "private", "outbound": "direct" }}
-    ],
-    "final": "direct",
-    "auto_detect_interface": true
-  }},
-  "experimental": {{
-    "clash_api": {{
-      "external_controller": "127.0.0.1:9090"
-    }}
-  }}
-}}"#, mixed_port);
-        std::fs::write(&config_path, default_config)
-            .map_err(|e| format!("Failed to write default config: {}", e))?;
-    }
-
-    // Dynamically patch inbounds array to match user's active settings.json (ports & proxyMode)
-    if config_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
-            if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
-                // Self-heal: strip deprecated block/dns special outbounds from old config files
-                if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
-                    outbounds.retain(|o| {
-                        let t = o.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        t != "block" && t != "dns"
-                    });
-                }
-
-                let mut server_hosts = Vec::new();
-                if let Some(outbounds) = config_val.get("outbounds").and_then(|o| o.as_array()) {
-                    for outbound in outbounds {
-                        if let Some(server) = outbound.get("server").and_then(|s| s.as_str()) {
-                            server_hosts.push(server.to_string());
-                        }
-                    }
-                }
-                let server_ips = crate::config::resolve_server_ips(&server_hosts);
-                let route_exclude_addresses = crate::config::build_route_exclude_addresses(&dns_address, &server_ips);
-
-                let proxy_mode = {
-                    let mut mode = "system".to_string();
-                    if let Ok(mut path) = app.path().app_data_dir() {
-                        path.push("settings.json");
-                        if path.exists() {
-                            if let Ok(content) = std::fs::read_to_string(&path) {
-                                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                                    if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
-                                        mode = m.to_string();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    mode
-                };
-
-                let mixed_port = *state.mixed_port.lock().unwrap();
-
-                let mut inbounds = vec![
-                    serde_json::json!({
-                        "type": "mixed",
-                        "tag": "mixed-in",
-                        "listen": listen_address,
-                        "listen_port": mixed_port
-                    })
-                ];
-
-                if proxy_mode == "tun" {
-                    let tun_settings = load_tun_settings(&app);
-                    let mut tun_inbound = serde_json::json!({
-                        "type": "tun",
-                        "tag": "tun-in",
-                        "interface_name": "X-Link",
-                        "address": [
-                            "172.19.0.1/30"
-                        ],
-                        "auto_route": tun_settings.auto_route,
-                        "strict_route": tun_settings.strict_route,
-                        "stack": tun_settings.stack,
-                        "route_exclude_address": route_exclude_addresses,
-                        "sniff": tun_settings.sniff_enabled,
-                        "sniff_override_destination": tun_settings.sniff_override_destination
-                    });
-                    if tun_settings.mtu != 0 {
-                        tun_inbound["mtu"] = serde_json::json!(tun_settings.mtu);
-                    }
-                    if tun_settings.auto_redirect {
-                        tun_inbound["auto_redirect"] = serde_json::json!(true);
-                    }
-                    if tun_settings.endpoint_independent_nat {
-                        tun_inbound["endpoint_independent_nat"] = serde_json::json!(true);
-                    }
-                    inbounds.push(tun_inbound);
-                }
-
-                config_val["inbounds"] = serde_json::to_value(inbounds).unwrap();
-
-                // Patch DNS section with dynamic dnsAddress from settings
-                // In TUN mode, DNS must go through the proxy tunnel to avoid WFP strict_route deadlock
-                if proxy_mode == "tun" {
-                    config_val["dns"] = serde_json::json!({
-                        "servers": [
-                            { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
-                            { "tag": "local-dns", "address": dns_address, "detour": "direct" }
-                        ],
-                        "rules": [
-                            { "outbound": "any", "server": "local-dns" }
-                        ],
-                        "strategy": "ipv4_only"
-                    });
-                } else {
-                    config_val["dns"] = serde_json::json!({
-                        "servers": [
-                            { "tag": "local-dns", "address": dns_address, "detour": "direct" }
-                        ],
-                        "rules": [
-                            { "outbound": "any", "server": "local-dns" }
-                        ]
-                    });
-                }
-
-                // Patch routing rules to keep public traffic on the proxy
-                let route_rules = crate::config::build_route_rules();
-                config_val["route"] = serde_json::json!({
-                    "rules": route_rules,
-                    "final": "proxy",
-                    "auto_detect_interface": true
-                });
-
-                // Patch experimental clash_api configuration
-                let mut clash_api = serde_json::json!({
-                    "external_controller": format!("127.0.0.1:{}", api_port)
-                });
-                if !api_secret.is_empty() {
-                    clash_api["secret"] = serde_json::Value::String(api_secret.clone());
-                }
-                if api_cors {
-                    clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
-                }
-                config_val["experimental"] = serde_json::json!({
-                    "clash_api": clash_api
-                });
-                let _ = std::fs::write(&config_path, serde_json::to_string_pretty(&config_val).unwrap());
-            }
-        }
-    }
 
     let (mut rx, child) = match app
         .shell()

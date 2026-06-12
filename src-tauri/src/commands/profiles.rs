@@ -510,5 +510,15 @@ pub async fn update_profile_config(
     std::fs::write(&config_path, pretty_config)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
+    // If this profile is currently active and sing-box is running, hot-reload it dynamically
+    let state = app.state::<crate::state::ProxyState>();
+    if state.get_status() == crate::state::ConnectionStatus::Connected {
+        if let Some(active_id) = crate::commands::proxy::get_active_profile_id() {
+            if active_id == profile_id {
+                let _ = crate::commands::proxy::try_reload_proxy_config(&app, &state, &profile_id).await;
+            }
+        }
+    }
+
     Ok(())
 }
