@@ -345,6 +345,20 @@ export default function App() {
     catch (e) { pushSystemLog(`Elevation aborted: ${e}`); }
   };
 
+  const handleSelectProfile = async (id: string) => {
+    setSelectedProfileId(id);
+    if (isConnected && activeProfileId && activeProfileId !== id) {
+      try {
+        const target = profiles.find((p) => p.id === id);
+        pushSystemLog(`Hot-swapping active profile to "${target?.name || 'Selected'}"...`);
+        await invoke('reload_active_profile', { profileId: id });
+        pushSystemLog(`Successfully hot-swapped to profile "${target?.name || 'Selected'}".`);
+      } catch (err) {
+        pushSystemLog(`Failed to hot-swap profile: ${err}`);
+      }
+    }
+  };
+
   const handleDeleteProfile = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -702,7 +716,7 @@ export default function App() {
             importError={importError}
             importSuccess={importSuccess}
             isImporting={isImporting}
-            onSelectProfile={setSelectedProfileId}
+            onSelectProfile={handleSelectProfile}
             onDeleteProfile={handleDeleteProfile}
             onSetImportName={setImportName}
             onSetImportContent={handleImportContentChange}

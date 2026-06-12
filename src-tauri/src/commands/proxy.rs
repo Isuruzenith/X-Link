@@ -386,6 +386,15 @@ pub async fn try_reload_proxy_config(
 }
 
 #[tauri::command]
+pub async fn reload_active_profile(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::state::ProxyState>,
+    profile_id: String,
+) -> Result<(), String> {
+    try_reload_proxy_config(&app, &state, &profile_id).await
+}
+
+#[tauri::command]
 pub async fn toggle_proxy(
     app: tauri::AppHandle,
     state: State<'_, crate::state::ProxyState>,

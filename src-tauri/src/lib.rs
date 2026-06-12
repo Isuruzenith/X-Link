@@ -36,6 +36,7 @@ pub fn run() {
             commands::proxy::get_proxy_status,
             commands::proxy::get_traffic_stats,
             commands::proxy::toggle_proxy,
+            commands::proxy::reload_active_profile,
             commands::profiles::import_subscription,
             commands::profiles::import_file,
             commands::profiles::import_from_clipboard,
