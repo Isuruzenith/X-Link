@@ -59,7 +59,7 @@ export default function App() {
     proxyMode: 'tun', closeToTray: true, autostart: false,
     httpPort: 7890, socksPort: 7891, mixedPort: 7892, wifiSharing: false,
     tunAutoRoute: true, tunAutoRedirect: false, tunStrictRoute: true,
-    tunStack: 'mixed', tunMtu: 9000, tunEndpointIndependentNat: false,
+    tunStack: 'gvisor', tunMtu: 9000, tunEndpointIndependentNat: false,
     sniffEnabled: true, sniffHttp: true, sniffTls: true, sniffQuic: true, sniffOverrideDestination: false,
     muxEnabled: false, muxProtocol: 'h2mux', muxMaxConnections: 4,
     muxMinStreams: 4, muxMaxStreams: 0, muxPadding: false, muxBrutal: false,
@@ -306,6 +306,18 @@ export default function App() {
       } catch (e) { pushSystemLog(`Error stopping proxy: ${e}`); }
     } else {
       if (!selectedProfileId) { pushSystemLog('Error: Select or import a profile first.'); setActiveTab('profiles'); return; }
+
+      // TUN mode requires admin privileges — auto-trigger elevation if not already elevated
+      if (settings.proxyMode === 'tun' && !isElevated) {
+        pushSystemLog('TUN mode requires Administrator privileges. Requesting elevation...');
+        try {
+          await invoke('request_elevation');
+        } catch (e) {
+          pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights.`);
+        }
+        return;
+      }
+
       try {
         const conflict = await invoke<number | null>('check_port_conflict', { ports: [httpPort, socksPort, mixedPort] });
         if (conflict) { pushSystemLog(`Error: Port ${conflict} is in use.`); setActiveTab('settings'); return; }

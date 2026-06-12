@@ -5,6 +5,7 @@ use tauri::Manager;
 use crate::config::adapters::adapt;
 use crate::config::generator::generate_singbox_config;
 use crate::config::validator::validate_singbox_config;
+use crate::commands::proxy::load_tun_settings;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -100,7 +101,8 @@ pub async fn import_subscription(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let tun_settings = load_tun_settings(&app);
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -203,7 +205,8 @@ pub async fn import_file(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let tun_settings = load_tun_settings(&app);
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);
@@ -305,7 +308,8 @@ pub async fn import_from_clipboard(
         let resolved_dns = crate::config::resolve_dns_address(dns.as_deref());
         (resolved_dns, sni, addr)
     };
-    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address)?;
+    let tun_settings = load_tun_settings(&app);
+    let generated_config = generate_singbox_config(mixed_port, outbounds, &proxy_mode, &dns_address, &sni_host, &listen_address, &tun_settings)?;
 
     // 5. Write to temporary file for validation
     let temp_id = format!("{}_temp", id);

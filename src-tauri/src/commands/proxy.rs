@@ -5,6 +5,34 @@ use tauri_plugin_shell::process::CommandEvent;
 use tauri::Emitter;
 use tokio::sync::oneshot;
 use std::sync::Arc;
+use crate::config::generator::TunSettings;
+
+/// Read TUN and sniffing settings from the user's settings.json file.
+/// Falls back to safe defaults if the file is missing or any field is absent.
+pub fn load_tun_settings(app: &tauri::AppHandle) -> TunSettings {
+    let mut ts = TunSettings::default();
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("settings.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(v) = val.get("tunAutoRoute").and_then(|v| v.as_bool()) { ts.auto_route = v; }
+                    if let Some(v) = val.get("tunAutoRedirect").and_then(|v| v.as_bool()) { ts.auto_redirect = v; }
+                    if let Some(v) = val.get("tunStrictRoute").and_then(|v| v.as_bool()) { ts.strict_route = v; }
+                    if let Some(v) = val.get("tunStack").and_then(|v| v.as_str()) { ts.stack = v.to_string(); }
+                    if let Some(v) = val.get("tunMtu").and_then(|v| v.as_u64()) { ts.mtu = v as u32; }
+                    if let Some(v) = val.get("tunEndpointIndependentNat").and_then(|v| v.as_bool()) { ts.endpoint_independent_nat = v; }
+                    if let Some(v) = val.get("sniffEnabled").and_then(|v| v.as_bool()) { ts.sniff_enabled = v; }
+                    if let Some(v) = val.get("sniffHttp").and_then(|v| v.as_bool()) { ts.sniff_http = v; }
+                    if let Some(v) = val.get("sniffTls").and_then(|v| v.as_bool()) { ts.sniff_tls = v; }
+                    if let Some(v) = val.get("sniffQuic").and_then(|v| v.as_bool()) { ts.sniff_quic = v; }
+                    if let Some(v) = val.get("sniffOverrideDestination").and_then(|v| v.as_bool()) { ts.sniff_override_destination = v; }
+                }
+            }
+        }
+    }
+    ts
+}
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +64,7 @@ pub fn get_active_profile_id() -> Option<String> {
 static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 #[tauri::command]
-pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<ProxyStateSerialized, String> {
+pub fn get_proxy_status(app: tauri::AppHandle, state: State<'_, crate::state::ProxyState>) -> Result<ProxyStateSerialized, String> {
     let status = state.get_status();
     let active_profile = ACTIVE_PROFILE_ID.lock().unwrap().clone();
     let uptime = if let Some(start) = *CONNECTION_START_TIME.lock().unwrap() {
@@ -45,13 +73,33 @@ pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<Pr
         0
     };
 
+    // Derive tun_enabled dynamically: true when connected AND proxyMode is 'tun'
+    let tun_enabled = if status == crate::state::ConnectionStatus::Connected {
+        let mut mode = "system".to_string();
+        if let Ok(mut path) = app.path().app_data_dir() {
+            path.push("settings.json");
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
+                            mode = m.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        mode == "tun"
+    } else {
+        false
+    };
+
     Ok(ProxyStateSerialized {
         status,
         active_profile_id: active_profile,
         http_port: *state.http_port.lock().unwrap(),
         socks_port: *state.socks_port.lock().unwrap(),
         mixed_port: *state.mixed_port.lock().unwrap(),
-        tun_enabled: false,
+        tun_enabled,
         uptime,
     })
 }
@@ -236,7 +284,7 @@ pub async fn toggle_proxy(
   ],
   "route": {{
     "rules": [
-      {{ "geoip": "private", "action": "direct" }}
+      {{ "geoip": "private", "outbound": "direct" }}
     ],
     "final": "direct",
     "auto_detect_interface": true
@@ -255,6 +303,14 @@ pub async fn toggle_proxy(
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(mut config_val) = serde_json::from_str::<serde_json::Value>(&content) {
+                // Self-heal: strip deprecated block/dns special outbounds from old config files
+                if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                    outbounds.retain(|o| {
+                        let t = o.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        t != "block" && t != "dns"
+                    });
+                }
+
                 let mut server_hosts = Vec::new();
                 if let Some(outbounds) = config_val.get("outbounds").and_then(|o| o.as_array()) {
                     for outbound in outbounds {
@@ -295,7 +351,8 @@ pub async fn toggle_proxy(
                 ];
 
                 if proxy_mode == "tun" {
-                    inbounds.push(serde_json::json!({
+                    let tun_settings = load_tun_settings(&app);
+                    let mut tun_inbound = serde_json::json!({
                         "type": "tun",
                         "tag": "tun-in",
                         "interface_name": "X-Link",
@@ -303,26 +360,50 @@ pub async fn toggle_proxy(
                             "172.19.0.1/30",
                             "fdfe:dcba:9876::1/126"
                         ],
-                        "auto_route": true,
-                        "strict_route": true,
-                        "stack": "gvisor",
+                        "auto_route": tun_settings.auto_route,
+                        "strict_route": tun_settings.strict_route,
+                        "stack": tun_settings.stack,
                         "route_exclude_address": route_exclude_addresses,
-                        "sniff": true,
-                        "sniff_override_destination": true
-                    }));
+                        "sniff": tun_settings.sniff_enabled,
+                        "sniff_override_destination": tun_settings.sniff_override_destination
+                    });
+                    if tun_settings.mtu != 0 {
+                        tun_inbound["mtu"] = serde_json::json!(tun_settings.mtu);
+                    }
+                    if tun_settings.auto_redirect {
+                        tun_inbound["auto_redirect"] = serde_json::json!(true);
+                    }
+                    if tun_settings.endpoint_independent_nat {
+                        tun_inbound["endpoint_independent_nat"] = serde_json::json!(true);
+                    }
+                    inbounds.push(tun_inbound);
                 }
 
                 config_val["inbounds"] = serde_json::to_value(inbounds).unwrap();
 
                 // Patch DNS section with dynamic dnsAddress from settings
-                config_val["dns"] = serde_json::json!({
-                    "servers": [
-                        { "tag": "local-dns", "address": dns_address, "detour": "direct" }
-                    ],
-                    "rules": [
-                        { "outbound": "any", "server": "local-dns" }
-                    ]
-                });
+                // In TUN mode, DNS must go through the proxy tunnel to avoid WFP strict_route deadlock
+                if proxy_mode == "tun" {
+                    config_val["dns"] = serde_json::json!({
+                        "servers": [
+                            { "tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy" },
+                            { "tag": "local-dns", "address": dns_address, "detour": "direct" }
+                        ],
+                        "rules": [
+                            { "outbound": "any", "server": "local-dns" }
+                        ],
+                        "strategy": "prefer_ipv4"
+                    });
+                } else {
+                    config_val["dns"] = serde_json::json!({
+                        "servers": [
+                            { "tag": "local-dns", "address": dns_address, "detour": "direct" }
+                        ],
+                        "rules": [
+                            { "outbound": "any", "server": "local-dns" }
+                        ]
+                    });
+                }
 
                 // Patch routing rules to keep public traffic on the proxy
                 let route_rules = crate::config::build_route_rules();

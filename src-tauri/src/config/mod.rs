@@ -92,7 +92,7 @@ pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
 pub fn build_route_rules() -> Vec<Value> {
     vec![
         serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
-        serde_json::json!({ "geoip": "private", "action": "direct" }),
+        serde_json::json!({ "geoip": "private", "outbound": "direct" }),
     ]
 }
 
