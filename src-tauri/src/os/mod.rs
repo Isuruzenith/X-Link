@@ -7,14 +7,14 @@ pub fn enable_system_proxy(host: &str, port: u16) -> Result<(), String> {
         bypass,
     };
     sys.set_system_proxy()
-       .map_err(|e| format!("Failed to set system proxy: {}", e))
+        .map_err(|e| format!("Failed to set system proxy: {}", e))
 }
 
 pub fn disable_system_proxy() -> Result<(), String> {
     if let Ok(mut sys) = sysproxy::Sysproxy::get_system_proxy() {
         sys.enable = false;
         sys.set_system_proxy()
-           .map_err(|e| format!("Failed to clear system proxy: {}", e))
+            .map_err(|e| format!("Failed to clear system proxy: {}", e))
     } else {
         // Fallback: set a default disabled proxy configuration
         let sys = sysproxy::Sysproxy {
@@ -24,6 +24,17 @@ pub fn disable_system_proxy() -> Result<(), String> {
             bypass: "".to_string(),
         };
         sys.set_system_proxy()
-           .map_err(|e| format!("Failed to clear system proxy (fallback): {}", e))
+            .map_err(|e| format!("Failed to clear system proxy (fallback): {}", e))
+    }
+}
+
+pub fn is_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        is_elevated::is_elevated()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        unsafe { libc::getuid() == 0 }
     }
 }

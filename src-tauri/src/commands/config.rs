@@ -1,10 +1,10 @@
-use tauri::{State, Manager};
-use std::time::SystemTime;
-use std::path::PathBuf;
+use crate::commands::proxy::load_tun_settings;
 use crate::config::adapters::adapt;
 use crate::config::generator::generate_singbox_config;
 use crate::config::validator::validate_singbox_config;
-use crate::commands::proxy::load_tun_settings;
+use std::path::PathBuf;
+use std::time::SystemTime;
+use tauri::{Manager, State};
 
 /// Metadata returned to the frontend when importing a profile.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -19,7 +19,9 @@ pub struct ProfileMeta {
 /// The single, fixed "active" config file path: <app_data_dir>/configs/active.json
 /// This is always the file sing-box boots from.
 pub fn get_active_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let mut path = app.path().app_data_dir()
+    let mut path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     path.push("configs");
     std::fs::create_dir_all(&path)
@@ -29,8 +31,13 @@ pub fn get_active_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String>
 }
 
 /// Per-profile config file: <app_data_dir>/configs/{profile_id}.json
-pub fn get_profile_config_path(app: &tauri::AppHandle, profile_id: &str) -> Result<PathBuf, String> {
-    let mut path = app.path().app_data_dir()
+pub fn get_profile_config_path(
+    app: &tauri::AppHandle,
+    profile_id: &str,
+) -> Result<PathBuf, String> {
+    let mut path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     path.push("configs");
     std::fs::create_dir_all(&path)
@@ -41,7 +48,9 @@ pub fn get_profile_config_path(app: &tauri::AppHandle, profile_id: &str) -> Resu
 
 /// Scratch file used to validate a candidate config before committing it.
 fn get_temp_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let mut path = app.path().app_data_dir()
+    let mut path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     path.push("configs");
     std::fs::create_dir_all(&path)
@@ -106,13 +115,23 @@ pub async fn import_config(
 
     // 3. Generate sing-box JSON config based on active settings.json
     let (proxy_mode, dns, wifi) = read_basic_settings(&app);
-    let listen_address = if wifi { "0.0.0.0".to_string() } else { "127.0.0.1".to_string() };
+    let listen_address = if wifi {
+        "0.0.0.0".to_string()
+    } else {
+        "127.0.0.1".to_string()
+    };
     let dns_address = crate::config::resolve_dns_address(dns.as_deref());
     let tun_settings = load_tun_settings(&app);
     let mixed_port = state.get_settings().mixed_port;
 
     let generated_config = generate_singbox_config(
-        mixed_port, outbounds, &proxy_mode, &dns_address, &listen_address, &tun_settings, None,
+        mixed_port,
+        outbounds,
+        &proxy_mode,
+        &dns_address,
+        &listen_address,
+        &tun_settings,
+        None,
     )?;
 
     // 4. Early guard: validate generated JSON has required structure before
@@ -120,7 +139,11 @@ pub async fn import_config(
     {
         let parsed: serde_json::Value = serde_json::from_str(&generated_config)
             .map_err(|e| format!("Generated config is not valid JSON: {}", e))?;
-        if parsed.get("outbounds").and_then(|o| o.as_array()).map_or(true, |a| a.is_empty()) {
+        if parsed
+            .get("outbounds")
+            .and_then(|o| o.as_array())
+            .map_or(true, |a| a.is_empty())
+        {
             return Err("Config has no outbounds — nothing to connect to.".to_string());
         }
     }
@@ -175,14 +198,19 @@ pub fn get_config_outbounds(app: tauri::AppHandle) -> Result<Vec<serde_json::Val
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
-    let outbounds = config.get("outbounds")
+    let outbounds = config
+        .get("outbounds")
         .and_then(|o| o.as_array())
         .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
 
     let mut nodes = Vec::new();
     for outbound in outbounds {
         let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector" && outbound_type != "direct" && outbound_type != "block" && outbound_type != "dns" {
+        if outbound_type != "selector"
+            && outbound_type != "direct"
+            && outbound_type != "block"
+            && outbound_type != "dns"
+        {
             nodes.push(outbound.clone());
         }
     }
@@ -204,13 +232,20 @@ pub fn get_active_outbound(app: tauri::AppHandle) -> Result<serde_json::Value, S
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
-    let outbounds = config.get("outbounds")
+    let outbounds = config
+        .get("outbounds")
         .and_then(|o| o.as_array())
         .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
 
-    if let Some(selector) = outbounds.iter().find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector")) {
+    if let Some(selector) = outbounds
+        .iter()
+        .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))
+    {
         if let Some(default_tag) = selector.get("default").and_then(|d| d.as_str()) {
-            if let Some(found) = outbounds.iter().find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag)) {
+            if let Some(found) = outbounds
+                .iter()
+                .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag))
+            {
                 return Ok(found.clone());
             }
         }
@@ -218,7 +253,11 @@ pub fn get_active_outbound(app: tauri::AppHandle) -> Result<serde_json::Value, S
 
     for outbound in outbounds {
         let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector" && outbound_type != "direct" && outbound_type != "block" && outbound_type != "dns" {
+        if outbound_type != "selector"
+            && outbound_type != "direct"
+            && outbound_type != "block"
+            && outbound_type != "dns"
+        {
             return Ok(outbound.clone());
         }
     }
@@ -235,8 +274,13 @@ pub fn get_selected_outbound_tag(app: &tauri::AppHandle) -> Option<String> {
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: serde_json::Value = serde_json::from_str(&content).ok()?;
     let outbounds = config.get("outbounds")?.as_array()?;
-    let selector = outbounds.iter().find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))?;
-    selector.get("default").and_then(|d| d.as_str()).map(|s| s.to_string())
+    let selector = outbounds
+        .iter()
+        .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))?;
+    selector
+        .get("default")
+        .and_then(|d| d.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Edits an existing node's connection parameters in-place (used by the node
@@ -257,12 +301,16 @@ pub async fn update_node(
     let mut config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
-    let target_tag = new_outbound.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string());
+    let target_tag = new_outbound
+        .get("tag")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_string());
     let mut target_idx = None;
     let mut old_tag: Option<String> = None;
 
     {
-        let outbounds = config.get_mut("outbounds")
+        let outbounds = config
+            .get_mut("outbounds")
             .and_then(|o| o.as_array_mut())
             .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
 
@@ -286,17 +334,24 @@ pub async fn update_node(
                 let t = outbound.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if t != "selector" && t != "direct" && t != "block" && t != "dns" {
                     target_idx = Some(idx);
-                    old_tag = outbound.get("tag").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    old_tag = outbound
+                        .get("tag")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     break;
                 }
             }
         }
     }
 
-    let target_idx = target_idx.ok_or_else(|| "No matching outbound found to update".to_string())?;
+    let target_idx =
+        target_idx.ok_or_else(|| "No matching outbound found to update".to_string())?;
 
     {
-        let outbounds = config.get_mut("outbounds").and_then(|o| o.as_array_mut()).unwrap();
+        let outbounds = config
+            .get_mut("outbounds")
+            .and_then(|o| o.as_array_mut())
+            .unwrap();
         outbounds[target_idx] = new_outbound.clone();
     }
 
@@ -306,7 +361,9 @@ pub async fn update_node(
             if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
                 for outbound in outbounds.iter_mut() {
                     if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
-                        if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                        if let Some(list) =
+                            outbound.get_mut("outbounds").and_then(|o| o.as_array_mut())
+                        {
                             for item in list.iter_mut() {
                                 if item.as_str() == Some(old.as_str()) {
                                     *item = serde_json::Value::String(new.to_string());
@@ -373,7 +430,10 @@ pub async fn switch_profile(
 ) -> Result<(), String> {
     let profile_path = get_profile_config_path(&app, &profile_id)?;
     if !profile_path.exists() {
-        return Err(format!("Profile config file not found for ID: {}", profile_id));
+        return Err(format!(
+            "Profile config file not found for ID: {}",
+            profile_id
+        ));
     }
 
     let config_content = std::fs::read_to_string(&profile_path)
@@ -405,7 +465,8 @@ pub async fn switch_profile(
     // Hot-reload if currently connected
     let state = app.state::<crate::state::ProxyState>();
     if state.get_status() == crate::state::ConnectionStatus::Connected {
-        let _ = crate::commands::proxy::try_reload_proxy_config(&app, &state, selected_node_tag).await;
+        let _ =
+            crate::commands::proxy::try_reload_proxy_config(&app, &state, selected_node_tag).await;
     }
 
     Ok(())
@@ -413,7 +474,10 @@ pub async fn switch_profile(
 
 /// Returns the outbound nodes from a specific profile's config file.
 #[tauri::command]
-pub fn get_profile_outbounds(app: tauri::AppHandle, profile_id: String) -> Result<Vec<serde_json::Value>, String> {
+pub fn get_profile_outbounds(
+    app: tauri::AppHandle,
+    profile_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
     let config_path = get_profile_config_path(&app, &profile_id)?;
     if !config_path.exists() {
         return Ok(Vec::new());
@@ -424,14 +488,19 @@ pub fn get_profile_outbounds(app: tauri::AppHandle, profile_id: String) -> Resul
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse profile config: {}", e))?;
 
-    let outbounds = config.get("outbounds")
+    let outbounds = config
+        .get("outbounds")
         .and_then(|o| o.as_array())
         .ok_or_else(|| "No outbounds array found in profile config".to_string())?;
 
     let mut nodes = Vec::new();
     for outbound in outbounds {
         let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector" && outbound_type != "direct" && outbound_type != "block" && outbound_type != "dns" {
+        if outbound_type != "selector"
+            && outbound_type != "direct"
+            && outbound_type != "block"
+            && outbound_type != "dns"
+        {
             nodes.push(outbound.clone());
         }
     }
@@ -439,7 +508,9 @@ pub fn get_profile_outbounds(app: tauri::AppHandle, profile_id: String) -> Resul
 }
 
 pub fn get_active_profile_id(app: &tauri::AppHandle) -> Result<Option<String>, String> {
-    let mut path = app.path().app_data_dir()
+    let mut path = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     path.push("profiles.json");
     if !path.exists() {

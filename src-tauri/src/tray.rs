@@ -1,13 +1,13 @@
 use tauri::{
-    menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder, CheckMenuItemBuilder},
+    menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{TrayIcon, TrayIconBuilder},
-    AppHandle, Manager, Wry, Emitter,
+    AppHandle, Emitter, Manager, Wry,
 };
 
 /// Safely unsets system proxy and terminates the sing-box process
 pub fn perform_clean_cleanup(app: &AppHandle) {
     let state = app.state::<crate::state::ProxyState>();
-    
+
     // 1. Kill the sing-box sidecar process if it's running
     if let Ok(mut process_lock) = state.child_process.lock() {
         if let Some(child) = process_lock.take() {
@@ -19,7 +19,7 @@ pub fn perform_clean_cleanup(app: &AppHandle) {
     if let Ok(mut session_lock) = state.active_session_id.lock() {
         *session_lock = None;
     }
-    
+
     // 3. Clear OS proxy settings
     let _ = crate::os::disable_system_proxy();
 }
@@ -49,7 +49,11 @@ fn get_active_profile_name(app: &AppHandle) -> String {
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(name) = val.get("activeConfig").and_then(|c| c.get("name")).and_then(|n| n.as_str()) {
+                    if let Some(name) = val
+                        .get("activeConfig")
+                        .and_then(|c| c.get("name"))
+                        .and_then(|n| n.as_str())
+                    {
                         return name.to_string();
                     }
                 }
@@ -69,11 +73,15 @@ fn get_node_tags_from_active_config(app: &AppHandle) -> Vec<(String, String)> {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                     if let Some(outbounds) = val.get("outbounds").and_then(|o| o.as_array()) {
                         let skip = ["direct", "block", "dns-out", "auto-select"];
-                        return outbounds.iter()
+                        return outbounds
+                            .iter()
                             .filter_map(|o| {
                                 let tag = o.get("tag")?.as_str()?;
                                 let otype = o.get("type")?.as_str()?;
-                                if skip.contains(&tag) || ["direct", "block", "dns", "selector", "urltest"].contains(&otype) {
+                                if skip.contains(&tag)
+                                    || ["direct", "block", "dns", "selector", "urltest"]
+                                        .contains(&otype)
+                                {
                                     None
                                 } else {
                                     Some((tag.to_string(), otype.to_string()))
@@ -130,7 +138,10 @@ fn set_proxy_mode(app: &AppHandle, mode: &str) {
             serde_json::json!({})
         };
         settings["proxyMode"] = serde_json::json!(mode);
-        let _ = std::fs::write(&path, serde_json::to_string_pretty(&settings).unwrap_or_default());
+        let _ = std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&settings).unwrap_or_default(),
+        );
     }
 }
 
@@ -154,7 +165,11 @@ pub fn update_tray_tooltip(app: &AppHandle) {
         crate::state::ConnectionStatus::Connected => {
             let down = state.download_speed.lock().map(|v| *v).unwrap_or(0);
             let up = state.upload_speed.lock().map(|v| *v).unwrap_or(0);
-            format!("X-Link — \u{2193} {} \u{2191} {}", format_speed(down), format_speed(up))
+            format!(
+                "X-Link — \u{2193} {} \u{2191} {}",
+                format_speed(down),
+                format_speed(up)
+            )
         }
         crate::state::ConnectionStatus::Connecting => "X-Link — Connecting...".to_string(),
         crate::state::ConnectionStatus::Disconnected => "X-Link — Disconnected".to_string(),
@@ -189,7 +204,8 @@ async fn handle_toggle_proxy(app: AppHandle) -> Result<(), String> {
         crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, None).await?;
     } else {
         let selected_tag = crate::commands::config::get_selected_outbound_tag(&app);
-        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, selected_tag).await?;
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, selected_tag)
+            .await?;
     }
 
     // Update tray state
@@ -213,19 +229,31 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     let server_text = format!("Active Server: {}", selected_node);
 
     let toggle_text = match status {
-        crate::state::ConnectionStatus::Connected | crate::state::ConnectionStatus::Connecting => "Disconnect",
+        crate::state::ConnectionStatus::Connected | crate::state::ConnectionStatus::Connecting => {
+            "Disconnect"
+        }
         crate::state::ConnectionStatus::Disconnected => "Connect",
     };
 
     let current_mode = get_current_proxy_mode(app);
 
     let menu = Menu::new(app).map_err(|e| e.to_string())?;
-    
-    let info_item = MenuItemBuilder::new(info_text).enabled(false).build(app).map_err(|e| e.to_string())?;
-    let server_item = MenuItemBuilder::new(server_text).enabled(false).build(app).map_err(|e| e.to_string())?;
+
+    let info_item = MenuItemBuilder::new(info_text)
+        .enabled(false)
+        .build(app)
+        .map_err(|e| e.to_string())?;
+    let server_item = MenuItemBuilder::new(server_text)
+        .enabled(false)
+        .build(app)
+        .map_err(|e| e.to_string())?;
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
-    let toggle_item = MenuItemBuilder::with_id("toggle", toggle_text).build(app).map_err(|e| e.to_string())?;
-    let restart_proxy_item = MenuItemBuilder::with_id("restart_proxy", "Restart Proxy").build(app).map_err(|e| e.to_string())?;
+    let toggle_item = MenuItemBuilder::with_id("toggle", toggle_text)
+        .build(app)
+        .map_err(|e| e.to_string())?;
+    let restart_proxy_item = MenuItemBuilder::with_id("restart_proxy", "Restart Proxy")
+        .build(app)
+        .map_err(|e| e.to_string())?;
 
     // Build Proxy Mode submenu
     let mode_system = CheckMenuItemBuilder::with_id("mode:system", "System Proxy")
@@ -246,7 +274,7 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     menu.append(&server_item).map_err(|e| e.to_string())?;
     menu.append(&sep1).map_err(|e| e.to_string())?;
     menu.append(&mode_submenu).map_err(|e| e.to_string())?;
-    
+
     // Add server nodes submenu when connected
     if status == crate::state::ConnectionStatus::Connected {
         let nodes = get_node_tags_from_active_config(app);
@@ -271,12 +299,19 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     }
 
     menu.append(&toggle_item).map_err(|e| e.to_string())?;
-    menu.append(&restart_proxy_item).map_err(|e| e.to_string())?;
+    menu.append(&restart_proxy_item)
+        .map_err(|e| e.to_string())?;
 
-    let open_item = MenuItemBuilder::with_id("open", "Open Dashboard").build(app).map_err(|e| e.to_string())?;
-    let restart_app_item = MenuItemBuilder::with_id("restart_app", "Restart X-Link").build(app).map_err(|e| e.to_string())?;
+    let open_item = MenuItemBuilder::with_id("open", "Open Dashboard")
+        .build(app)
+        .map_err(|e| e.to_string())?;
+    let restart_app_item = MenuItemBuilder::with_id("restart_app", "Restart X-Link")
+        .build(app)
+        .map_err(|e| e.to_string())?;
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
-    let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app).map_err(|e| e.to_string())?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Quit")
+        .build(app)
+        .map_err(|e| e.to_string())?;
 
     menu.append(&open_item).map_err(|e| e.to_string())?;
     menu.append(&restart_app_item).map_err(|e| e.to_string())?;
@@ -303,8 +338,11 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<crate::state::ProxyState>();
                     let _ = crate::commands::proxy::switch_node_hot(
-                        app_handle.clone(), state.clone(), node_tag
-                    ).await;
+                        app_handle.clone(),
+                        state.clone(),
+                        node_tag,
+                    )
+                    .await;
                     update_tray(&app_handle);
                     let _ = app_handle.emit("node-switched", ());
                 });
@@ -321,10 +359,23 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
 
                     // If currently connected, restart proxy with the new mode
                     if status != crate::state::ConnectionStatus::Disconnected {
-                        let selected_tag = crate::commands::config::get_selected_outbound_tag(&app_handle);
-                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), false, None).await;
+                        let selected_tag =
+                            crate::commands::config::get_selected_outbound_tag(&app_handle);
+                        let _ = crate::commands::proxy::toggle_proxy(
+                            app_handle.clone(),
+                            state.clone(),
+                            false,
+                            None,
+                        )
+                        .await;
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), true, selected_tag).await;
+                        let _ = crate::commands::proxy::toggle_proxy(
+                            app_handle.clone(),
+                            state.clone(),
+                            true,
+                            selected_tag,
+                        )
+                        .await;
                     }
 
                     update_tray(&app_handle);
@@ -344,14 +395,27 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {
                         let state = app_handle.state::<crate::state::ProxyState>();
-                        let selected_tag = crate::commands::config::get_selected_outbound_tag(&app_handle);
-                        
+                        let selected_tag =
+                            crate::commands::config::get_selected_outbound_tag(&app_handle);
+
                         // Stop the proxy
-                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), false, None).await;
+                        let _ = crate::commands::proxy::toggle_proxy(
+                            app_handle.clone(),
+                            state.clone(),
+                            false,
+                            None,
+                        )
+                        .await;
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        
+
                         // Start the proxy again
-                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), true, selected_tag).await;
+                        let _ = crate::commands::proxy::toggle_proxy(
+                            app_handle.clone(),
+                            state.clone(),
+                            true,
+                            selected_tag,
+                        )
+                        .await;
                         update_tray(&app_handle);
                     });
                 }

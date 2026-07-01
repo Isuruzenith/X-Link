@@ -6054,6 +6054,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "is_elevated",
+ "libc",
  "log 0.4.30",
  "percent-encoding",
  "reqwest 0.12.28",

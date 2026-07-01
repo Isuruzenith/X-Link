@@ -2,11 +2,10 @@ use std::path::Path;
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 
-pub async fn validate_singbox_config(
-    app: &AppHandle,
-    config_path: &Path,
-) -> Result<(), String> {
-    let sidecar = app.shell().sidecar("sing-box")
+pub async fn validate_singbox_config(app: &AppHandle, config_path: &Path) -> Result<(), String> {
+    let sidecar = app
+        .shell()
+        .sidecar("sing-box")
         .map_err(|e| format!("Failed to find sing-box sidecar: {}", e))?;
 
     let output = sidecar

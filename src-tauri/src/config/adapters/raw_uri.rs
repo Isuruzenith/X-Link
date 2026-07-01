@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use serde_json::Value;
-use url::Url;
 use super::SingBoxOutbound;
+use serde_json::Value;
+use std::collections::HashMap;
+use url::Url;
 
 fn decode_base64_padded(s: &str) -> Result<Vec<u8>, String> {
     let mut s = s.trim().to_string();
@@ -14,32 +14,47 @@ fn decode_base64_padded(s: &str) -> Result<Vec<u8>, String> {
 }
 
 fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
-    let security = query_params.get("security").map(|s| s.as_str()).unwrap_or("");
+    let security = query_params
+        .get("security")
+        .map(|s| s.as_str())
+        .unwrap_or("");
     let sni = query_params.get("sni").or_else(|| query_params.get("peer"));
-    
+
     if security == "tls" || security == "reality" || sni.is_some() {
         let mut tls = HashMap::new();
         tls.insert("enabled".to_string(), Value::Bool(true));
-        
+
         if let Some(sni_val) = sni {
-            tls.insert("server_name".to_string(), Value::String(sni_val.to_string()));
+            tls.insert(
+                "server_name".to_string(),
+                Value::String(sni_val.to_string()),
+            );
         }
-        
+
         if let Some(fp) = query_params.get("fp") {
             let mut utls = HashMap::new();
             utls.insert("enabled".to_string(), Value::Bool(true));
             utls.insert("fingerprint".to_string(), Value::String(fp.to_string()));
-            tls.insert("utls".to_string(), Value::Object(utls.into_iter().collect()));
+            tls.insert(
+                "utls".to_string(),
+                Value::Object(utls.into_iter().collect()),
+            );
         }
-        
-        let is_insecure = query_params.get("allowInsecure").map(|s| s == "1" || s == "true")
-            .or_else(|| query_params.get("insecure").map(|s| s == "1" || s == "true"))
+
+        let is_insecure = query_params
+            .get("allowInsecure")
+            .map(|s| s == "1" || s == "true")
+            .or_else(|| {
+                query_params
+                    .get("insecure")
+                    .map(|s| s == "1" || s == "true")
+            })
             .unwrap_or(false);
-            
+
         if is_insecure {
             tls.insert("insecure".to_string(), Value::Bool(true));
         }
-        
+
         if security == "reality" {
             let mut reality = HashMap::new();
             reality.insert("enabled".to_string(), Value::Bool(true));
@@ -49,17 +64,23 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
             if let Some(sid) = query_params.get("sid") {
                 reality.insert("short_id".to_string(), Value::String(sid.to_string()));
             }
-            tls.insert("reality".to_string(), Value::Object(reality.into_iter().collect()));
+            tls.insert(
+                "reality".to_string(),
+                Value::Object(reality.into_iter().collect()),
+            );
         }
-        
+
         if let Some(alpn_str) = query_params.get("alpn") {
-            let alpn_list: Vec<Value> = alpn_str.split(',').map(|s| Value::String(s.to_string())).collect();
+            let alpn_list: Vec<Value> = alpn_str
+                .split(',')
+                .map(|s| Value::String(s.to_string()))
+                .collect();
             tls.insert("alpn".to_string(), Value::Array(alpn_list));
         }
 
         return Some(Value::Object(tls.into_iter().collect()));
     }
-    
+
     None
 }
 
@@ -70,7 +91,10 @@ fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Va
     }
 
     let mut transport = HashMap::new();
-    transport.insert("type".to_string(), Value::String(transport_type.to_string()));
+    transport.insert(
+        "type".to_string(),
+        Value::String(transport_type.to_string()),
+    );
 
     match transport_type {
         "ws" | "httpupgrade" => {
@@ -80,12 +104,21 @@ fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Va
             if let Some(host) = query_params.get("host") {
                 let mut headers = HashMap::new();
                 headers.insert("Host".to_string(), Value::String(host.to_string()));
-                transport.insert("headers".to_string(), Value::Object(headers.into_iter().collect()));
+                transport.insert(
+                    "headers".to_string(),
+                    Value::Object(headers.into_iter().collect()),
+                );
             }
         }
         "grpc" => {
-            if let Some(service_name) = query_params.get("serviceName").or_else(|| query_params.get("servicename")) {
-                transport.insert("service_name".to_string(), Value::String(service_name.to_string()));
+            if let Some(service_name) = query_params
+                .get("serviceName")
+                .or_else(|| query_params.get("servicename"))
+            {
+                transport.insert(
+                    "service_name".to_string(),
+                    Value::String(service_name.to_string()),
+                );
             }
         }
         _ => {}
@@ -99,12 +132,17 @@ fn parse_shadowsocks_uri(trimmed: &str) -> Option<(String, String, String, Strin
         return None;
     }
     let s = &trimmed[5..];
-    
+
     // Split fragment (#tag)
     let parts: Vec<&str> = s.split('#').collect();
     let main_with_query = parts[0];
-    let tag = parts.get(1)
-        .map(|f| percent_encoding::percent_decode_str(f).decode_utf8_lossy().into_owned())
+    let tag = parts
+        .get(1)
+        .map(|f| {
+            percent_encoding::percent_decode_str(f)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
         .unwrap_or_else(|| "Shadowsocks Proxy".to_string());
 
     // Split query (?plugin=...)
@@ -126,7 +164,9 @@ fn parse_shadowsocks_uri(trimmed: &str) -> Option<(String, String, String, Strin
             }
         } else {
             // Plain userinfo
-            let userinfo_dec = percent_encoding::percent_decode_str(userinfo_part).decode_utf8_lossy().into_owned();
+            let userinfo_dec = percent_encoding::percent_decode_str(userinfo_part)
+                .decode_utf8_lossy()
+                .into_owned();
             let colon_parts: Vec<&str> = userinfo_dec.splitn(2, ':').collect();
             if colon_parts.len() == 2 {
                 (colon_parts[0].to_string(), colon_parts[1].to_string())
@@ -187,8 +227,11 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             let b64_part = &trimmed[8..];
             let parts: Vec<&str> = b64_part.split('#').collect();
             let b64_clean = parts[0];
-            let fragment_tag = parts.get(1)
-                .map(|t| percent_encoding::percent_decode_str(t).decode_utf8_lossy().into_owned());
+            let fragment_tag = parts.get(1).map(|t| {
+                percent_encoding::percent_decode_str(t)
+                    .decode_utf8_lossy()
+                    .into_owned()
+            });
 
             let decoded_b64 = percent_encoding::percent_decode_str(b64_clean).decode_utf8_lossy();
             // Decode base64 JSON
@@ -196,26 +239,35 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 Ok(bytes) => bytes,
                 Err(_) => continue, // skip invalid vmess URIs
             };
-            
+
             let json: Value = match serde_json::from_slice(&decoded) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
 
-            let tag = json.get("ps")
+            let tag = json
+                .get("ps")
                 .and_then(|t| t.as_str())
                 .map(|s| s.to_string())
                 .or(fragment_tag)
                 .unwrap_or_else(|| "VMess Proxy".to_string());
-            let server = json.get("add").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            
+            let server = json
+                .get("add")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+
             let port = match json.get("port") {
                 Some(Value::Number(n)) => n.as_u64().unwrap_or(0) as u16,
                 Some(Value::String(s)) => s.parse::<u16>().unwrap_or(0),
                 _ => 0,
             };
 
-            let uuid = json.get("id").and_then(|u| u.as_str()).unwrap_or("").to_string();
+            let uuid = json
+                .get("id")
+                .and_then(|u| u.as_str())
+                .unwrap_or("")
+                .to_string();
             let alter_id = json.get("aid").and_then(|a| a.as_u64()).unwrap_or(0);
 
             let mut fields = HashMap::new();
@@ -235,13 +287,16 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             if tls_enabled {
                 let mut tls = HashMap::new();
                 tls.insert("enabled".to_string(), Value::Bool(true));
-                
+
                 let host = json.get("host").and_then(|h| h.as_str());
                 let sni = json.get("sni").and_then(|s| s.as_str()).or(host);
                 if let Some(sni_val) = sni {
-                    tls.insert("server_name".to_string(), Value::String(sni_val.to_string()));
+                    tls.insert(
+                        "server_name".to_string(),
+                        Value::String(sni_val.to_string()),
+                    );
                 }
-                
+
                 let is_insecure = match json.get("verify_cert") {
                     Some(Value::Bool(b)) => !*b,
                     _ => match json.get("allowInsecure") {
@@ -249,7 +304,7 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                         Some(Value::Number(n)) => n.as_u64() == Some(1),
                         Some(Value::String(s)) => s == "1" || s == "true",
                         _ => false,
-                    }
+                    },
                 };
                 if is_insecure {
                     tls.insert("insecure".to_string(), Value::Bool(true));
@@ -268,9 +323,15 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                     if let Some(host) = json.get("host").and_then(|h| h.as_str()) {
                         let mut headers = HashMap::new();
                         headers.insert("Host".to_string(), Value::String(host.to_string()));
-                        transport.insert("headers".to_string(), Value::Object(headers.into_iter().collect()));
+                        transport.insert(
+                            "headers".to_string(),
+                            Value::Object(headers.into_iter().collect()),
+                        );
                     }
-                    fields.insert("transport".to_string(), Value::Object(transport.into_iter().collect()));
+                    fields.insert(
+                        "transport".to_string(),
+                        Value::Object(transport.into_iter().collect()),
+                    );
                 }
             }
 
@@ -305,8 +366,13 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             Err(_) => continue,
         };
 
-        let tag = url.fragment()
-            .map(|f| percent_encoding::percent_decode_str(f).decode_utf8_lossy().into_owned())
+        let tag = url
+            .fragment()
+            .map(|f| {
+                percent_encoding::percent_decode_str(f)
+                    .decode_utf8_lossy()
+                    .into_owned()
+            })
             .unwrap_or_else(|| "Proxy Node".to_string());
 
         let server = url.host_str().unwrap_or("").to_string();
@@ -322,21 +388,28 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 let uuid = url.username().to_string();
                 fields.insert("uuid".to_string(), Value::String(uuid));
 
-                let query_params: HashMap<String, String> = url.query_pairs().into_owned().collect();
-                
+                let query_params: HashMap<String, String> =
+                    url.query_pairs().into_owned().collect();
+
                 let mut flow_val = query_params.get("flow").map(|s| s.to_string());
                 if flow_val.is_none() {
-                    let security = query_params.get("security").map(|s| s.as_str()).unwrap_or("");
-                    let net_type = query_params.get("type").map(|s| s.as_str()).unwrap_or("tcp");
+                    let security = query_params
+                        .get("security")
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    let net_type = query_params
+                        .get("type")
+                        .map(|s| s.as_str())
+                        .unwrap_or("tcp");
                     if security == "reality" && net_type == "tcp" {
                         flow_val = Some("xtls-rprx-vision".to_string());
                     }
                 }
-                
+
                 if let Some(flow) = flow_val {
                     fields.insert("flow".to_string(), Value::String(flow));
                 }
-                
+
                 if let Some(pe) = query_params.get("packetEncoding") {
                     fields.insert("packet_encoding".to_string(), Value::String(pe.to_string()));
                 }
@@ -360,7 +433,8 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 let password = url.username().to_string();
                 fields.insert("password".to_string(), Value::String(password));
 
-                let query_params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+                let query_params: HashMap<String, String> =
+                    url.query_pairs().into_owned().collect();
                 if let Some(tls) = parse_tls_settings(&query_params) {
                     fields.insert("tls".to_string(), tls);
                 }
@@ -396,19 +470,75 @@ mod tests {
         let ss_node = &res[0];
         assert_eq!(ss_node.outbound_type, "shadowsocks");
         assert_eq!(ss_node.tag, "Shadowsocks Node");
-        assert_eq!(ss_node.fields.get("server").and_then(|v| v.as_str()).unwrap(), "1.2.3.4");
-        assert_eq!(ss_node.fields.get("server_port").and_then(|v| v.as_u64()).unwrap(), 8388);
-        assert_eq!(ss_node.fields.get("method").and_then(|v| v.as_str()).unwrap(), "aes-256-gcm");
-        assert_eq!(ss_node.fields.get("password").and_then(|v| v.as_str()).unwrap(), "secretpassword");
+        assert_eq!(
+            ss_node
+                .fields
+                .get("server")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "1.2.3.4"
+        );
+        assert_eq!(
+            ss_node
+                .fields
+                .get("server_port")
+                .and_then(|v| v.as_u64())
+                .unwrap(),
+            8388
+        );
+        assert_eq!(
+            ss_node
+                .fields
+                .get("method")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "aes-256-gcm"
+        );
+        assert_eq!(
+            ss_node
+                .fields
+                .get("password")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "secretpassword"
+        );
 
         // Vless node check
         let vless_node = &res[1];
         assert_eq!(vless_node.outbound_type, "vless");
         assert_eq!(vless_node.tag, "Vless Node");
-        assert_eq!(vless_node.fields.get("server").and_then(|v| v.as_str()).unwrap(), "4.5.6.7");
-        assert_eq!(vless_node.fields.get("server_port").and_then(|v| v.as_u64()).unwrap(), 443);
-        assert_eq!(vless_node.fields.get("uuid").and_then(|v| v.as_str()).unwrap(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
-        assert_eq!(vless_node.fields.get("flow").and_then(|v| v.as_str()).unwrap(), "xtls-rprx-vision");
+        assert_eq!(
+            vless_node
+                .fields
+                .get("server")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "4.5.6.7"
+        );
+        assert_eq!(
+            vless_node
+                .fields
+                .get("server_port")
+                .and_then(|v| v.as_u64())
+                .unwrap(),
+            443
+        );
+        assert_eq!(
+            vless_node
+                .fields
+                .get("uuid")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        );
+        assert_eq!(
+            vless_node
+                .fields
+                .get("flow")
+                .and_then(|v| v.as_str())
+                .unwrap(),
+            "xtls-rprx-vision"
+        );
     }
 
     #[test]
@@ -421,19 +551,42 @@ mod tests {
         let vless_ws = &res[0];
         assert_eq!(vless_ws.outbound_type, "vless");
         assert_eq!(vless_ws.tag, "Vless WS");
-        let transport = vless_ws.fields.get("transport").unwrap().as_object().unwrap();
+        let transport = vless_ws
+            .fields
+            .get("transport")
+            .unwrap()
+            .as_object()
+            .unwrap();
         assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
         assert_eq!(transport.get("path").unwrap().as_str().unwrap(), "/chat");
         let headers = transport.get("headers").unwrap().as_object().unwrap();
-        assert_eq!(headers.get("Host").unwrap().as_str().unwrap(), "cloudflare.com");
+        assert_eq!(
+            headers.get("Host").unwrap().as_str().unwrap(),
+            "cloudflare.com"
+        );
 
         // Trojan gRPC check
         let trojan_grpc = &res[1];
         assert_eq!(trojan_grpc.outbound_type, "trojan");
         assert_eq!(trojan_grpc.tag, "Trojan gRPC");
-        let transport_grpc = trojan_grpc.fields.get("transport").unwrap().as_object().unwrap();
-        assert_eq!(transport_grpc.get("type").unwrap().as_str().unwrap(), "grpc");
-        assert_eq!(transport_grpc.get("service_name").unwrap().as_str().unwrap(), "grpc-test");
+        let transport_grpc = trojan_grpc
+            .fields
+            .get("transport")
+            .unwrap()
+            .as_object()
+            .unwrap();
+        assert_eq!(
+            transport_grpc.get("type").unwrap().as_str().unwrap(),
+            "grpc"
+        );
+        assert_eq!(
+            transport_grpc
+                .get("service_name")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "grpc-test"
+        );
     }
 
     #[test]
@@ -445,16 +598,38 @@ mod tests {
         let node = &res[0];
         assert_eq!(node.outbound_type, "vless");
         assert_eq!(node.tag, "Zoom-SG-Kavishka-300GB");
-        assert_eq!(node.fields.get("server").and_then(|v| v.as_str()).unwrap(), "azure.ezgateway.net");
-        assert_eq!(node.fields.get("server_port").and_then(|v| v.as_u64()).unwrap(), 443);
-        assert_eq!(node.fields.get("uuid").and_then(|v| v.as_str()).unwrap(), "88dacb71-7530-475b-9ed6-a431caef6b3f");
+        assert_eq!(
+            node.fields.get("server").and_then(|v| v.as_str()).unwrap(),
+            "azure.ezgateway.net"
+        );
+        assert_eq!(
+            node.fields
+                .get("server_port")
+                .and_then(|v| v.as_u64())
+                .unwrap(),
+            443
+        );
+        assert_eq!(
+            node.fields.get("uuid").and_then(|v| v.as_str()).unwrap(),
+            "88dacb71-7530-475b-9ed6-a431caef6b3f"
+        );
 
         let tls = node.fields.get("tls").unwrap().as_object().unwrap();
         assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
         assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "aka.ms");
         assert_eq!(tls.get("insecure").unwrap().as_bool().unwrap(), true);
-        assert_eq!(tls.get("alpn").unwrap().as_array().unwrap()[0].as_str().unwrap(), "h2");
-        assert_eq!(tls.get("alpn").unwrap().as_array().unwrap()[1].as_str().unwrap(), "http/1.1");
+        assert_eq!(
+            tls.get("alpn").unwrap().as_array().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "h2"
+        );
+        assert_eq!(
+            tls.get("alpn").unwrap().as_array().unwrap()[1]
+                .as_str()
+                .unwrap(),
+            "http/1.1"
+        );
         let utls = tls.get("utls").unwrap().as_object().unwrap();
         assert_eq!(utls.get("fingerprint").unwrap().as_str().unwrap(), "chrome");
 
@@ -462,7 +637,10 @@ mod tests {
         assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
         assert_eq!(transport.get("path").unwrap().as_str().unwrap(), "/azure");
         let headers = transport.get("headers").unwrap().as_object().unwrap();
-        assert_eq!(headers.get("Host").unwrap().as_str().unwrap(), "azure.ezgateway.net");
+        assert_eq!(
+            headers.get("Host").unwrap().as_str().unwrap(),
+            "azure.ezgateway.net"
+        );
     }
 
     #[test]
@@ -474,13 +652,25 @@ mod tests {
         let vmess = &res[0];
         assert_eq!(vmess.outbound_type, "vmess");
         assert_eq!(vmess.tag, "VMess Test Node");
-        assert_eq!(vmess.fields.get("server").unwrap().as_str().unwrap(), "1.2.3.4");
-        assert_eq!(vmess.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
-        assert_eq!(vmess.fields.get("uuid").unwrap().as_str().unwrap(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
-        
+        assert_eq!(
+            vmess.fields.get("server").unwrap().as_str().unwrap(),
+            "1.2.3.4"
+        );
+        assert_eq!(
+            vmess.fields.get("server_port").unwrap().as_u64().unwrap(),
+            443
+        );
+        assert_eq!(
+            vmess.fields.get("uuid").unwrap().as_str().unwrap(),
+            "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+        );
+
         let tls = vmess.fields.get("tls").unwrap().as_object().unwrap();
         assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
-        assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "sni.host");
+        assert_eq!(
+            tls.get("server_name").unwrap().as_str().unwrap(),
+            "sni.host"
+        );
 
         let transport = vmess.fields.get("transport").unwrap().as_object().unwrap();
         assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
@@ -519,10 +709,22 @@ mod tests {
         let node = &res[0];
         assert_eq!(node.outbound_type, "shadowsocks");
         assert_eq!(node.tag, "Legacy Node");
-        assert_eq!(node.fields.get("server").unwrap().as_str().unwrap(), "1.2.3.4");
-        assert_eq!(node.fields.get("server_port").unwrap().as_u64().unwrap(), 8388);
-        assert_eq!(node.fields.get("method").unwrap().as_str().unwrap(), "aes-128-cfb");
-        assert_eq!(node.fields.get("password").unwrap().as_str().unwrap(), "password");
+        assert_eq!(
+            node.fields.get("server").unwrap().as_str().unwrap(),
+            "1.2.3.4"
+        );
+        assert_eq!(
+            node.fields.get("server_port").unwrap().as_u64().unwrap(),
+            8388
+        );
+        assert_eq!(
+            node.fields.get("method").unwrap().as_str().unwrap(),
+            "aes-128-cfb"
+        );
+        assert_eq!(
+            node.fields.get("password").unwrap().as_str().unwrap(),
+            "password"
+        );
     }
 
     #[test]
@@ -534,10 +736,22 @@ mod tests {
         let node = &res[0];
         assert_eq!(node.outbound_type, "shadowsocks");
         assert_eq!(node.tag, "Plain Node");
-        assert_eq!(node.fields.get("server").unwrap().as_str().unwrap(), "192.168.1.100");
-        assert_eq!(node.fields.get("server_port").unwrap().as_u64().unwrap(), 8888);
-        assert_eq!(node.fields.get("method").unwrap().as_str().unwrap(), "2022-blake3-aes-128-gcm");
-        assert_eq!(node.fields.get("password").unwrap().as_str().unwrap(), "password_string");
+        assert_eq!(
+            node.fields.get("server").unwrap().as_str().unwrap(),
+            "192.168.1.100"
+        );
+        assert_eq!(
+            node.fields.get("server_port").unwrap().as_u64().unwrap(),
+            8888
+        );
+        assert_eq!(
+            node.fields.get("method").unwrap().as_str().unwrap(),
+            "2022-blake3-aes-128-gcm"
+        );
+        assert_eq!(
+            node.fields.get("password").unwrap().as_str().unwrap(),
+            "password_string"
+        );
     }
 
     #[test]
@@ -549,11 +763,25 @@ mod tests {
         let node1 = &res1[0];
         assert_eq!(node1.outbound_type, "vless");
         assert_eq!(node1.tag, "Danuwa-v2ray-dialog-zoom");
-        assert_eq!(node1.fields.get("server").unwrap().as_str().unwrap(), "178.128.16.26");
-        assert_eq!(node1.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
-        assert_eq!(node1.fields.get("flow").unwrap().as_str().unwrap(), "xtls-rprx-vision");
-        assert_eq!(node1.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "aka.ms");
-        
+        assert_eq!(
+            node1.fields.get("server").unwrap().as_str().unwrap(),
+            "178.128.16.26"
+        );
+        assert_eq!(
+            node1.fields.get("server_port").unwrap().as_u64().unwrap(),
+            443
+        );
+        assert_eq!(
+            node1.fields.get("flow").unwrap().as_str().unwrap(),
+            "xtls-rprx-vision"
+        );
+        assert_eq!(
+            node1.fields.get("tls").unwrap()["server_name"]
+                .as_str()
+                .unwrap(),
+            "aka.ms"
+        );
+
         // URI 2: Trojan WS TLS
         let uri2 = "trojan://fNeTGTI4KN@172.237.90.117:35287?path=%2FFREE%20By%20Tharuwa%20%280767597317%29&security=tls&alpn=h2%2Chttp%2F1.1&fp=chrome&type=ws&sni=zoom.us#Free%20By%20Tharuwa%20TLS%20ON";
         let res2 = adapt(uri2.as_bytes()).unwrap();
@@ -561,11 +789,27 @@ mod tests {
         let node2 = &res2[0];
         assert_eq!(node2.outbound_type, "trojan");
         assert_eq!(node2.tag, "Free By Tharuwa TLS ON");
-        assert_eq!(node2.fields.get("server").unwrap().as_str().unwrap(), "172.237.90.117");
-        assert_eq!(node2.fields.get("server_port").unwrap().as_u64().unwrap(), 35287);
-        assert_eq!(node2.fields.get("transport").unwrap()["path"].as_str().unwrap(), "/FREE By Tharuwa (0767597317)");
-        assert_eq!(node2.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "zoom.us");
-        
+        assert_eq!(
+            node2.fields.get("server").unwrap().as_str().unwrap(),
+            "172.237.90.117"
+        );
+        assert_eq!(
+            node2.fields.get("server_port").unwrap().as_u64().unwrap(),
+            35287
+        );
+        assert_eq!(
+            node2.fields.get("transport").unwrap()["path"]
+                .as_str()
+                .unwrap(),
+            "/FREE By Tharuwa (0767597317)"
+        );
+        assert_eq!(
+            node2.fields.get("tls").unwrap()["server_name"]
+                .as_str()
+                .unwrap(),
+            "zoom.us"
+        );
+
         // URI 3: VLESS WS TLS
         let uri3 = "vless://408172dd-f3c7-4229-aff7-a741f78bda55@azureedge.duckdns.org:443?alpn=h2%2Chttp%2F1.1&encryption=none&fp=chrome&host=azureedge.duckdns.org&path=%2Fazureedge&security=tls&sni=aka.ms&type=ws#One-Piece-Zoom-In";
         let res3 = adapt(uri3.as_bytes()).unwrap();
@@ -573,10 +817,31 @@ mod tests {
         let node3 = &res3[0];
         assert_eq!(node3.outbound_type, "vless");
         assert_eq!(node3.tag, "One-Piece-Zoom-In");
-        assert_eq!(node3.fields.get("server").unwrap().as_str().unwrap(), "azureedge.duckdns.org");
-        assert_eq!(node3.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
-        assert_eq!(node3.fields.get("transport").unwrap()["path"].as_str().unwrap(), "/azureedge");
-        assert_eq!(node3.fields.get("transport").unwrap()["headers"]["Host"].as_str().unwrap(), "azureedge.duckdns.org");
-        assert_eq!(node3.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "aka.ms");
+        assert_eq!(
+            node3.fields.get("server").unwrap().as_str().unwrap(),
+            "azureedge.duckdns.org"
+        );
+        assert_eq!(
+            node3.fields.get("server_port").unwrap().as_u64().unwrap(),
+            443
+        );
+        assert_eq!(
+            node3.fields.get("transport").unwrap()["path"]
+                .as_str()
+                .unwrap(),
+            "/azureedge"
+        );
+        assert_eq!(
+            node3.fields.get("transport").unwrap()["headers"]["Host"]
+                .as_str()
+                .unwrap(),
+            "azureedge.duckdns.org"
+        );
+        assert_eq!(
+            node3.fields.get("tls").unwrap()["server_name"]
+                .as_str()
+                .unwrap(),
+            "aka.ms"
+        );
     }
 }
