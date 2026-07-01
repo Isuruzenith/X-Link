@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { useProfileStore } from './profileStore';
 import { useLogStore } from './logStore';
+import { useToastStore } from './toastStore';
 
 interface NodeEditorState {
   isOpen: boolean;
@@ -216,30 +217,29 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
         if (state.editHttpTls) outbound.tls = { enabled: true };
       }
 
-      if (!['socks', 'http', 'hysteria2', 'tuic'].includes(state.editProtocol)) {
-        if (state.editTlsEnabled) {
-          const tls: any = { enabled: true };
-          if (state.editServerName.trim()) tls.server_name = state.editServerName.trim();
-          if (state.editAllowInsecure) tls.insecure = true;
-          if (state.editAlpn.trim()) tls.alpn = state.editAlpn.split(',').map((s) => s.trim()).filter(Boolean);
-          if (state.editFingerprint) tls.utls = { enabled: true, fingerprint: state.editFingerprint };
-          if (state.editRealityEnabled) {
-            if (!state.editPublicKey.trim()) {
-              set({ saveError: 'Reality Public Key required.', isSaving: false });
-              return;
-            }
-            tls.reality = { enabled: true, public_key: state.editPublicKey.trim(), short_id: state.editShortId.trim() || undefined };
+      const needTls = state.editTlsEnabled || ['hysteria2', 'tuic'].includes(state.editProtocol);
+      if (needTls && !['socks', 'http', 'shadowsocks'].includes(state.editProtocol)) {
+        const tls: any = { enabled: true };
+        if (state.editServerName.trim()) tls.server_name = state.editServerName.trim();
+        if (state.editAllowInsecure) tls.insecure = true;
+        if (state.editAlpn.trim()) tls.alpn = state.editAlpn.split(',').map((s) => s.trim()).filter(Boolean);
+        if (state.editFingerprint) tls.utls = { enabled: true, fingerprint: state.editFingerprint };
+        if (state.editRealityEnabled && !['hysteria2', 'tuic'].includes(state.editProtocol)) {
+          if (!state.editPublicKey.trim()) {
+            set({ saveError: 'Reality Public Key required.', isSaving: false });
+            return;
           }
-          outbound.tls = tls;
+          tls.reality = { enabled: true, public_key: state.editPublicKey.trim(), short_id: state.editShortId.trim() || undefined };
         }
+        outbound.tls = tls;
+      }
 
-        if (state.editNetwork && state.editNetwork !== 'tcp') {
-          const transport: any = { type: state.editNetwork };
-          if (state.editPath.trim()) transport.path = state.editPath.trim();
-          if (state.editHost.trim()) transport.headers = { Host: state.editHost.trim() };
-          if (state.editServiceName.trim()) transport.service_name = state.editServiceName.trim();
-          outbound.transport = transport;
-        }
+      if (state.editNetwork && state.editNetwork !== 'tcp' && !['socks', 'http', 'hysteria2', 'tuic'].includes(state.editProtocol)) {
+        const transport: any = { type: state.editNetwork };
+        if (state.editPath.trim()) transport.path = state.editPath.trim();
+        if (state.editHost.trim()) transport.headers = { Host: state.editHost.trim() };
+        if (state.editServiceName.trim()) transport.service_name = state.editServiceName.trim();
+        outbound.transport = transport;
       }
 
       await invoke('update_node', { newOutbound: outbound });
@@ -254,9 +254,11 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
       }
 
       logStore.pushSystemLog(`Node "${outbound.tag}" updated and validated.`);
+      useToastStore.getState().addToast('success', `Server "${outbound.tag}" updated successfully.`, 'Server Saved');
       set({ isOpen: false });
     } catch (err) {
       set({ saveError: String(err) });
+      useToastStore.getState().addToast('error', `Failed to save server: ${err}`, 'Save Error');
     } finally {
       set({ isSaving: false });
     }

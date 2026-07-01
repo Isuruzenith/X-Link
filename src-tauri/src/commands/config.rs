@@ -336,6 +336,12 @@ pub async fn update_node(
     std::fs::write(&config_path, &pretty_config)
         .map_err(|e| format!("Failed to write config file: {}", e))?;
 
+    if let Ok(Some(profile_id)) = get_active_profile_id(&app) {
+        if let Ok(profile_path) = get_profile_config_path(&app, &profile_id) {
+            let _ = std::fs::write(&profile_path, &pretty_config);
+        }
+    }
+
     // Hot-reload if currently connected, preserving whichever node is selected
     let state = app.state::<crate::state::ProxyState>();
     if state.get_status() == crate::state::ConnectionStatus::Connected {
@@ -430,4 +436,26 @@ pub fn get_profile_outbounds(app: tauri::AppHandle, profile_id: String) -> Resul
         }
     }
     Ok(nodes)
+}
+
+pub fn get_active_profile_id(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let mut path = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    path.push("profiles.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read profiles.json: {}", e))?;
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse profiles.json: {}", e))?;
+    if let Some(val) = json.get("activeProfileId") {
+        if let Some(s) = val.as_str() {
+            return Ok(Some(s.to_string()));
+        }
+        if let Some(s) = val.get("value").and_then(|v| v.as_str()) {
+            return Ok(Some(s.to_string()));
+        }
+    }
+    Ok(None)
 }
