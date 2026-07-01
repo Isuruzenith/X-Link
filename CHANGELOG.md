@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.2.0...x-link-v0.3.0) (2026-07-01)
+
+
+### Features
+
+* add ToastContainer component for displaying global notifications ([5864940](https://github.com/Isuruzenith/X-Link/commit/5864940a45b9108ac147fe503d7b925e6a05208d))
+* create LogsView component with filtering, searching, and syntax-highlighted log display ([243514c](https://github.com/Isuruzenith/X-Link/commit/243514cca73948c05a8cfbae9e15fa1c1c7dd723))
+* implement backend command for importing and managing sing-box configurations and add node editor store for UI state management ([b0e96b6](https://github.com/Isuruzenith/X-Link/commit/b0e96b64107649701dec46e955af749c2dabea2c))
+* implement backend state management, proxy control commands, and frontend connection store ([236a590](https://github.com/Isuruzenith/X-Link/commit/236a5904d08d05cc33d6b0b3be6b48f4a0d2f681))
+* implement ConfigView UI with profile management, node selection, and latency monitoring components ([2204913](https://github.com/Isuruzenith/X-Link/commit/2204913662673fa9a14246fc9c9a37f3049049bc))
+* implement core proxy infrastructure and initial UI views for logs, connections, and dashboard ([3c85f38](https://github.com/Isuruzenith/X-Link/commit/3c85f389b0426d722a18dbbe3637ef7a0c70f7ff))
+* implement cross-platform system utility commands and connection store for managing sing-box and app lifecycle. ([6fc8718](https://github.com/Isuruzenith/X-Link/commit/6fc8718a396824e2dcc8b2fb79de8ea0f7b7a7b4))
+* implement log management store and real-time visualization interface with filtering and autoscroll ([989bfc6](https://github.com/Isuruzenith/X-Link/commit/989bfc6aa8880bf1e741bb822a0a4c7b51a3a7bc))
+* implement multi-profile management system with configuration import and node switching support ([1ae1044](https://github.com/Isuruzenith/X-Link/commit/1ae1044c84b5c923c961c8ee1c78f58f40148cf6))
+* implement multi-profile management system with persistent storage, node latency testing, and configuration import capabilities ([12f2822](https://github.com/Isuruzenith/X-Link/commit/12f2822648d59943173fbd8c9e814bd4f8ccf70b))
+* implement proxy auto-connection, system tray management, and traffic monitoring orchestration ([96cbe00](https://github.com/Isuruzenith/X-Link/commit/96cbe00ed6c75bbcd2902c231d923eba730a14f8))
+* implement sing-box proxy sidecar lifecycle management and configuration health checks ([eacc833](https://github.com/Isuruzenith/X-Link/commit/eacc8338a26cd50d2f416df56f360719164bc7c1))
+* implement system tray menu with proxy control and server switching support ([a1bec58](https://github.com/Isuruzenith/X-Link/commit/a1bec58bebac64b0e1080af6f849a523482cac4a))
+* implement toast notification system and integrate connection state feedback ([5be9b3a](https://github.com/Isuruzenith/X-Link/commit/5be9b3a3e59ebc39694bd6f0ba8c5b4600f21c98))
+* move wintun.dll resource to separate tauri.windows.conf.json ([1795d4f](https://github.com/Isuruzenith/X-Link/commit/1795d4fc94191d79f18e9453580d8b340bcb1c6b))
+
 ## [0.2.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.1.0...x-link-v0.2.0) (2026-07-01)
 
 
