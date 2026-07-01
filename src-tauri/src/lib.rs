@@ -126,7 +126,7 @@ pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
     }
     #[cfg(target_os = "windows")]
     {
-        if let Ok(resource_dir) = app.path().resource_dir() {
+        if let Ok(resource_dir) = app.path().resolve(".", tauri::path::BaseDirectory::Resource) {
             let wintun_src = resource_dir.join("binaries").join("wintun.dll");
             if wintun_src.exists() {
                 let mut paths_to_try = vec![];
