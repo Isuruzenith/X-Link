@@ -355,20 +355,30 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
         let exe_str = exe_path.to_str()
             .ok_or_else(|| "Failed to convert executable path to string".to_string())?;
 
-        let cmd = if enabled {
-            format!(
-                "reg add \"HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers\" /v \"{}\" /t REG_SZ /d \"~ RUNASADMIN\" /f",
-                exe_str
-            )
+        let mut command = std::process::Command::new("reg");
+        if enabled {
+            command.args([
+                "add",
+                "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers",
+                "/v",
+                exe_str,
+                "/t",
+                "REG_SZ",
+                "/d",
+                "~ RUNASADMIN",
+                "/f",
+            ]);
         } else {
-            format!(
-                "reg delete \"HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers\" /v \"{}\" /f",
-                exe_str
-            )
-        };
+            command.args([
+                "delete",
+                "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers",
+                "/v",
+                exe_str,
+                "/f",
+            ]);
+        }
 
-        let output = std::process::Command::new("cmd")
-            .args(["/C", &cmd])
+        let output = command
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output()
             .map_err(|e| format!("Registry exec failed: {}", e))?;

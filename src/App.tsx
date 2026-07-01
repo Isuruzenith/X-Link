@@ -127,6 +127,13 @@ export default function App() {
       pushSystemLog(`sing-box terminated (code ${e.payload ?? 'None'})`);
     });
 
+    // Listen to status changes from the backend (hot-reloads, swaps)
+    const unlistenStatus = listen<string>('proxy-status-changed', (e) => {
+      const status = e.payload as 'connected' | 'connecting' | 'disconnected';
+      setConnectionStatus(status);
+      setIsConnected(status === 'connected');
+    });
+
     // Fetch initial log buffer from Rust sidecar manager
     (async () => {
       try {
@@ -145,6 +152,7 @@ export default function App() {
     return () => {
       unlistenLog.then((f) => f());
       unlistenTerm.then((f) => f());
+      unlistenStatus.then((f) => f());
     };
   }, []);
 

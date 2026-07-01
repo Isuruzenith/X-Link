@@ -115,7 +115,7 @@ fn spawn_singbox_sidecar(
                     };
 
                     if is_active {
-                        state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
+                        state_for_logs.set_status(&app_for_logs, crate::state::ConnectionStatus::Disconnected);
                         *CONNECTION_START_TIME.lock().unwrap() = None;
                         crate::tray::perform_clean_cleanup(&app_for_logs);
                         crate::tray::update_tray(&app_for_logs);
@@ -560,7 +560,7 @@ pub async fn toggle_proxy(
 
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
-        state.set_status(crate::state::ConnectionStatus::Disconnected);
+        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
         {
             let mut process_lock = state.child_process.lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
@@ -625,7 +625,7 @@ pub async fn toggle_proxy(
         }
     }
 
-    state.set_status(crate::state::ConnectionStatus::Connecting);
+    state.set_status(&app, crate::state::ConnectionStatus::Connecting);
     crate::tray::update_tray(&app);
     // Forcefully kill any existing sing-box processes system-wide before starting
     #[cfg(target_os = "windows")]
@@ -665,7 +665,7 @@ pub async fn toggle_proxy(
     let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None) {
         Ok(res) => res,
         Err(e) => {
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(e);
         }
@@ -790,7 +790,7 @@ pub async fn toggle_proxy(
                 
             state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
         } else {
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(format!("Connection failed after 5 fallback attempts: {}", last_error));
         }
@@ -884,14 +884,14 @@ pub async fn toggle_proxy(
         let mixed_port = state.get_settings().mixed_port;
         if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", mixed_port) {
             crate::tray::perform_clean_cleanup(&app);
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(e);
         }
     }
 
     // Set connection global states
-    state.set_status(crate::state::ConnectionStatus::Connected);
+    state.set_status(&app, crate::state::ConnectionStatus::Connected);
     *CONNECTION_START_TIME.lock().unwrap() = Some(std::time::Instant::now());
 
     // Sync native system tray

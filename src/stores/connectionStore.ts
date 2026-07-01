@@ -152,11 +152,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     const logStore = useLogStore.getState();
     try {
       logStore.pushSystemLog('Registering app to always run as Administrator on next launches...');
-      await invoke('set_runas_admin', { enabled: true });
+      try {
+        await invoke('set_runas_admin', { enabled: true });
+      } catch (err) {
+        logStore.pushSystemLog(`Warning: Failed to set run-as-admin auto-elevation: ${err}`);
+      }
       logStore.pushSystemLog('Requesting session elevation...');
       await invoke('request_elevation');
     } catch (e) {
       logStore.pushSystemLog(`Elevation aborted: ${e}`);
+      useToastStore.getState().addToast('error', `Elevation failed: ${e}`, 'Elevation Error');
     }
   }
 }));
