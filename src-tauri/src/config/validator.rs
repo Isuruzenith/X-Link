@@ -12,6 +12,7 @@ pub async fn validate_singbox_config(
     let output = sidecar
         .args(["check", "-c", config_path.to_str().unwrap()])
         .env("ENABLE_DEPRECATED_GEOSITE", "true")
+        .env("ENABLE_DEPRECATED_GEOIP", "true")
         .output()
         .await
         .map_err(|e| format!("Failed to execute sing-box check: {}", e))?;

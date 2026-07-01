@@ -1,7 +1,7 @@
 use tauri::{
-    menu::{Menu, MenuItemBuilder, PredefinedMenuItem},
+    menu::{Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder, CheckMenuItemBuilder},
     tray::{TrayIcon, TrayIconBuilder},
-    AppHandle, Manager, Wry,
+    AppHandle, Manager, Wry, Emitter,
 };
 
 /// Safely unsets system proxy and terminates the sing-box process
@@ -42,40 +42,62 @@ pub fn get_close_to_tray_setting(app: &AppHandle) -> bool {
     true
 }
 
-/// Resolves the name of the currently active profile from profiles.json
+/// Resolves the name of the currently active config from profiles.json
 fn get_active_profile_name(app: &AppHandle) -> String {
-    let active_id = match crate::commands::proxy::get_active_profile_id() {
-        Some(id) => id,
-        None => return "Disconnected".to_string(),
-    };
-
-    if active_id == "default" {
-        return "Default Outbound".to_string();
-    }
-
     if let Ok(mut path) = app.path().app_data_dir() {
         path.push("profiles.json");
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                    // tauri-plugin-store stores standard collections under the key 'profiles'
-                    if let Some(profiles) = val.get("profiles").and_then(|p| p.as_array()) {
-                        for p in profiles {
-                            if let Some(id) = p.get("id").and_then(|i| i.as_str()) {
-                                if id == active_id {
-                                    if let Some(name) = p.get("name").and_then(|n| n.as_str()) {
-                                        return name.to_string();
-                                    }
-                                }
-                            }
-                        }
+                    if let Some(name) = val.get("activeConfig").and_then(|c| c.get("name")).and_then(|n| n.as_str()) {
+                        return name.to_string();
                     }
                 }
             }
         }
     }
 
-    format!("Profile ({})", &active_id[0..std::cmp::min(8, active_id.len())])
+    "Active Config".to_string()
+}
+
+/// Returns list of (tag, type) pairs from the active config
+fn get_node_tags_from_active_config(app: &AppHandle) -> Vec<(String, String)> {
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("active.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(outbounds) = val.get("outbounds").and_then(|o| o.as_array()) {
+                        let skip = ["direct", "block", "dns-out", "auto-select"];
+                        return outbounds.iter()
+                            .filter_map(|o| {
+                                let tag = o.get("tag")?.as_str()?;
+                                let otype = o.get("type")?.as_str()?;
+                                if skip.contains(&tag) || ["direct", "block", "dns", "selector", "urltest"].contains(&otype) {
+                                    None
+                                } else {
+                                    Some((tag.to_string(), otype.to_string()))
+                                }
+                            })
+                            .take(10)
+                            .collect();
+                    }
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Gets the currently selected outbound tag from the ProxyState
+fn get_selected_node_tag(app: &AppHandle) -> Option<String> {
+    let state = app.state::<crate::state::ProxyState>();
+    let result = if let Ok(lock) = state.selected_outbound_tag.lock() {
+        lock.clone()
+    } else {
+        None
+    };
+    result
 }
 
 fn get_disconnected_icon() -> tauri::image::Image<'static> {
@@ -99,27 +121,10 @@ async fn handle_toggle_proxy(app: AppHandle) -> Result<(), String> {
     let status = state.get_status();
 
     if status != crate::state::ConnectionStatus::Disconnected {
-        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, "".to_string()).await?;
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, None).await?;
     } else {
-        // Find the first available profile to connect to, fallback to "default"
-        let mut profile_id = "default".to_string();
-        if let Ok(mut path) = app.path().app_data_dir() {
-            path.push("profiles.json");
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(profiles) = val.get("profiles").and_then(|p| p.as_array()) {
-                            if let Some(first_profile) = profiles.first() {
-                                if let Some(id) = first_profile.get("id").and_then(|i| i.as_str()) {
-                                    profile_id = id.to_string();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, profile_id).await?;
+        let selected_tag = crate::commands::config::get_selected_outbound_tag(&app);
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, selected_tag).await?;
     }
 
     // Update tray state
@@ -149,13 +154,39 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     let info_item = MenuItemBuilder::new(info_text).enabled(false).build(app).map_err(|e| e.to_string())?;
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let toggle_item = MenuItemBuilder::with_id("toggle", toggle_text).build(app).map_err(|e| e.to_string())?;
+
+    menu.append(&info_item).map_err(|e| e.to_string())?;
+    menu.append(&sep1).map_err(|e| e.to_string())?;
+
+    // Add server nodes submenu when connected
+    if status == crate::state::ConnectionStatus::Connected {
+        let nodes = get_node_tags_from_active_config(app);
+        if !nodes.is_empty() {
+            let selected = get_selected_node_tag(app);
+            let mut submenu_builder = SubmenuBuilder::with_id(app, "servers", "Switch Server");
+            for (tag, _otype) in &nodes {
+                let is_selected = selected.as_deref() == Some(tag.as_str());
+                let item_id = format!("node:{}", tag);
+                let item = CheckMenuItemBuilder::with_id(item_id, tag)
+                    .checked(is_selected)
+                    .build(app)
+                    .map_err(|e| e.to_string())?;
+                submenu_builder = submenu_builder.item(&item);
+            }
+            let submenu = submenu_builder.build().map_err(|e| e.to_string())?;
+            menu.append(&submenu).map_err(|e| e.to_string())?;
+
+            let sep_nodes = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
+            menu.append(&sep_nodes).map_err(|e| e.to_string())?;
+        }
+    }
+
+    menu.append(&toggle_item).map_err(|e| e.to_string())?;
+
     let open_item = MenuItemBuilder::with_id("open", "Open Dashboard").build(app).map_err(|e| e.to_string())?;
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app).map_err(|e| e.to_string())?;
 
-    menu.append(&info_item).map_err(|e| e.to_string())?;
-    menu.append(&sep1).map_err(|e| e.to_string())?;
-    menu.append(&toggle_item).map_err(|e| e.to_string())?;
     menu.append(&open_item).map_err(|e| e.to_string())?;
     menu.append(&sep2).map_err(|e| e.to_string())?;
     menu.append(&quit_item).map_err(|e| e.to_string())?;
@@ -171,7 +202,23 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
         .icon(get_disconnected_icon())
         .menu(&menu)
         .on_menu_event(|app, event| {
-            match event.id.as_ref() {
+            let id = event.id.as_ref().to_string();
+            if id.starts_with("node:") {
+                // Handle node switch from tray
+                let node_tag = id.strip_prefix("node:").unwrap_or("").to_string();
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = app_handle.state::<crate::state::ProxyState>();
+                    let _ = crate::commands::proxy::switch_node_hot(
+                        app_handle.clone(), state.clone(), node_tag
+                    ).await;
+                    update_tray(&app_handle);
+                    // Notify frontend of the node change
+                    let _ = app_handle.emit("node-switched", ());
+                });
+                return;
+            }
+            match id.as_str() {
                 "toggle" => {
                     let app_handle = app.clone();
                     tauri::async_runtime::spawn(async move {

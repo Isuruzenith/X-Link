@@ -1,0 +1,400 @@
+import { create } from 'zustand';
+import { storeHelper, type Profile } from '../utils/store';
+import { useLogStore } from './logStore';
+import { useToastStore } from './toastStore';
+import { useConnectionStore } from './connectionStore';
+import { invoke } from '@tauri-apps/api/core';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
+import { open } from '@tauri-apps/plugin-dialog';
+
+interface ImportResult {
+  id: string;
+  name: string;
+  importedAt: number;
+  nodeCount: number;
+}
+
+interface ProfileState {
+  // Multi-profile state
+  profiles: Profile[];
+  activeProfileId: string | null;
+  nodes: any[];
+  selectedNodeTag: string | null;
+
+  // Import form state
+  importName: string;
+  importContent: string;
+  importError: string | null;
+  importSuccess: boolean;
+  isImporting: boolean;
+
+  // Latency testing
+  latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
+  isTestingLatency: boolean;
+
+  // Computed getters
+  activeProfile: () => Profile | null;
+
+  // Actions
+  initProfiles: () => Promise<void>;
+  refreshNodes: (profileId?: string) => Promise<void>;
+  selectNode: (node: any) => Promise<void>;
+  setImportName: (name: string) => void;
+  setImportContent: (content: string) => void;
+  setImportError: (err: string | null) => void;
+  pasteClipboard: () => Promise<void>;
+  pickFileAndImport: () => Promise<void>;
+  importConfig: () => Promise<void>;
+  deleteProfile: (profileId: string) => Promise<void>;
+  switchProfile: (profileId: string) => Promise<void>;
+  testAllNodes: () => Promise<void>;
+  updateNodesList: (newNodes: any[]) => void;
+}
+
+const detectNameFromContent = (text: string): string => {
+  const trimmedText = text.trim();
+  if (trimmedText.startsWith('vless://') || trimmedText.startsWith('vmess://') || trimmedText.startsWith('trojan://') || trimmedText.startsWith('ss://')) {
+    if (trimmedText.startsWith('vmess://')) {
+      try {
+        let b64 = trimmedText.replace('vmess://', '').trim();
+        while (b64.length % 4 !== 0) { b64 += '='; }
+        const decoded = atob(b64);
+        const parsed = JSON.parse(decoded);
+        if (parsed.ps) return parsed.ps;
+      } catch { /* ignore decode errors */ }
+    } else {
+      const parts = trimmedText.split('#');
+      if (parts.length > 1) return decodeURIComponent(parts[1].trim());
+    }
+  }
+  return '';
+};
+
+const mapImportError = (raw: string): string => {
+  const r = String(raw);
+  if (r.includes('sing-box check failed:')) return `Configuration is invalid: ${r.replace(/.*sing-box check failed:\s*/i, '')}`;
+  if (r.includes('Failed to read file:')) return 'Could not read the selected file.';
+  if (r.includes('No content or file path provided')) return 'Please paste a subscription link or select a file.';
+  if (r.includes('spawn_failed:')) return 'Could not start the proxy engine. Check logs for details.';
+  if (r.includes('Config has no outbounds')) return 'This configuration has no proxy nodes — please import a valid subscription.';
+  if (r.includes('Generated config is not valid JSON')) return 'Internal error: generated config is malformed. Please try re-importing.';
+  return r;
+};
+
+export const useProfileStore = create<ProfileState>((set, get) => ({
+  profiles: [],
+  activeProfileId: null,
+  nodes: [],
+  selectedNodeTag: null,
+  importName: '',
+  importContent: '',
+  importError: null,
+  importSuccess: false,
+  isImporting: false,
+  latencyResults: {},
+  isTestingLatency: false,
+
+  activeProfile: () => {
+    const { profiles, activeProfileId } = get();
+    return profiles.find((p) => p.id === activeProfileId) ?? null;
+  },
+
+  initProfiles: async () => {
+    // Run legacy migration first (converts old single-slot config to multi-profile)
+    await storeHelper.migrateFromLegacy();
+
+    const profiles = await storeHelper.getProfiles();
+    const activeProfileId = await storeHelper.getActiveProfileId();
+    set({ profiles, activeProfileId });
+
+    if (activeProfileId) {
+      await get().refreshNodes(activeProfileId);
+    }
+  },
+
+  refreshNodes: async (profileId) => {
+    const pid = profileId || get().activeProfileId;
+    if (!pid) {
+      set({ nodes: [], selectedNodeTag: null });
+      return;
+    }
+
+    try {
+      // Fetch outbounds for the specific profile (or fall back to active config)
+      const outbounds = await invoke<any[]>('get_profile_outbounds', { profileId: pid });
+      set({ nodes: outbounds || [] });
+
+      const profile = get().profiles.find((p) => p.id === pid);
+      let tag = profile?.selectedNodeTag ?? null;
+
+      if (!tag || !(outbounds || []).some((n) => n.tag === tag)) {
+        try {
+          const active = await invoke<any>('get_active_outbound');
+          tag = active?.tag || outbounds?.[0]?.tag || null;
+        } catch {
+          tag = outbounds?.[0]?.tag || null;
+        }
+      }
+
+      set({ selectedNodeTag: tag });
+
+      // Sync tag back to profile metadata
+      if (profile && tag !== profile.selectedNodeTag) {
+        const updatedProfiles = get().profiles.map((p) =>
+          p.id === pid ? { ...p, selectedNodeTag: tag } : p
+        );
+        set({ profiles: updatedProfiles });
+        await storeHelper.saveProfiles(updatedProfiles);
+      }
+    } catch {
+      set({ nodes: [] });
+    }
+  },
+
+  selectNode: async (node) => {
+    const { activeProfileId, profiles } = get();
+    const logStore = useLogStore.getState();
+    const connectionStore = useConnectionStore.getState();
+
+    set({ selectedNodeTag: node.tag });
+
+    // Update the profile's selectedNodeTag
+    if (activeProfileId) {
+      const updatedProfiles = profiles.map((p) =>
+        p.id === activeProfileId ? { ...p, selectedNodeTag: node.tag } : p
+      );
+      set({ profiles: updatedProfiles });
+      await storeHelper.saveProfiles(updatedProfiles);
+    }
+
+    if (connectionStore.isConnected) {
+      try {
+        logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
+        await invoke('switch_node_hot', { tag: node.tag });
+        logStore.pushSystemLog(`Successfully switched to "${node.tag}".`);
+      } catch (err) {
+        logStore.pushSystemLog(`Failed to switch node: ${err}`);
+      }
+    }
+  },
+
+  setImportName: (name) => set({ importName: name }),
+  setImportContent: (content) => {
+    set({ importContent: content });
+    if (!get().importName.trim()) {
+      const tagPart = detectNameFromContent(content);
+      if (tagPart) set({ importName: tagPart });
+    }
+  },
+  setImportError: (err) => set({ importError: err }),
+
+  pasteClipboard: async () => {
+    const logStore = useLogStore.getState();
+    try {
+      const text = await readText();
+      if (text) {
+        get().setImportContent(text);
+        logStore.pushSystemLog('Pasted config from clipboard.');
+      } else {
+        set({ importError: 'Clipboard is empty.' });
+      }
+    } catch {
+      set({ importError: 'Failed to read clipboard.' });
+    }
+  },
+
+  pickFileAndImport: async () => {
+    set({ importError: null, importSuccess: false });
+    const logStore = useLogStore.getState();
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: 'Config', extensions: ['json', 'yaml', 'yml', 'txt'] }],
+      });
+      if (!path || typeof path !== 'string') return;
+      set({ isImporting: true });
+      const fileName = path.split(/[\\/]/).pop() || 'Imported Config';
+      const name = get().importName.trim() || fileName.replace(/\.[^/.]+$/, '');
+      const profileId = crypto.randomUUID();
+
+      const result = await invoke<ImportResult>('import_config', { filePath: path, name, profileId });
+
+      const newProfile: Profile = {
+        id: result.id,
+        name: result.name,
+        type: 'file',
+        importedAt: result.importedAt,
+        lastUpdated: result.importedAt,
+        nodeCount: result.nodeCount,
+        selectedNodeTag: null,
+      };
+
+      const updatedProfiles = [...get().profiles, newProfile];
+      await storeHelper.saveProfiles(updatedProfiles);
+      await storeHelper.setActiveProfileId(newProfile.id);
+
+      set({
+        profiles: updatedProfiles,
+        activeProfileId: newProfile.id,
+        importSuccess: true,
+        importName: '',
+        importContent: '',
+      });
+
+      logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      setTimeout(() => set({ importSuccess: false }), 3000);
+      await get().refreshNodes(newProfile.id);
+    } catch (err) {
+      set({ importError: mapImportError(String(err)) });
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+
+  importConfig: async () => {
+    set({ importError: null, importSuccess: false, isImporting: true });
+    const { importContent, importName } = get();
+    const logStore = useLogStore.getState();
+
+    if (!importContent.trim()) {
+      set({ importError: 'Please paste config content.', isImporting: false });
+      return;
+    }
+
+    try {
+      const name = importName.trim() || 'My Config';
+      const profileId = crypto.randomUUID();
+
+      // Detect if the content is a subscription URL
+      const isUrl = importContent.trim().startsWith('http://') || importContent.trim().startsWith('https://');
+      const profileType: Profile['type'] = isUrl ? 'subscription' : 'manual';
+
+      const result = await invoke<ImportResult>('import_config', { content: importContent, name, profileId });
+
+      const newProfile: Profile = {
+        id: result.id,
+        name: result.name,
+        type: profileType,
+        subscriptionUrl: isUrl ? importContent.trim() : undefined,
+        importedAt: result.importedAt,
+        lastUpdated: result.importedAt,
+        nodeCount: result.nodeCount,
+        selectedNodeTag: null,
+      };
+
+      const updatedProfiles = [...get().profiles, newProfile];
+      await storeHelper.saveProfiles(updatedProfiles);
+      await storeHelper.setActiveProfileId(newProfile.id);
+
+      set({
+        profiles: updatedProfiles,
+        activeProfileId: newProfile.id,
+        importSuccess: true,
+        importName: '',
+        importContent: '',
+      });
+
+      logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      setTimeout(() => set({ importSuccess: false }), 3000);
+      await get().refreshNodes(newProfile.id);
+    } catch (err) {
+      set({ importError: mapImportError(String(err)) });
+    } finally {
+      set({ isImporting: false });
+    }
+  },
+
+  deleteProfile: async (profileId) => {
+    const logStore = useLogStore.getState();
+    const connectionStore = useConnectionStore.getState();
+    const { profiles, activeProfileId } = get();
+
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+
+    // If deleting the active profile while connected, disconnect first
+    if (profileId === activeProfileId && connectionStore.isConnected) {
+      try {
+        await invoke('toggle_proxy', { enable: false });
+      } catch { /* ignore disconnect errors */ }
+    }
+
+    // Remove from backend
+    try {
+      await invoke('delete_profile_config', { profileId });
+    } catch { /* ignore if file doesn't exist */ }
+
+    // Remove from store
+    await storeHelper.deleteProfile(profileId);
+    const updatedProfiles = profiles.filter((p) => p.id !== profileId);
+
+    const newActiveId = profileId === activeProfileId
+      ? (updatedProfiles.length > 0 ? updatedProfiles[0].id : null)
+      : activeProfileId;
+
+    set({ profiles: updatedProfiles, activeProfileId: newActiveId });
+
+    // If we switched to a new active profile, load its nodes
+    if (newActiveId && newActiveId !== activeProfileId) {
+      try {
+        await invoke('switch_profile', { profileId: newActiveId });
+      } catch { /* ignore */ }
+      await get().refreshNodes(newActiveId);
+    } else if (!newActiveId) {
+      set({ nodes: [], selectedNodeTag: null });
+    }
+
+    logStore.pushSystemLog(`Profile "${profile.name}" deleted.`);
+  },
+
+  switchProfile: async (profileId) => {
+    const logStore = useLogStore.getState();
+    const { profiles } = get();
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+
+    try {
+      await invoke('switch_profile', { profileId, selectedNodeTag: profile.selectedNodeTag });
+      await storeHelper.setActiveProfileId(profileId);
+      set({ activeProfileId: profileId });
+      logStore.pushSystemLog(`Switched to profile "${profile.name}".`);
+      await get().refreshNodes(profileId);
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to switch profile: ${err}`);
+    }
+  },
+
+  testAllNodes: async () => {
+    const { activeProfileId } = get();
+    const logStore = useLogStore.getState();
+    if (!activeProfileId) return;
+
+    set({ isTestingLatency: true, latencyResults: {} });
+    logStore.pushSystemLog('Testing latency for all nodes...');
+
+    try {
+      const results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
+        'test_all_nodes',
+        { profileId: activeProfileId }
+      );
+
+      const latencyMap: Record<string, { latencyMs: number | null; error: string | null }> = {};
+      for (const r of results) {
+        latencyMap[r.tag] = { latencyMs: r.latencyMs, error: r.error };
+      }
+
+      set({ latencyResults: latencyMap });
+
+      const successful = results.filter((r) => r.latencyMs !== null).length;
+      logStore.pushSystemLog(`Latency test complete: ${successful}/${results.length} nodes reachable.`);
+    } catch (err) {
+      logStore.pushSystemLog(`Latency test failed: ${err}`);
+    } finally {
+      set({ isTestingLatency: false });
+    }
+  },
+
+  updateNodesList: (newNodes) => set({ nodes: newNodes }),
+}));

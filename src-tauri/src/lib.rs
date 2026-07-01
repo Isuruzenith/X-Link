@@ -22,7 +22,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(ProxyState::new(7890, 7891, 7892))
+        .manage(ProxyState::new())
         .invoke_handler(tauri::generate_handler![
             commands::system::get_singbox_version,
             commands::system::get_app_version,
@@ -36,47 +36,29 @@ pub fn run() {
             commands::proxy::get_proxy_status,
             commands::proxy::get_traffic_stats,
             commands::proxy::toggle_proxy,
-            commands::proxy::reload_active_profile,
-            commands::profiles::import_subscription,
-            commands::profiles::import_file,
-            commands::profiles::import_from_clipboard,
-            commands::profiles::delete_profile,
-            commands::profiles::get_profile_outbound,
-            commands::profiles::get_profile_outbounds,
-            commands::profiles::update_profile_config
+            commands::proxy::reload_active_config,
+            commands::proxy::switch_node_hot,
+            commands::config::import_config,
+            commands::config::get_active_outbound,
+            commands::config::get_config_outbounds,
+            commands::config::update_node,
+            commands::config::delete_profile_config,
+            commands::config::switch_profile,
+            commands::config::get_profile_outbounds,
+            commands::latency::test_node_latency,
+            commands::latency::test_all_nodes
         ])
         .setup(|app| {
-            // Load saved ports from settings.json dynamically on boot
+            // Load and cache settings dynamically on boot
             // Run in a background thread to avoid blocking the app startup
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let state = app_handle.state::<ProxyState>();
-                let mut proxy_mode = "tun".to_string();
-                if let Ok(mut path) = app_handle.path().app_data_dir() {
-                    path.push("settings.json");
-                    if path.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(p) = val.get("mixedPort").and_then(|v| v.as_u64()) {
-                                    *state.mixed_port.lock().unwrap() = p as u16;
-                                }
-                                if let Some(p) = val.get("httpPort").and_then(|v| v.as_u64()) {
-                                    *state.http_port.lock().unwrap() = p as u16;
-                                }
-                                if let Some(p) = val.get("socksPort").and_then(|v| v.as_u64()) {
-                                    *state.socks_port.lock().unwrap() = p as u16;
-                                }
-                                if let Some(m) = val.get("proxyMode").and_then(|v| v.as_str()) {
-                                    proxy_mode = m.to_string();
-                                }
-                            }
-                        }
+                if let Ok(settings) = state.reload_settings(&app_handle) {
+                    // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
+                    if is_elevated::is_elevated() && settings.proxy_mode == "tun" {
+                        let _ = crate::commands::system::set_runas_admin(true);
                     }
-                }
-                
-                // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
-                if is_elevated::is_elevated() && proxy_mode == "tun" {
-                    let _ = crate::commands::system::set_runas_admin(true);
                 }
             });
 
@@ -136,7 +118,7 @@ pub fn run() {
     });
 }
 
-fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
+pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
     #[cfg(target_os = "windows")]
     {
         if let Ok(resource_dir) = app.path().resource_dir() {

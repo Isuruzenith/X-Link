@@ -1,24 +1,18 @@
 import { useRef, useEffect, useState } from 'react';
 import { Terminal, Copy, Trash2 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
+import { useLogStore } from '../stores/logStore';
 
-interface LogEntry { type: 'info' | 'warn' | 'error' | 'system'; text: string; }
-
-interface LogsViewProps {
-  logs: LogEntry[];
-  autoScroll: boolean;
-  onSetAutoScroll: (v: boolean) => void;
-  onClearLogs: () => void;
-  onCopyLogs: () => void;
-}
-
-export function LogsView({ logs, autoScroll, onSetAutoScroll, onClearLogs, onCopyLogs }: LogsViewProps) {
+export function LogsView() {
+  const { logs, autoScroll, setAutoScroll, clearLogs, copyLogs } = useLogStore();
   const endRef = useRef<HTMLDivElement>(null);
   const [filterText, setFilterText] = useState('');
   const [levelFilter, setLevelFilter] = useState<'all' | 'info' | 'warn' | 'error'>('all');
 
   useEffect(() => {
-    if (autoScroll && endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && endRef.current) {
+      endRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [logs, autoScroll]);
 
   const filtered = logs.filter((l) => {
@@ -40,10 +34,10 @@ export function LogsView({ logs, autoScroll, onSetAutoScroll, onClearLogs, onCop
       subtitle="Real-time sing-box process console output"
       actions={
         <div className="flex-row">
-          <button className="btn secondary sm" onClick={onCopyLogs}><Copy size={13} /> Copy All</button>
-          <button className="btn secondary sm" onClick={onClearLogs}><Trash2 size={13} /> Clear</button>
+          <button className="btn secondary sm" onClick={copyLogs}><Copy size={13} /> Copy All</button>
+          <button className="btn secondary sm" onClick={clearLogs}><Trash2 size={13} /> Clear</button>
           <label className="switch-toggle" title="Autoscroll">
-            <input type="checkbox" checked={autoScroll} onChange={(e) => onSetAutoScroll(e.target.checked)} />
+            <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
             <span className="switch-slider"></span>
           </label>
           <span style={{ fontSize: '11px', color: 'var(--text-low)' }}>Autoscroll</span>
@@ -62,8 +56,12 @@ export function LogsView({ logs, autoScroll, onSetAutoScroll, onClearLogs, onCop
           />
           <div className="seg-control">
             {(['all', 'info', 'warn', 'error'] as const).map((l) => (
-              <div key={l} className={`seg-item ${levelFilter === l ? 'active' : ''}`} onClick={() => setLevelFilter(l)}
-                style={l === 'error' && levelFilter === l ? { color: 'var(--status-err)' } : l === 'warn' && levelFilter === l ? { color: 'var(--status-warn)' } : undefined}>
+              <div
+                key={l}
+                className={`seg-item ${levelFilter === l ? 'active' : ''}`}
+                onClick={() => setLevelFilter(l)}
+                style={l === 'error' && levelFilter === l ? { color: 'var(--status-err)' } : l === 'warn' && levelFilter === l ? { color: 'var(--status-warn)' } : undefined}
+              >
                 {l.toUpperCase()}
               </div>
             ))}
@@ -78,11 +76,14 @@ export function LogsView({ logs, autoScroll, onSetAutoScroll, onClearLogs, onCop
           <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.7 }}>
             {filtered.length > 0 ? filtered.map((log, i) => (
               <div key={i} className={`log-line ${log.type}`}>
-                <span className="log-level" style={{
-                  color: log.type === 'error' ? 'var(--status-err)' :
-                         log.type === 'warn'  ? 'var(--status-warn)' :
-                         log.type === 'system' ? 'var(--text-low)' : 'var(--status-info)'
-                }}>
+                <span
+                  className="log-level"
+                  style={{
+                    color: log.type === 'error' ? 'var(--status-err)' :
+                           log.type === 'warn'  ? 'var(--status-warn)' :
+                           log.type === 'system' ? 'var(--text-low)' : 'var(--status-info)'
+                  }}
+                >
                   {getLevel(log.type)}
                 </span>
                 <span className="log-text">{log.text}</span>

@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "node scripts/setup-sidecars.cjs && tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
@@ -17,7 +17,9 @@
     "@tauri-apps/plugin-store": "^2.4.3",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-window": "^2.2.7",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,9 +1,11 @@
 import React from 'react';
 import {
-  Settings as SettingsIcon, Network, Eye, Layers2, Code2,
-  Info, AlertTriangle, CheckCircle2, ExternalLink
+  Settings as SettingsIcon, Network, Eye, Dna, Code2,
+  Info, AlertTriangle, CheckCircle2, ExternalLink, Sun, Moon, Monitor
 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
+import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
+import { useConnectionStore } from '../stores/connectionStore';
 import type { Settings } from '../utils/store';
 import xLinkLogo from '../assets/X-Link-logo.png';
 
@@ -41,46 +43,44 @@ const SwitchRow = ({ title, desc, checked, onChange, disabled }: {
   </div>
 );
 
-type SettingsSection = 'general' | 'tun' | 'sniff' | 'mux' | 'api';
+type SettingsSection = 'general' | 'tun' | 'sniff' | 'dns' | 'api';
 
-interface SettingsViewProps {
-  settings: Settings;
-  settingsTab: SettingsSection;
-  conflictingPorts: number[];
-  isElevated: boolean;
-  singboxVersion: string;
-  appVersion: string;
-  httpPort: number;
-  socksPort: number;
-  mixedPort: number;
-  isConnected: boolean;
-  onSetSettingsTab: (t: SettingsSection) => void;
-  onSaveSettings: (updates: Partial<Settings>) => void;
-  onSetHttpPort: (v: number) => void;
-  onSetSocksPort: (v: number) => void;
-  onSetMixedPort: (v: number) => void;
-}
+export function SettingsView() {
+  const {
+    settings,
+    conflictingPorts,
+    isElevated,
+    appVersion,
+    theme,
+    updateSettings,
+    setTheme,
+  } = useSettingsStore();
 
-export function SettingsView({
-  settings, settingsTab, conflictingPorts, isElevated, appVersion,
-  httpPort, socksPort, mixedPort, isConnected,
-  onSetSettingsTab, onSaveSettings, onSetHttpPort, onSetSocksPort, onSetMixedPort,
-}: SettingsViewProps) {
+  const {
+    isConnected,
+    httpPort,
+    socksPort,
+    mixedPort,
+    setPorts,
+  } = useConnectionStore();
+
+  const [settingsTab, setSettingsTab] = React.useState<SettingsSection>('general');
+
   const sideNavItems: [SettingsSection, React.ComponentType<any>, string][] = [
     ['general', SettingsIcon, 'General'],
     ['tun',     Network,      'TUN Mode'],
     ['sniff',   Eye,          'Sniffing'],
-    ['mux',     Layers2,      'Multiplexing'],
+    ['dns',     Dna,          'DNS'],
     ['api',     Code2,        'API'],
   ];
 
   return (
-    <ViewShell title="Settings" subtitle="Proxy mode, TUN, sniffing, multiplexing, API and performance options">
+    <ViewShell title="Settings" subtitle="Proxy mode, TUN, sniffing, DNS and API options">
       <div className="settings-layout" style={{ height: 'calc(100vh - 100px)' }}>
         {/* Secondary nav */}
         <div className="settings-sidenav">
           {sideNavItems.map(([id, Icon, label]) => (
-            <div key={id} className={`settings-nav-item ${settingsTab === id ? 'active' : ''}`} onClick={() => onSetSettingsTab(id)}>
+            <div key={id} className={`settings-nav-item ${settingsTab === id ? 'active' : ''}`} onClick={() => setSettingsTab(id)}>
               <Icon size={14} />{label}
             </div>
           ))}
@@ -97,14 +97,35 @@ export function SettingsView({
                   <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div className="settings-section-heading">Proxy Mode</div>
                     <SwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy). TUN mode captures all system traffic but requires Administrator."
-                      checked={settings.proxyMode === 'tun'} onChange={(v) => onSaveSettings({ proxyMode: v ? 'tun' : 'system' })} />
+                      checked={settings.proxyMode === 'tun'} onChange={(v) => updateSettings({ proxyMode: v ? 'tun' : 'system' })} />
                   </div>
 
                   <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div className="settings-section-heading">App Preferences</div>
-                    <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => onSaveSettings({ closeToTray: v })} />
-                    <SwitchRow title="Autostart with Windows" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => onSaveSettings({ autostart: v })} />
-                    <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => onSaveSettings({ wifiSharing: v })} />
+                    <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => updateSettings({ closeToTray: v })} />
+                    <SwitchRow title="Autostart with Windows" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
+                    <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => updateSettings({ wifiSharing: v })} />
+                  </div>
+
+                  <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="settings-section-heading">Appearance</div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {([['dark', Moon, 'Dark'], ['light', Sun, 'Light'], ['system', Monitor, 'System']] as const).map(([mode, Icon, label]) => (
+                        <button
+                          key={mode}
+                          onClick={() => setTheme(mode as ThemeMode)}
+                          style={{
+                            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                            padding: '8px 12px', borderRadius: 'var(--r-md)', border: 'none', cursor: 'pointer',
+                            fontSize: '12px', fontWeight: 500, transition: 'all 0.15s',
+                            background: theme === mode ? 'var(--accent-primary)' : 'var(--surface-sunken)',
+                            color: theme === mode ? 'var(--text-on-accent)' : 'var(--text-low)',
+                          }}
+                        >
+                          <Icon size={14} />{label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -112,8 +133,8 @@ export function SettingsView({
                   <div className="settings-section-heading">Inbound Ports</div>
                   <div className="grid-2">
                     {[
-                      { label: 'HTTP Proxy Port', key: 'httpPort', val: httpPort, set: onSetHttpPort },
-                      { label: 'SOCKS5 Port', key: 'socksPort', val: socksPort, set: onSetSocksPort },
+                      { label: 'HTTP Proxy Port', key: 'httpPort' as keyof Settings, val: httpPort, set: (v: number) => setPorts({ httpPort: v }) },
+                      { label: 'SOCKS5 Port', key: 'socksPort' as keyof Settings, val: socksPort, set: (v: number) => setPorts({ socksPort: v }) },
                     ].map(({ label, key, val, set }) => (
                       <div key={key} className="form-group">
                         <div className="flex-row-between">
@@ -123,7 +144,7 @@ export function SettingsView({
                           </span>
                         </div>
                         <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(val) ? 'var(--status-err)' : undefined }}
-                          value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); onSaveSettings({ [key]: v } as any); }} />
+                          value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); updateSettings({ [key]: v } as any); }} />
                       </div>
                     ))}
                   </div>
@@ -135,7 +156,7 @@ export function SettingsView({
                       </span>
                     </div>
                     <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(mixedPort) ? 'var(--status-err)' : undefined }}
-                      value={mixedPort} onChange={(e) => { const v = parseInt(e.target.value) || 0; onSetMixedPort(v); onSaveSettings({ mixedPort: v }); }} />
+                      value={mixedPort} onChange={(e) => { const v = parseInt(e.target.value) || 0; setPorts({ mixedPort: v }); updateSettings({ mixedPort: v }); }} />
                   </div>
                   <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>Port changes take effect on next connection restart.</p>
                 </div>
@@ -170,7 +191,7 @@ export function SettingsView({
                 <div className="grid-2">
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">TUN Stack Implementation</label>
-                    <Sel value={settings.tunStack} onChange={(v) => onSaveSettings({ tunStack: v as any })} options={[
+                    <Sel value={settings.tunStack} onChange={(v) => updateSettings({ tunStack: v as any })} options={[
                       { value: 'mixed', label: 'Mixed (gVisor TCP + system UDP)' },
                       { value: 'gvisor', label: 'gVisor (Full userspace)' },
                       { value: 'system', label: 'System (Kernel-level)' },
@@ -179,7 +200,7 @@ export function SettingsView({
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">TUN MTU</label>
-                    <input type="number" className="text-input" value={settings.tunMtu} onChange={(e) => onSaveSettings({ tunMtu: parseInt(e.target.value) || 9000 })} />
+                    <input type="number" className="text-input" value={settings.tunMtu} onChange={(e) => updateSettings({ tunMtu: parseInt(e.target.value) || 9000 })} />
                     <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>9000 recommended. Use 1500 for strict environments.</span>
                   </div>
                 </div>
@@ -189,7 +210,7 @@ export function SettingsView({
                   { key: 'tunStrictRoute', title: 'Strict Route', desc: 'Block unmatched traffic to prevent leaks' },
                   { key: 'tunEndpointIndependentNat', title: 'Endpoint Independent NAT', desc: 'Improves UDP NAT traversal (P2P, gaming)' },
                 ].map(({ key, title, desc }) => (
-                  <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => onSaveSettings({ [key]: v } as any)} disabled={!isElevated} />
+                  <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => updateSettings({ [key]: v } as any)} disabled={!isElevated} />
                 ))}
               </div>
               <div className="info-box">
@@ -205,7 +226,7 @@ export function SettingsView({
               <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div className="settings-section-heading">Traffic Sniffing & Protocol Detection</div>
                 <SwitchRow title="Enable Traffic Sniffing" desc="Inspect connection metadata to extract domain names for routing"
-                  checked={settings.sniffEnabled} onChange={(v) => onSaveSettings({ sniffEnabled: v })} />
+                  checked={settings.sniffEnabled} onChange={(v) => updateSettings({ sniffEnabled: v })} />
                 <div style={{ opacity: settings.sniffEnabled ? 1 : 0.4, pointerEvents: settings.sniffEnabled ? 'auto' : 'none' }}>
                   <div className="grid-2">
                     {[
@@ -214,7 +235,7 @@ export function SettingsView({
                       { key: 'sniffQuic', title: 'QUIC/HTTP3 Sniffing', desc: 'Extract SNI from QUIC Initial packets' },
                       { key: 'sniffOverrideDestination', title: 'Override Destination', desc: 'Use sniffed domain to override target IP' },
                     ].map(({ key, title, desc }) => (
-                      <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => onSaveSettings({ [key]: v } as any)} />
+                      <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => updateSettings({ [key]: v } as any)} />
                     ))}
                   </div>
                 </div>
@@ -222,53 +243,61 @@ export function SettingsView({
             </div>
           )}
 
-          {/* ── MULTIPLEXING ── */}
-          {settingsTab === 'mux' && (
+          {/* ── DNS ── */}
+          {settingsTab === 'dns' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div className="settings-section-heading">Connection Multiplexing</div>
-                <SwitchRow title="Enable Multiplexing (Mux)" desc="Bundle multiple streams into single connection to reduce TLS overhead"
-                  checked={settings.muxEnabled} onChange={(v) => onSaveSettings({ muxEnabled: v })} />
-                <div style={{ opacity: settings.muxEnabled ? 1 : 0.4, pointerEvents: settings.muxEnabled ? 'auto' : 'none', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div className="grid-2">
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Mux Protocol</label>
-                      <Sel value={settings.muxProtocol} onChange={(v) => onSaveSettings({ muxProtocol: v as any })} options={[
-                        { value: 'h2mux', label: 'h2mux (HTTP/2, recommended)' },
-                        { value: 'smux', label: 'smux (Simple stream mux)' },
-                        { value: 'yamux', label: 'yamux (HashiCorp Yamux)' },
-                      ]} />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Max Connections</label>
-                      <input type="number" className="text-input" value={settings.muxMaxConnections} onChange={(e) => onSaveSettings({ muxMaxConnections: parseInt(e.target.value) || 4 })} />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Min Streams</label>
-                      <input type="number" className="text-input" value={settings.muxMinStreams} onChange={(e) => onSaveSettings({ muxMinStreams: parseInt(e.target.value) || 4 })} />
-                    </div>
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Max Streams (0 = unlimited)</label>
-                      <input type="number" className="text-input" value={settings.muxMaxStreams} onChange={(e) => onSaveSettings({ muxMaxStreams: parseInt(e.target.value) || 0 })} />
-                    </div>
+                <div className="settings-section-heading">DNS Servers</div>
+                <div className="grid-2">
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Primary DNS (via proxy)</label>
+                    <Inp value={settings.primaryDns} onChange={(v) => updateSettings({ primaryDns: v })} placeholder="https://1.1.1.1/dns-query" mono />
                   </div>
-                  <div className="grid-2">
-                    <SwitchRow title="Stream Padding" desc="Add random padding to obfuscate stream lengths" checked={settings.muxPadding} onChange={(v) => onSaveSettings({ muxPadding: v })} />
-                    <SwitchRow title="Brutal Congestion Control" desc="Fixed bandwidth mode instead of BBR" checked={settings.muxBrutal} onChange={(v) => onSaveSettings({ muxBrutal: v })} />
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Fallback DNS (via proxy)</label>
+                    <Inp value={settings.fallbackDns} onChange={(v) => updateSettings({ fallbackDns: v })} placeholder="https://8.8.8.8/dns-query" mono />
                   </div>
-                  {settings.muxBrutal && (
-                    <div className="grid-2">
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Brutal Upload Speed (Mbps)</label>
-                        <input type="number" className="text-input" value={settings.muxBrutalUpMbps} onChange={(e) => onSaveSettings({ muxBrutalUpMbps: parseFloat(e.target.value) || 100 })} />
-                      </div>
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Brutal Download Speed (Mbps)</label>
-                        <input type="number" className="text-input" value={settings.muxBrutalDownMbps} onChange={(e) => onSaveSettings({ muxBrutalDownMbps: parseFloat(e.target.value) || 100 })} />
-                      </div>
-                    </div>
-                  )}
                 </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>
+                  Used for resolving domains while the proxy tunnel is active. The fallback server is only used in Normal mode.
+                </p>
+              </div>
+
+              <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="settings-section-heading">Resolution Mode</div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">DNS Mode</label>
+                  <Sel value={settings.dnsMode} onChange={(v) => updateSettings({ dnsMode: v as any })} options={[
+                    { value: 'fakeip', label: 'FakeIP (recommended for TUN)' },
+                    { value: 'normal', label: 'Normal (real IP resolution)' },
+                  ]} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>
+                    FakeIP avoids leaking real destination IPs to the local resolver and speeds up routing decisions.
+                  </span>
+                </div>
+                <div style={{ opacity: settings.dnsMode === 'fakeip' ? 1 : 0.4, pointerEvents: settings.dnsMode === 'fakeip' ? 'auto' : 'none' }}>
+                  <div className="grid-2">
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">FakeIP Range</label>
+                      <Inp value={settings.fakeipRange} onChange={(v) => updateSettings({ fakeipRange: v })} placeholder="198.18.0.0/15" mono />
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">FakeIP Exclude Filter</label>
+                      <Inp value={settings.fakeipFilter} onChange={(v) => updateSettings({ fakeipFilter: v })} placeholder="geosite:private" mono />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="settings-section-heading">Routing</div>
+                <SwitchRow title="Bypass LAN / Private IPs" desc="Route RFC-1918 addresses directly instead of through the proxy"
+                  checked={settings.bypassLan} onChange={(v) => updateSettings({ bypassLan: v })} />
+              </div>
+
+              <div className="info-box">
+                <Info size={13} />
+                <span>DNS settings only take effect in TUN mode and apply on the next connection.</span>
               </div>
             </div>
           )}
@@ -279,20 +308,20 @@ export function SettingsView({
               <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div className="settings-section-heading">Clash-Compatible REST API</div>
                 <SwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
-                  checked={settings.apiEnabled} onChange={(v) => onSaveSettings({ apiEnabled: v })} />
+                  checked={settings.apiEnabled} onChange={(v) => updateSettings({ apiEnabled: v })} />
                 <div style={{ opacity: settings.apiEnabled ? 1 : 0.4, pointerEvents: settings.apiEnabled ? 'auto' : 'none', display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div className="grid-2">
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">API Port</label>
-                      <input type="number" className="text-input" value={settings.apiPort} onChange={(e) => onSaveSettings({ apiPort: parseInt(e.target.value) || 9090 })} />
+                      <input type="number" className="text-input" value={settings.apiPort} onChange={(e) => updateSettings({ apiPort: parseInt(e.target.value) || 9090 })} />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">API Secret Token</label>
-                      <Inp value={settings.apiSecret} onChange={(v) => onSaveSettings({ apiSecret: v })} placeholder="Leave empty for no auth" mono />
+                      <Inp value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" mono />
                     </div>
                   </div>
                   <SwitchRow title="Allow CORS (Cross-Origin)" desc="Allow web-based controllers (Yacd) to connect from browser"
-                    checked={settings.apiCors} onChange={(v) => onSaveSettings({ apiCors: v })} />
+                    checked={settings.apiCors} onChange={(v) => updateSettings({ apiCors: v })} />
                   {settings.apiEnabled && isConnected && (
                     <div className="alert-box success">
                       <CheckCircle2 size={14} />

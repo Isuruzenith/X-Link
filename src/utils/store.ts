@@ -1,14 +1,28 @@
 import { Store } from '@tauri-apps/plugin-store';
 
-// ── PROFILE ──────────────────────────────────────────────────────────────────
+// ── LEGACY ACTIVE CONFIG (kept for migration) ───────────────────────────────
+export interface ActiveConfig {
+  /** Always "active" — fixed slot, not a UUID */
+  id: 'active';
+  name: string;
+  importedAt: number;      // Unix ms timestamp
+  nodeCount: number;
+  selectedNodeTag: string | null;
+}
+
+// ── MULTI-PROFILE SYSTEM ─────────────────────────────────────────────────────
+export type ProfileType = 'subscription' | 'manual' | 'file';
+
 export interface Profile {
   id: string;
   name: string;
-  type: 'url' | 'file' | 'manual';
+  type: ProfileType;
   subscriptionUrl?: string;
-  configPath: string;
-  lastUpdated: number;
+  importedAt: number;        // Unix ms
+  lastUpdated: number;       // Unix ms
   nodeCount: number;
+  groupId?: string;
+  selectedNodeTag: string | null;
 }
 
 // ── ROUTING ───────────────────────────────────────────────────────────────────
@@ -40,18 +54,8 @@ export interface RuleSet {
 }
 
 // ── DNS ───────────────────────────────────────────────────────────────────────
-export type DnsRuleType = 'domain' | 'domain_suffix' | 'domain_keyword' | 'geosite' | 'rule_set' | 'ip_cidr';
 export type DnsStrategy = 'prefer_ipv4' | 'prefer_ipv6' | 'ipv4_only' | 'ipv6_only';
 export type DnsMode = 'normal' | 'fakeip';
-
-export interface DnsRule {
-  id: string;
-  type: DnsRuleType;
-  value: string;
-  server: string;   // 'primary' | 'fallback' | 'direct' | 'block'
-  disableCache: boolean;
-  invert: boolean;
-}
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 export interface Settings {
@@ -81,17 +85,6 @@ export interface Settings {
   sniffQuic: boolean;
   sniffOverrideDestination: boolean;
 
-  // Multiplexing
-  muxEnabled: boolean;
-  muxProtocol: 'smux' | 'yamux' | 'h2mux';
-  muxMaxConnections: number;
-  muxMinStreams: number;
-  muxMaxStreams: number;
-  muxPadding: boolean;
-  muxBrutal: boolean;
-  muxBrutalUpMbps: number;
-  muxBrutalDownMbps: number;
-
   // Clash-compatible API
   apiEnabled: boolean;
   apiPort: number;
@@ -112,11 +105,9 @@ export interface Settings {
   // Routing globals
   finalOutbound: OutboundAction;
   bypassLan: boolean;
-  bypassChina: boolean;
 
   // Legacy SNI bypass
   dnsAddress: string;
-  sniHost: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -141,16 +132,6 @@ const DEFAULT_SETTINGS: Settings = {
   sniffQuic: true,
   sniffOverrideDestination: false,
 
-  muxEnabled: false,
-  muxProtocol: 'h2mux',
-  muxMaxConnections: 4,
-  muxMinStreams: 4,
-  muxMaxStreams: 0,
-  muxPadding: false,
-  muxBrutal: false,
-  muxBrutalUpMbps: 100,
-  muxBrutalDownMbps: 100,
-
   apiEnabled: false,
   apiPort: 9090,
   apiSecret: '',
@@ -168,36 +149,22 @@ const DEFAULT_SETTINGS: Settings = {
 
   finalOutbound: 'proxy',
   bypassLan: true,
-  bypassChina: false,
 
   dnsAddress: '',
-  sniHost: '',
 };
 
 const DEFAULT_ROUTING_RULES: RoutingRule[] = [
   { id: 'r1', type: 'geoip',   value: 'private',  outbound: 'direct', invert: false, notes: 'Bypass LAN/private IPs' },
   { id: 'r2', type: 'geosite', value: 'private',  outbound: 'direct', invert: false, notes: 'Bypass private domains' },
-  { id: 'r3', type: 'geoip',   value: 'cn',       outbound: 'direct', invert: false, notes: 'China IPs - direct' },
-  { id: 'r4', type: 'geosite', value: 'cn',       outbound: 'direct', invert: false, notes: 'China sites - direct' },
   { id: 'r5', type: 'protocol','value': 'dns',    outbound: 'dns',    invert: false, notes: 'Route DNS queries' },
 ];
 
-const DEFAULT_RULE_SETS: RuleSet[] = [
-  { id: 'rs1', tag: 'geoip-cn',     type: 'remote', format: 'binary', url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geoip/cn.srs',     updateInterval: '1d' },
-  { id: 'rs2', tag: 'geosite-cn',   type: 'remote', format: 'binary', url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/cn.srs',    updateInterval: '1d' },
-  { id: 'rs3', tag: 'geosite-private', type: 'remote', format: 'binary', url: 'https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@sing/geo/geosite/private.srs', updateInterval: '7d' },
-];
-
-const DEFAULT_DNS_RULES: DnsRule[] = [
-  { id: 'd1', type: 'geosite', value: 'cn',      server: 'direct', disableCache: false, invert: false },
-  { id: 'd2', type: 'geosite', value: 'private', server: 'direct', disableCache: false, invert: false },
-];
+const DEFAULT_RULE_SETS: RuleSet[] = [];
 
 // ── STORE INSTANCES ───────────────────────────────────────────────────────────
 let settingsStore: Store | null = null;
 let profilesStore: Store | null = null;
 let routingStore: Store | null = null;
-let dnsStore: Store | null = null;
 
 async function getSettingsStore(): Promise<Store> {
   if (!settingsStore) settingsStore = await Store.load('settings.json');
@@ -210,10 +177,6 @@ async function getProfilesStore(): Promise<Store> {
 async function getRoutingStore(): Promise<Store> {
   if (!routingStore) routingStore = await Store.load('routing.json');
   return routingStore;
-}
-async function getDnsStore(): Promise<Store> {
-  if (!dnsStore) dnsStore = await Store.load('dns.json');
-  return dnsStore;
 }
 
 export const storeHelper = {
@@ -241,42 +204,42 @@ export const storeHelper = {
         .filter(([, value]) => value !== undefined)
         .map(([key, value]) => store.set(key, value));
       await Promise.all(setOps);
+      // Stamp schema version on every save so migration can detect it on next boot
+      await store.set('_schemaVersion', 2);
       await store.save();
     } catch (e) {
       console.error('Failed to save settings:', e);
     }
   },
 
-  // ── PROFILES ──
-  async getProfiles(): Promise<Profile[]> {
+  // ── ACTIVE CONFIG ──
+  async getActiveConfig(): Promise<ActiveConfig | null> {
     try {
       const store = await getProfilesStore();
-      return (await store.get<Profile[]>('profiles')) || [];
+      return (await store.get<ActiveConfig>('activeConfig')) ?? null;
     } catch {
-      return [];
+      return null;
     }
   },
 
-  async saveProfiles(profiles: Profile[]): Promise<void> {
+  async saveActiveConfig(config: ActiveConfig | null): Promise<void> {
     try {
       const store = await getProfilesStore();
-      await store.set('profiles', profiles);
+      await store.set('activeConfig', config);
       await store.save();
     } catch (e) {
-      console.error('Failed to save profiles:', e);
+      console.error('Failed to save active config:', e);
     }
   },
 
-  async addProfile(profile: Profile): Promise<void> {
-    const list = await this.getProfiles();
-    const filtered = list.filter((p) => p.id !== profile.id);
-    filtered.push(profile);
-    await this.saveProfiles(filtered);
-  },
-
-  async removeProfile(profileId: string): Promise<void> {
-    const list = await this.getProfiles();
-    await this.saveProfiles(list.filter((p) => p.id !== profileId));
+  async clearActiveConfig(): Promise<void> {
+    try {
+      const store = await getProfilesStore();
+      await store.delete('activeConfig');
+      await store.save();
+    } catch (e) {
+      console.error('Failed to clear active config:', e);
+    }
   },
 
   // ── ROUTING RULES ──
@@ -319,23 +282,88 @@ export const storeHelper = {
     }
   },
 
-  // ── DNS RULES ──
-  async getDnsRules(): Promise<DnsRule[]> {
+  // ── MULTI-PROFILE MANAGEMENT ──
+  async getProfiles(): Promise<Profile[]> {
     try {
-      const store = await getDnsStore();
-      return (await store.get<DnsRule[]>('rules')) ?? DEFAULT_DNS_RULES;
+      const store = await getProfilesStore();
+      return (await store.get<Profile[]>('profiles')) ?? [];
     } catch {
-      return DEFAULT_DNS_RULES;
+      return [];
     }
   },
 
-  async saveDnsRules(rules: DnsRule[]): Promise<void> {
+  async saveProfiles(profiles: Profile[]): Promise<void> {
     try {
-      const store = await getDnsStore();
-      await store.set('rules', rules);
+      const store = await getProfilesStore();
+      await store.set('profiles', profiles);
       await store.save();
     } catch (e) {
-      console.error('Failed to save DNS rules:', e);
+      console.error('Failed to save profiles:', e);
+    }
+  },
+
+  async getActiveProfileId(): Promise<string | null> {
+    try {
+      const store = await getProfilesStore();
+      return (await store.get<string>('activeProfileId')) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  async setActiveProfileId(id: string | null): Promise<void> {
+    try {
+      const store = await getProfilesStore();
+      await store.set('activeProfileId', id);
+      await store.save();
+    } catch (e) {
+      console.error('Failed to set active profile ID:', e);
+    }
+  },
+
+  async deleteProfile(profileId: string): Promise<void> {
+    const profiles = await this.getProfiles();
+    const updated = profiles.filter((p) => p.id !== profileId);
+    await this.saveProfiles(updated);
+
+    const activeId = await this.getActiveProfileId();
+    if (activeId === profileId) {
+      // If we deleted the active profile, switch to the first remaining or null
+      await this.setActiveProfileId(updated.length > 0 ? updated[0].id : null);
+    }
+  },
+
+  /**
+   * Migrate from the legacy single-slot ActiveConfig to the new multi-profile system.
+   * Runs once on first boot after upgrade. Creates a profile from the old activeConfig
+   * and clears the legacy key.
+   */
+  async migrateFromLegacy(): Promise<void> {
+    try {
+      const store = await getProfilesStore();
+      const legacy = await store.get<ActiveConfig>('activeConfig');
+      const existing = await store.get<Profile[]>('profiles');
+
+      // Only migrate if there's a legacy config and no profiles exist yet
+      if (legacy && (!existing || existing.length === 0)) {
+        const now = Date.now();
+        const migratedProfile: Profile = {
+          id: crypto.randomUUID(),
+          name: legacy.name,
+          type: 'manual',
+          importedAt: legacy.importedAt,
+          lastUpdated: now,
+          nodeCount: legacy.nodeCount,
+          selectedNodeTag: legacy.selectedNodeTag,
+        };
+
+        await store.set('profiles', [migratedProfile]);
+        await store.set('activeProfileId', migratedProfile.id);
+        // Don't delete legacy key yet — keep it for rollback safety
+        await store.save();
+      }
+    } catch (e) {
+      console.error('Failed to migrate legacy config:', e);
     }
   },
 };

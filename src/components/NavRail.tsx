@@ -1,8 +1,8 @@
 import React from 'react';
-import { Activity, Layers, Route, Dna, Terminal, Settings } from 'lucide-react';
+import { Activity, Layers, Route, Terminal, Settings } from 'lucide-react';
 import xLinkLogo from '../assets/X-Link-logo.png';
 
-export type TabId = 'dashboard' | 'profiles' | 'routing' | 'dns' | 'logs' | 'settings';
+export type TabId = 'dashboard' | 'profiles' | 'routing' | 'logs' | 'settings';
 
 interface NavRailProps {
   activeTab: TabId;
@@ -11,9 +11,8 @@ interface NavRailProps {
 
 const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
   ['dashboard', Activity,  'Dashboard'],
-  ['profiles',  Layers,    'Profiles'],
+  ['profiles',  Layers,    'Config'],
   ['routing',   Route,     'Routing'],
-  ['dns',       Dna,       'DNS'],
   ['logs',      Terminal,  'Logs'],
   ['settings',  Settings,  'Settings'],
 ];

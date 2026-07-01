@@ -3,9 +3,7 @@ use serde_json::Value;
 use super::adapters::SingBoxOutbound;
 use super::build_route_exclude_addresses;
 use super::resolve_server_ips;
-use super::build_route_rules;
 use super::resolve_dns_address;
-use std::net::ToSocketAddrs;
 
 /// User-configurable TUN and sniffing settings read from settings.json.
 #[derive(Debug, Clone)]
@@ -21,6 +19,17 @@ pub struct TunSettings {
     pub sniff_tls: bool,
     pub sniff_quic: bool,
     pub sniff_override_destination: bool,
+    /// "normal" or "fakeip"
+    pub dns_mode: String,
+    pub fakeip_range: String,
+    /// Remote DNS resolved through the proxy tunnel
+    pub primary_dns: String,
+    /// Secondary remote DNS, used only in "normal" DNS mode
+    pub fallback_dns: String,
+    /// Route RFC-1918 / .lan / .local traffic directly instead of through the proxy
+    pub bypass_lan: bool,
+    /// Outbound tag ("proxy" or "direct") used for unmatched traffic
+    pub final_outbound: String,
 }
 
 impl Default for TunSettings {
@@ -37,6 +46,12 @@ impl Default for TunSettings {
             sniff_tls: true,
             sniff_quic: true,
             sniff_override_destination: false,
+            dns_mode: "fakeip".to_string(),
+            fakeip_range: "198.18.0.0/15".to_string(),
+            primary_dns: "https://1.1.1.1/dns-query".to_string(),
+            fallback_dns: "https://8.8.8.8/dns-query".to_string(),
+            bypass_lan: true,
+            final_outbound: "proxy".to_string(),
         }
     }
 }
@@ -48,6 +63,7 @@ pub fn generate_singbox_config(
     dns_address: &str,
     listen_address: &str,
     tun_settings: &TunSettings,
+    default_outbound_tag: Option<&str>,
 ) -> Result<String, String> {
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
@@ -74,6 +90,9 @@ pub fn generate_singbox_config(
     selector.insert("type".to_string(), Value::String("selector".to_string()));
     selector.insert("tag".to_string(), Value::String("proxy".to_string()));
     selector.insert("outbounds".to_string(), Value::Array(node_tags.into_iter().map(Value::String).collect()));
+    if let Some(def_tag) = default_outbound_tag {
+        selector.insert("default".to_string(), Value::String(def_tag.to_string()));
+    }
 
     // First, push our custom selector outbound
     final_outbounds.push(Value::Object(selector.into_iter().collect()));
@@ -89,29 +108,14 @@ pub fn generate_singbox_config(
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
 
-        // Resolve domain to IP and replace 'server' field to prevent DNS deadlock.
-        // This allows the proxy domain itself to be resolved via the proxy-dns securely
-        // by the user's browser, without creating a routing loop for the proxy connection.
-        if let Some(server_val) = obj.get("server") {
-            if let Some(server_str) = server_val.as_str() {
-                let original_domain = server_str.to_string();
-                if original_domain.parse::<std::net::IpAddr>().is_err() {
-                    // Try to resolve using OS resolver
-                    if let Ok(mut addrs) = format!("{}:443", &original_domain).to_socket_addrs() {
-                        // Prefer IPv4
-                        let addr = addrs.find(|a| a.is_ipv4()).or_else(|| addrs.next());
-                        if let Some(addr) = addr {
-                            // Ensure tls.server_name is set before replacing server
-                            if let Some(tls) = obj.get_mut("tls") {
-                                if let Some(tls_obj) = tls.as_object_mut() {
-                                    if !tls_obj.contains_key("server_name") {
-                                        tls_obj.insert("server_name".to_string(), Value::String(original_domain.clone()));
-                                    }
-                                }
-                            }
-                            // Replace server with IP
-                            obj.insert("server".to_string(), Value::String(addr.ip().to_string()));
-                        }
+        // Self-heal: If transport type is "ws" (WebSocket), strip "h2" from ALPN.
+        // WebSockets over HTTP/2 (RFC 8441) is unsupported by most standard VLESS/VMess proxy servers (Nginx/Xray),
+        // causing immediate EOF/reset errors when sing-box attempts it.
+        if let Some(transport) = obj.get("transport").and_then(|t| t.as_object()) {
+            if transport.get("type").and_then(|t| t.as_str()) == Some("ws") {
+                if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
+                    if let Some(alpn) = tls.get_mut("alpn").and_then(|a| a.as_array_mut()) {
+                        alpn.retain(|v| v.as_str() != Some("h2"));
                     }
                 }
             }
@@ -125,6 +129,9 @@ pub fn generate_singbox_config(
     direct.insert("type".to_string(), Value::String("direct".to_string()));
     direct.insert("tag".to_string(), Value::String("direct".to_string()));
     final_outbounds.push(Value::Object(direct.into_iter().collect()));
+
+    // Unconditionally push block outbound
+    final_outbounds.push(serde_json::json!({ "type": "block", "tag": "block" }));
 
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
@@ -145,7 +152,8 @@ pub fn generate_singbox_config(
             "tag": "tun-in",
             "interface_name": "X-Link",
             "address": [
-                "172.19.0.1/30"
+                "172.19.0.1/30",
+                "fdfe:dcba:9876::1/126"
             ],
             "auto_route": tun_settings.auto_route,
             "strict_route": tun_settings.strict_route,
@@ -166,30 +174,75 @@ pub fn generate_singbox_config(
         inbounds.push(tun_inbound);
     }
 
-    let route_rules = build_route_rules();
+    let mut route_rules = vec![
+        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
+    ];
+
+    if tun_settings.bypass_lan {
+        route_rules.push(serde_json::json!({ "ip_is_private": true, "outbound": "direct" }));
+        route_rules.push(serde_json::json!({
+            "domain_suffix": [".lan", ".local", ".internal", ".home.arpa"],
+            "outbound": "direct"
+        }));
+    }
+
+    let route_section = serde_json::json!({
+        "rules": route_rules,
+        "final": tun_settings.final_outbound,
+        "auto_detect_interface": true
+    });
 
     let mut dns_rules = vec![
         serde_json::json!({ "outbound": "direct", "server": "local-dns" })
     ];
 
-    // We no longer need to force proxy server domains through local-dns,
-    // because we have replaced the 'server' field in outbounds with IPs!
-    // This safely delegates resolving the proxy domain in browsers to 'proxy-dns'.
-    // In TUN mode, DNS must go through the proxy tunnel to avoid the strict_route WFP deadlock.
-    // Two-server strategy:
-    //   - proxy-dns: uses a PUBLIC DNS (not the user's local router IP which is unreachable
-    //     from the remote proxy server). Routes through the proxy tunnel.
-    //   - local-dns: uses the system/local resolver via direct detour, only for resolving
-    //     the proxy server's own hostname and direct connections.
+    let server_domains: Vec<String> = server_hosts
+        .iter()
+        .filter(|h| h.trim().parse::<std::net::IpAddr>().is_err())
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .collect();
+    if !server_domains.is_empty() {
+        dns_rules.insert(0, serde_json::json!({
+            "domain": server_domains,
+            "server": "local-dns"
+        }));
+    }
+
+    let is_fakeip = tun_settings.dns_mode == "fakeip";
+
+    let mut dns_servers = vec![
+        serde_json::json!({ "tag": "local-dns", "address": resolved_dns_address, "detour": "direct" }),
+        serde_json::json!({ "tag": "remote-dns", "address": tun_settings.primary_dns, "detour": "proxy" }),
+    ];
+    if !is_fakeip && !tun_settings.fallback_dns.trim().is_empty() {
+        dns_servers.push(serde_json::json!({
+            "tag": "remote-dns-fallback", "address": tun_settings.fallback_dns, "detour": "proxy"
+        }));
+    }
+    if is_fakeip {
+        dns_servers.push(serde_json::json!({ "tag": "fakeip-dns", "address": "fakeip" }));
+        dns_rules.push(serde_json::json!({
+            "query_type": ["A", "AAAA"],
+            "server": "fakeip-dns"
+        }));
+    }
+
     let dns_section = if proxy_mode == "tun" {
-        serde_json::json!({
-            "servers": [
-                { "tag": "proxy-dns", "address": "tcp://1.1.1.1", "detour": "proxy" },
-                { "tag": "local-dns", "address": resolved_dns_address, "detour": "direct" }
-            ],
+        let mut section = serde_json::json!({
+            "servers": dns_servers,
             "rules": dns_rules,
-            "strategy": "ipv4_only"
-        })
+            "strategy": "ipv4_only",
+            "final": "remote-dns"
+        });
+        if is_fakeip {
+            section["fakeip"] = serde_json::json!({
+                "enabled": true,
+                "inet4_range": tun_settings.fakeip_range,
+                "inet6_range": "fc00::/18"
+            });
+        }
+        section
     } else {
         serde_json::json!({
             "servers": [
@@ -208,11 +261,7 @@ pub fn generate_singbox_config(
         "dns": dns_section,
         "inbounds": inbounds,
         "outbounds": final_outbounds,
-        "route": {
-            "rules": route_rules,
-            "final": "proxy",
-            "auto_detect_interface": true
-        }
+        "route": route_section
     });
 
     serde_json::to_string_pretty(&config)
@@ -241,6 +290,7 @@ mod tests {
             "1.1.1.1",
             "127.0.0.1",
             &tun,
+            None,
         ).unwrap();
         let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
         let inbounds_local = config_local["inbounds"].as_array().unwrap();
@@ -257,6 +307,7 @@ mod tests {
             "1.1.1.1",
             "0.0.0.0",
             &tun,
+            None,
         ).unwrap();
         let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
         let inbounds_wifi = config_wifi["inbounds"].as_array().unwrap();
@@ -264,5 +315,56 @@ mod tests {
         let mixed_inbound_wifi = &inbounds_wifi[0];
         assert_eq!(mixed_inbound_wifi["listen"].as_str().unwrap(), "0.0.0.0");
         assert_eq!(mixed_inbound_wifi["listen_port"].as_u64().unwrap(), 7890);
+    }
+
+    #[test]
+    fn test_generate_singbox_config_alpn_self_healing() {
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("server".to_string(), serde_json::json!("azure.ezgateway.net"));
+        fields.insert("server_port".to_string(), serde_json::json!(443));
+        fields.insert("uuid".to_string(), serde_json::json!("88dacb71-7530-475b-9ed6-a431caef6b3f"));
+        fields.insert("tls".to_string(), serde_json::json!({
+            "enabled": true,
+            "insecure": true,
+            "server_name": "aka.ms",
+            "alpn": ["h2", "http/1.1"]
+        }));
+        fields.insert("transport".to_string(), serde_json::json!({
+            "type": "ws",
+            "path": "/azure",
+            "headers": {
+                "Host": "azure.ezgateway.net"
+            }
+        }));
+
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "vless".to_string(),
+            tag: "Zoom-SG-Kavishka-300GB".to_string(),
+            fields,
+        }];
+
+        let tun = TunSettings::default();
+        let config_str = generate_singbox_config(
+            7892,
+            outbounds,
+            "tun",
+            "172.20.10.1",
+            "127.0.0.1",
+            &tun,
+            None,
+        ).unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let outbounds_arr = config["outbounds"].as_array().unwrap();
+
+        // Find our node outbound
+        let node_outbound = outbounds_arr.iter()
+            .find(|o| o["tag"].as_str() == Some("Zoom-SG-Kavishka-300GB"))
+            .expect("Should find our node outbound");
+
+        let alpn = node_outbound["tls"]["alpn"].as_array().unwrap();
+        // Check that "h2" has been stripped
+        assert!(alpn.iter().all(|v| v.as_str() != Some("h2")));
+        assert!(alpn.iter().any(|v| v.as_str() == Some("http/1.1")));
     }
 }

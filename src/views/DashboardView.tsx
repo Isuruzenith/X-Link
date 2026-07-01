@@ -1,10 +1,12 @@
 import {
   DownloadCloud, UploadCloud, Clock, Server, Power,
-  Shield, ShieldAlert, Network, Wifi
+  Shield, ShieldAlert, Network, Wifi, Zap
 } from 'lucide-react';
 import { TrafficChart } from '../components/TrafficChart';
 import { ViewShell } from '../components/ViewShell';
-import type { Profile, Settings } from '../utils/store';
+import { useConnectionStore } from '../stores/connectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useProfileStore } from '../stores/profileStore';
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -12,12 +14,14 @@ const formatBytes = (bytes: number): string => {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
+
 const formatSpeed = (bps: number): string => {
   if (bps === 0) return '0 B/s';
   const k = 1024, sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
   const i = Math.floor(Math.log(bps) / Math.log(k));
   return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
+
 const formatUptime = (seconds: number): string => {
   const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
   const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
@@ -25,35 +29,28 @@ const formatUptime = (seconds: number): string => {
   return `${h}h ${m}m ${s}s`;
 };
 
-interface DashboardViewProps {
-  isConnected: boolean;
-  connectionStatus: 'connected' | 'connecting' | 'disconnected';
-  activeProfileId: string | null;
-  uptime: number;
-  httpPort: number;
-  socksPort: number;
-  mixedPort: number;
-  isElevated: boolean;
-  singboxVersion: string;
-  appVersion: string;
-  uploadBytes: number;
-  downloadBytes: number;
-  uploadSpeed: number;
-  downloadSpeed: number;
-  activeConnections: number;
-  speedHistory: { up: number; down: number }[];
-  profiles: Profile[];
-  settings: Settings;
-  onToggleConnect: () => void;
-  onRequestElevation: () => void;
-}
+export function DashboardView() {
+  const {
+    isConnected,
+    connectionStatus,
+    uptime,
+    httpPort,
+    socksPort,
+    mixedPort,
+    uploadBytes,
+    downloadBytes,
+    uploadSpeed,
+    downloadSpeed,
+    activeConnections,
+    speedHistory,
+    toggleConnect,
+    requestElevation,
+  } = useConnectionStore();
 
-export function DashboardView({
-  isConnected, connectionStatus, activeProfileId, uptime, httpPort, socksPort, mixedPort,
-  isElevated, uploadBytes, downloadBytes, uploadSpeed,
-  downloadSpeed, activeConnections, speedHistory, profiles, settings,
-  onToggleConnect, onRequestElevation,
-}: DashboardViewProps) {
+  const { settings, isElevated } = useSettingsStore();
+  const activeProfile = useProfileStore((s) => s.activeProfile)();
+  const { nodes, selectedNodeTag, selectNode } = useProfileStore();
+
   return (
     <ViewShell
       title="Dashboard"
@@ -63,7 +60,7 @@ export function DashboardView({
           {isElevated ? (
             <div className="tun-shield-badge"><Shield size={14} /><span>TUN: Active</span></div>
           ) : (
-            <button className="tun-shield-btn" onClick={onRequestElevation}>
+            <button className="tun-shield-btn" onClick={requestElevation}>
               <ShieldAlert size={14} /><span>TUN: Elevation Required</span>
             </button>
           )}
@@ -77,7 +74,10 @@ export function DashboardView({
           <div className="glass-panel connect-panel">
             <div className="power-button-container">
               <div className={`power-button-outer ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} />
-              <button className={`power-button ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} onClick={onToggleConnect}>
+              <button
+                className={`power-button ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`}
+                onClick={toggleConnect}
+              >
                 <Power size={28} />
               </button>
             </div>
@@ -86,7 +86,7 @@ export function DashboardView({
             </h3>
             <p className="connect-status-sub">
               {connectionStatus === 'connected'
-                ? `${profiles.find((p) => p.id === activeProfileId)?.name || 'Default'}`
+                ? `${activeProfile?.name || 'Default'}`
                 : connectionStatus === 'connecting'
                   ? 'Establishing secure tunnels...'
                   : 'Toggle power to start proxy'}
@@ -95,6 +95,38 @@ export function DashboardView({
               <div className="connect-mode-badge">
                 <Network size={12} />
                 <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
+              </div>
+            )}
+            {isConnected && selectedNodeTag && (
+              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-low)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Zap size={10} style={{ color: 'var(--accent-primary)' }} />
+                <span style={{ color: 'var(--text-med)' }}>{selectedNodeTag}</span>
+              </div>
+            )}
+            {isConnected && nodes.length > 1 && (
+              <div style={{
+                marginTop: '12px', display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center',
+                maxHeight: '52px', overflowY: 'auto', overflowX: 'hidden',
+              }}>
+                {nodes.slice(0, 8).map((node) => (
+                  <button
+                    key={node.tag}
+                    onClick={() => selectNode(node)}
+                    style={{
+                      fontSize: '9px', padding: '2px 8px', borderRadius: '10px', border: 'none', cursor: 'pointer',
+                      background: selectedNodeTag === node.tag ? 'var(--accent-primary)' : 'var(--surface-sunken)',
+                      color: selectedNodeTag === node.tag ? '#fff' : 'var(--text-low)',
+                      transition: 'all 0.15s',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px',
+                    }}
+                    title={node.tag}
+                  >
+                    {node.tag}
+                  </button>
+                ))}
+                {nodes.length > 8 && (
+                  <span style={{ fontSize: '9px', color: 'var(--text-low)', padding: '2px 4px' }}>+{nodes.length - 8} more</span>
+                )}
               </div>
             )}
           </div>
