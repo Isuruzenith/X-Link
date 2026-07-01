@@ -30,7 +30,11 @@ const formatUptime = (seconds: number): string => {
   return `${h}h ${m}m ${s}s`;
 };
 
-export function DashboardView() {
+interface DashboardViewProps {
+  onNavigateToTab?: (tab: 'connections') => void;
+}
+
+export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
   const {
     isConnected,
     connectionStatus,
@@ -196,7 +200,11 @@ export function DashboardView() {
             { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime),            color: 'var(--status-warn)' },
             { icon: Server,        label: 'Connections',  value: `${activeConnections} active`,  color: 'var(--status-ok)' },
           ].map(({ icon: Icon, label, value, color }) => (
-            <div key={label} className="glass-panel metric-card">
+            <div
+              key={label}
+              className={`glass-panel metric-card ${label === 'Connections' ? 'clickable' : ''}`}
+              onClick={label === 'Connections' ? () => onNavigateToTab?.('connections') : undefined}
+            >
               <div className="metric-icon-box" style={{ color }}><Icon size={20} /></div>
               <div className="metric-info">
                 <span className="metric-label">{label}</span>

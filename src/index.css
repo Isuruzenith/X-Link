@@ -892,6 +892,8 @@ body {
 
 /* ── METRIC CARD ───────────────────────────────────────────────────────────── */
 .metric-card { display: flex; align-items: center; gap: var(--sp-4); }
+.metric-card.clickable { cursor: pointer; transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.metric-card.clickable:hover { border-color: var(--border-accent); background: var(--surface-hover); box-shadow: var(--shadow-md); }
 .metric-icon-box { width: 44px; height: 44px; border-radius: var(--r-lg); background: rgba(74,158,255,0.05); display: flex; align-items: center; justify-content: center; border: 1px solid rgba(74,158,255,0.1); flex-shrink: 0; }
 .metric-info { display: flex; flex-direction: column; gap: 2px; }
 .metric-label { font-size: 11px; color: var(--text-low); text-transform: uppercase; letter-spacing: 0.5px; }

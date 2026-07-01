@@ -195,7 +195,8 @@ export function LogsView() {
                     padding: '4px 6px',
                     borderRadius: '4px',
                     marginBottom: '2px',
-                    transition: 'background 0.15s ease'
+                    transition: 'background 0.15s ease',
+                    fontWeight: 300
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
@@ -212,7 +213,8 @@ export function LogsView() {
                       userSelect: 'none',
                       fontSize: '11px',
                       opacity: 0.65,
-                      flexShrink: 0
+                      flexShrink: 0,
+                      fontWeight: 300
                     }}
                   >
                     {log.timestamp}
@@ -224,7 +226,7 @@ export function LogsView() {
                     style={{
                       width: '38px',
                       flexShrink: 0,
-                      fontWeight: 600,
+                      fontWeight: 500,
                       fontSize: '9.5px',
                       letterSpacing: '0.4px',
                       marginRight: '8px',
@@ -238,7 +240,7 @@ export function LogsView() {
                   </span>
 
                   {/* Log content */}
-                  <span className="log-text" style={{ color: log.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'var(--text-med)', flex: 1, wordBreak: 'break-all' }}>
+                  <span className="log-text" style={{ color: log.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'var(--text-med)', flex: 1, wordBreak: 'break-all', fontWeight: 300 }}>
                     {renderHighlightedText(log.text)}
                   </span>
                 </div>

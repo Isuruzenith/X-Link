@@ -905,3 +905,72 @@ pub async fn toggle_proxy(
 
     Ok("started".into())
 }
+
+#[tauri::command]
+pub async fn get_active_connections(state: State<'_, crate::state::ProxyState>) -> Result<serde_json::Value, String> {
+    if !state.is_running() {
+        return Ok(serde_json::json!({ "connections": [] }));
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections", api_port);
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                Ok(json)
+            } else {
+                Err("Failed to parse connections JSON".to_string())
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn close_connection(id: String, state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+    if !state.is_running() {
+        return Ok(());
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections/{}", api_port, id);
+
+    let client = reqwest::Client::new();
+    let mut req = client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn close_all_connections(state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+    if !state.is_running() {
+        return Ok(());
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections", api_port);
+
+    let client = reqwest::Client::new();
+    let mut req = client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
