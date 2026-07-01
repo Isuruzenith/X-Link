@@ -92,13 +92,26 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         return;
       }
 
+      let outboundTag = selectedNodeTag;
+      if (!outboundTag) {
+        const nodes = profileStore.nodes;
+        if (nodes && nodes.length > 0) {
+          outboundTag = nodes[0].tag;
+          profileStore.selectNode(nodes[0]);
+          logStore.pushSystemLog(`No node selected. Automatically selecting first node "${outboundTag}".`);
+        } else {
+          logStore.pushSystemLog('Error: Active profile has no nodes to connect to.');
+          return;
+        }
+      }
+
       // TUN mode requires admin privileges — auto-trigger elevation if not already elevated
       if (settings.proxyMode === 'tun' && !isElevated) {
         logStore.pushSystemLog('TUN mode requires Administrator privileges. Requesting elevation...');
         try {
           await invoke('request_elevation');
-        } catch {
-          logStore.pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights.`);
+        } catch (e) {
+          logStore.pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights: ${e}`);
         }
         return;
       }
@@ -109,13 +122,15 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           logStore.pushSystemLog(`Error: Port ${conflict} is in use.`);
           return;
         }
-      } catch {}
+      } catch (err) {
+        logStore.pushSystemLog(`Port check failed: ${err}. Proceeding anyway...`);
+      }
 
-      logStore.pushSystemLog(`Booting X-Link Core using "${activeProfile.name}"...`);
+      logStore.pushSystemLog(`Booting X-Link Core using "${activeProfile.name}" [${outboundTag}]...`);
       set({ connectionStatus: 'connecting' });
 
       try {
-        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: selectedNodeTag });
+        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: outboundTag });
         if (result === 'started') {
           set({ isConnected: true, connectionStatus: 'connected' });
           logStore.pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);

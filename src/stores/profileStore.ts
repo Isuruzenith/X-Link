@@ -22,6 +22,7 @@ interface ProfileState {
   nodes: any[];
   selectedNodeTag: string | null;
   nodeGeoCache: Record<string, string>;
+  activatingNodeTag: string | null;
 
   // Import form state
   importName: string;
@@ -157,6 +158,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   nodes: [],
   selectedNodeTag: null,
   nodeGeoCache: {},
+  activatingNodeTag: null,
   importName: '',
   importContent: '',
   importError: null,
@@ -223,40 +225,40 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   selectNode: async (node) => {
+    if (!node || !node.tag) return;
     const { selectedProfileId, activeProfileId, profiles } = get();
     const targetProfileId = selectedProfileId || activeProfileId;
     const logStore = useLogStore.getState();
     const connectionStore = useConnectionStore.getState();
 
-    set({ selectedNodeTag: node.tag });
+    set({ selectedNodeTag: node.tag, activatingNodeTag: node.tag });
 
-    // Update the target profile's selectedNodeTag
-    if (targetProfileId) {
-      const updatedProfiles = profiles.map((p) =>
-        p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
-      );
-      set({ profiles: updatedProfiles });
-      await storeHelper.saveProfiles(updatedProfiles);
-    }
+    try {
+      // Update the target profile's selectedNodeTag
+      if (targetProfileId) {
+        const updatedProfiles = profiles.map((p) =>
+          p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
+        );
+        set({ profiles: updatedProfiles });
+        await storeHelper.saveProfiles(updatedProfiles);
+      }
 
-    // Node-wise profile activation
-    if (targetProfileId && targetProfileId !== activeProfileId) {
-      try {
-        logStore.pushSystemLog(`Activating profile "${profiles.find((p) => p.id === targetProfileId)?.name}"...`);
+      // Node-wise profile activation
+      if (targetProfileId && targetProfileId !== activeProfileId) {
+        const targetProfileName = profiles.find((p) => p.id === targetProfileId)?.name || 'Unknown';
+        logStore.pushSystemLog(`Activating profile "${targetProfileName}"...`);
         await invoke('switch_profile', { profileId: targetProfileId, selectedNodeTag: node.tag });
         await storeHelper.setActiveProfileId(targetProfileId);
         set({ activeProfileId: targetProfileId });
-      } catch (err) {
-        logStore.pushSystemLog(`Failed to switch profile: ${err}`);
-      }
-    } else if (connectionStore.isConnected) {
-      try {
+      } else if (connectionStore.isConnected) {
         logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
         await invoke('switch_node_hot', { tag: node.tag });
         logStore.pushSystemLog(`Successfully switched to "${node.tag}".`);
-      } catch (err) {
-        logStore.pushSystemLog(`Failed to switch node: ${err}`);
       }
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to switch: ${err}`);
+    } finally {
+      set({ activatingNodeTag: null });
     }
   },
 

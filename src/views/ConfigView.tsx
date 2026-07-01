@@ -9,7 +9,6 @@ import type { Profile } from '../utils/store';
 function ProfileHeaderCard({
   selectedProfile,
   activeProfileId,
-  switchProfile,
   nodes,
   selectedNodeTag,
   isConnected,
@@ -18,7 +17,6 @@ function ProfileHeaderCard({
 }: {
   selectedProfile: Profile;
   activeProfileId: string | null;
-  switchProfile: (id: string) => void;
   nodes: any[];
   selectedNodeTag: string | null;
   isConnected: boolean;
@@ -36,32 +34,19 @@ function ProfileHeaderCard({
 
   return (
     <div style={{ padding: '16px 20px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', marginBottom: '16px', flexShrink: 0 }}>
-      {/* Top row: Profile name + badges + activate button */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: activeNode ? '12px' : '0' }}>
-        <div>
-          <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '6px' }}>
-            {selectedProfile.name}
-          </h2>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
-              <Zap size={9} style={{ marginRight: '3px' }} /> {selectedProfile.nodeCount} Nodes
+      {/* Top row: Profile name + badges */}
+      <div style={{ marginBottom: activeNode ? '12px' : '0' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '6px' }}>
+          {selectedProfile.name}
+        </h2>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
+            <Zap size={9} style={{ marginRight: '3px' }} /> {selectedProfile.nodeCount} Nodes
+          </span>
+          {selectedProfile.type === 'subscription' && (selectedProfile as any).subscriptionUrl && (
+            <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
+              <Link2 size={9} style={{ marginRight: '3px' }} /> Sub
             </span>
-            {selectedProfile.type === 'subscription' && (selectedProfile as any).subscriptionUrl && (
-              <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
-                <Link2 size={9} style={{ marginRight: '3px' }} /> Sub
-              </span>
-            )}
-          </div>
-        </div>
-        <div>
-          {!isActiveProfile && (
-            <button
-              className="btn primary"
-              onClick={() => switchProfile(selectedProfile.id)}
-              style={{ height: '30px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px', padding: '0 12px' }}
-            >
-              <Zap size={13} /> Activate
-            </button>
           )}
         </div>
       </div>
@@ -136,7 +121,8 @@ function ServerCard({
   openEditor,
   latencyResults,
   nodeGeoCache,
-  fetchNodeGeo
+  fetchNodeGeo,
+  activatingNodeTag
 }: {
   node: any;
   selectedNodeTag: string | null;
@@ -148,6 +134,7 @@ function ServerCard({
   latencyResults: any;
   nodeGeoCache: Record<string, string>;
   fetchNodeGeo: (server: string, tag: string) => void;
+  activatingNodeTag: string | null;
 }) {
   useEffect(() => {
     const cachedCode = nodeGeoCache[node.server];
@@ -167,8 +154,15 @@ function ServerCard({
           <span className="node-name" title={node.tag} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.tag}</span>
           <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
-            {isConnected && selectedProfile.id === activeProfileId && selectedNodeTag === node.tag && (
+            {isConnected && selectedProfile.id === activeProfileId && selectedNodeTag === node.tag ? (
               <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
+            ) : (
+              activatingNodeTag === node.tag && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div className="blink-dot" />
+                  <span style={{ fontSize: '9px', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>connecting</span>
+                </div>
+              )
             )}
           </div>
         </div>
@@ -232,12 +226,12 @@ export function ConfigView() {
     pickFileAndImport,
     importConfig,
     selectNode,
-    switchProfile,
     deleteProfile,
     testAllNodes,
     selectProfile,
     nodeGeoCache,
     fetchNodeGeo,
+    activatingNodeTag,
   } = useProfileStore();
 
   const { isConnected } = useConnectionStore();
@@ -433,7 +427,6 @@ export function ConfigView() {
               <ProfileHeaderCard
                 selectedProfile={selectedProfile}
                 activeProfileId={activeProfileId}
-                switchProfile={switchProfile}
                 nodes={nodes}
                 selectedNodeTag={selectedNodeTag}
                 isConnected={isConnected}
@@ -471,6 +464,7 @@ export function ConfigView() {
                         latencyResults={latencyResults}
                         nodeGeoCache={nodeGeoCache}
                         fetchNodeGeo={fetchNodeGeo}
+                        activatingNodeTag={activatingNodeTag}
                       />
                     ))}
                   </div>

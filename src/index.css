@@ -960,3 +960,17 @@ body {
   from { opacity: 0; transform: translateX(24px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ── SWITCHING DOT ANIMATIONS ─────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 0.35; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+.blink-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-ok);
+  box-shadow: 0 0 6px var(--status-ok-glow);
+  animation: blink 1s infinite ease-in-out;
+}
