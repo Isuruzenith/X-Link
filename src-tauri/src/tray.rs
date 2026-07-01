@@ -144,6 +144,9 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     };
 
     let info_text = format!("X-Link — {}", profile_name);
+    let selected_node = get_selected_node_tag(app).unwrap_or_else(|| "None".to_string());
+    let server_text = format!("Active Server: {}", selected_node);
+
     let toggle_text = match status {
         crate::state::ConnectionStatus::Connected | crate::state::ConnectionStatus::Connecting => "Disconnect",
         crate::state::ConnectionStatus::Disconnected => "Connect",
@@ -152,12 +155,15 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     let menu = Menu::new(app).map_err(|e| e.to_string())?;
     
     let info_item = MenuItemBuilder::new(info_text).enabled(false).build(app).map_err(|e| e.to_string())?;
+    let server_item = MenuItemBuilder::new(server_text).enabled(false).build(app).map_err(|e| e.to_string())?;
     let sep1 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let toggle_item = MenuItemBuilder::with_id("toggle", toggle_text).build(app).map_err(|e| e.to_string())?;
+    let restart_proxy_item = MenuItemBuilder::with_id("restart_proxy", "Restart Proxy").build(app).map_err(|e| e.to_string())?;
 
     menu.append(&info_item).map_err(|e| e.to_string())?;
+    menu.append(&server_item).map_err(|e| e.to_string())?;
     menu.append(&sep1).map_err(|e| e.to_string())?;
-
+    
     // Add server nodes submenu when connected
     if status == crate::state::ConnectionStatus::Connected {
         let nodes = get_node_tags_from_active_config(app);
@@ -182,12 +188,15 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     }
 
     menu.append(&toggle_item).map_err(|e| e.to_string())?;
+    menu.append(&restart_proxy_item).map_err(|e| e.to_string())?;
 
     let open_item = MenuItemBuilder::with_id("open", "Open Dashboard").build(app).map_err(|e| e.to_string())?;
+    let restart_app_item = MenuItemBuilder::with_id("restart_app", "Restart X-Link").build(app).map_err(|e| e.to_string())?;
     let sep2 = PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?;
     let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app).map_err(|e| e.to_string())?;
 
     menu.append(&open_item).map_err(|e| e.to_string())?;
+    menu.append(&restart_app_item).map_err(|e| e.to_string())?;
     menu.append(&sep2).map_err(|e| e.to_string())?;
     menu.append(&quit_item).map_err(|e| e.to_string())?;
 
@@ -225,11 +234,33 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                         let _ = handle_toggle_proxy(app_handle).await;
                     });
                 }
+                "restart_proxy" => {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<crate::state::ProxyState>();
+                        let selected_tag = crate::commands::config::get_selected_outbound_tag(&app_handle);
+                        
+                        // Stop the proxy
+                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), false, None).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        
+                        // Start the proxy again
+                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), true, selected_tag).await;
+                        update_tray(&app_handle);
+                    });
+                }
                 "open" => {
                     if let Some(window) = app.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
+                }
+                "restart_app" => {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        perform_clean_cleanup(&app_handle);
+                        app_handle.restart();
+                    });
                 }
                 "quit" => {
                     let app_handle = app.clone();
