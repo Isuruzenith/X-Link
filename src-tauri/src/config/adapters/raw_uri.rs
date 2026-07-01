@@ -437,6 +437,35 @@ mod tests {
     }
 
     #[test]
+    fn test_adapt_zoom_vless_ws_tls_uri() {
+        let uri = "vless://88dacb71-7530-475b-9ed6-a431caef6b3f@azure.ezgateway.net:443?alpn=h2%2Chttp%2F1.1&encryption=none&fp=chrome&host=azure.ezgateway.net&path=%2Fazure&security=tls&sni=aka.ms&allowInsecure=1&type=ws#Zoom-SG-Kavishka-300GB";
+        let res = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(res.len(), 1);
+
+        let node = &res[0];
+        assert_eq!(node.outbound_type, "vless");
+        assert_eq!(node.tag, "Zoom-SG-Kavishka-300GB");
+        assert_eq!(node.fields.get("server").and_then(|v| v.as_str()).unwrap(), "azure.ezgateway.net");
+        assert_eq!(node.fields.get("server_port").and_then(|v| v.as_u64()).unwrap(), 443);
+        assert_eq!(node.fields.get("uuid").and_then(|v| v.as_str()).unwrap(), "88dacb71-7530-475b-9ed6-a431caef6b3f");
+
+        let tls = node.fields.get("tls").unwrap().as_object().unwrap();
+        assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "aka.ms");
+        assert_eq!(tls.get("insecure").unwrap().as_bool().unwrap(), true);
+        assert_eq!(tls.get("alpn").unwrap().as_array().unwrap()[0].as_str().unwrap(), "h2");
+        assert_eq!(tls.get("alpn").unwrap().as_array().unwrap()[1].as_str().unwrap(), "http/1.1");
+        let utls = tls.get("utls").unwrap().as_object().unwrap();
+        assert_eq!(utls.get("fingerprint").unwrap().as_str().unwrap(), "chrome");
+
+        let transport = node.fields.get("transport").unwrap().as_object().unwrap();
+        assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "ws");
+        assert_eq!(transport.get("path").unwrap().as_str().unwrap(), "/azure");
+        let headers = transport.get("headers").unwrap().as_object().unwrap();
+        assert_eq!(headers.get("Host").unwrap().as_str().unwrap(), "azure.ezgateway.net");
+    }
+
+    #[test]
     fn test_adapt_raw_vmess() {
         // vmess JSON: {"ps":"VMess Test Node","add":"1.2.3.4","port":443,"id":"f47ac10b-58cc-4372-a567-0e02b2c3d479","aid":0,"tls":"tls","net":"ws","path":"/path","host":"sni.host"}
         let uri = "vmess://eyJwcyI6IlZNZXNzIFRlc3QgTm9kZSIsImFkZCI6IjEuMi4zLjQiLCJwb3J0Ijo0NDMsImlkIjoiZjQ3YWMxMGItNThjYy00MzcyLWE1NjctMGUwMmIyYzNkNDc5IiwiYWlkIjowLCJ0bHMiOiJ0bHMiLCJuZXQiOiJ3cyIsInBhdGgiOiIvcGF0aCIsImhvc3QiOiJzbmkuaG9zdCJ9";
@@ -510,5 +539,44 @@ mod tests {
         assert_eq!(node.fields.get("method").unwrap().as_str().unwrap(), "2022-blake3-aes-128-gcm");
         assert_eq!(node.fields.get("password").unwrap().as_str().unwrap(), "password_string");
     }
-}
 
+    #[test]
+    fn test_adapt_user_provided_uris() {
+        // URI 1: VLESS TCP TLS Reality/SNI
+        let uri1 = "vless://1444a1d0-74ea-48eb-8e39-296c87d5f4c2@178.128.16.26:443?security=tls&alpn=h2%2Chttp%2F1.1&encryption=none&headerType=none&type=tcp&flow=xtls-rprx-vision&sni=aka.ms#Danuwa-v2ray-dialog-zoom";
+        let res1 = adapt(uri1.as_bytes()).unwrap();
+        assert_eq!(res1.len(), 1);
+        let node1 = &res1[0];
+        assert_eq!(node1.outbound_type, "vless");
+        assert_eq!(node1.tag, "Danuwa-v2ray-dialog-zoom");
+        assert_eq!(node1.fields.get("server").unwrap().as_str().unwrap(), "178.128.16.26");
+        assert_eq!(node1.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
+        assert_eq!(node1.fields.get("flow").unwrap().as_str().unwrap(), "xtls-rprx-vision");
+        assert_eq!(node1.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "aka.ms");
+        
+        // URI 2: Trojan WS TLS
+        let uri2 = "trojan://fNeTGTI4KN@172.237.90.117:35287?path=%2FFREE%20By%20Tharuwa%20%280767597317%29&security=tls&alpn=h2%2Chttp%2F1.1&fp=chrome&type=ws&sni=zoom.us#Free%20By%20Tharuwa%20TLS%20ON";
+        let res2 = adapt(uri2.as_bytes()).unwrap();
+        assert_eq!(res2.len(), 1);
+        let node2 = &res2[0];
+        assert_eq!(node2.outbound_type, "trojan");
+        assert_eq!(node2.tag, "Free By Tharuwa TLS ON");
+        assert_eq!(node2.fields.get("server").unwrap().as_str().unwrap(), "172.237.90.117");
+        assert_eq!(node2.fields.get("server_port").unwrap().as_u64().unwrap(), 35287);
+        assert_eq!(node2.fields.get("transport").unwrap()["path"].as_str().unwrap(), "/FREE By Tharuwa (0767597317)");
+        assert_eq!(node2.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "zoom.us");
+        
+        // URI 3: VLESS WS TLS
+        let uri3 = "vless://408172dd-f3c7-4229-aff7-a741f78bda55@azureedge.duckdns.org:443?alpn=h2%2Chttp%2F1.1&encryption=none&fp=chrome&host=azureedge.duckdns.org&path=%2Fazureedge&security=tls&sni=aka.ms&type=ws#One-Piece-Zoom-In";
+        let res3 = adapt(uri3.as_bytes()).unwrap();
+        assert_eq!(res3.len(), 1);
+        let node3 = &res3[0];
+        assert_eq!(node3.outbound_type, "vless");
+        assert_eq!(node3.tag, "One-Piece-Zoom-In");
+        assert_eq!(node3.fields.get("server").unwrap().as_str().unwrap(), "azureedge.duckdns.org");
+        assert_eq!(node3.fields.get("server_port").unwrap().as_u64().unwrap(), 443);
+        assert_eq!(node3.fields.get("transport").unwrap()["path"].as_str().unwrap(), "/azureedge");
+        assert_eq!(node3.fields.get("transport").unwrap()["headers"]["Host"].as_str().unwrap(), "azureedge.duckdns.org");
+        assert_eq!(node3.fields.get("tls").unwrap()["server_name"].as_str().unwrap(), "aka.ms");
+    }
+}

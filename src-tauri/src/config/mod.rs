@@ -2,26 +2,11 @@ use std::net::IpAddr;
 use serde_json::Value;
 #[cfg(target_os = "windows")]
 use std::process::Command;
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
 
 pub mod adapters;
 pub mod generator;
 pub mod validator;
-
-pub fn get_config_path(app: &AppHandle, profile_id: &str) -> Result<PathBuf, String> {
-    let mut path = app.path().app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    
-    path.push("configs");
-    
-    // Create directory if it doesn't exist
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create configs directory: {}", e))?;
-    
-    path.push(format!("{}.json", profile_id));
-    Ok(path)
-}
+pub mod rules;
 
 pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -> Vec<String> {
     let mut addresses = vec![
@@ -89,11 +74,110 @@ pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
     ip_strings
 }
 
-pub fn build_route_rules() -> Vec<Value> {
-    vec![
+pub fn build_route_rules(
+    bypass_lan: bool,
+    user_rules: &[crate::config::rules::RoutingRule],
+    rule_sets: &[crate::config::rules::RuleSet],
+) -> Vec<Value> {
+    let mut rules = vec![
         serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
-        serde_json::json!({ "geoip": "private", "outbound": "direct" }),
-    ]
+    ];
+
+    if bypass_lan {
+        // Native, database-free private-network matching (no geoip/geosite
+        // resource files required, unlike the deprecated geoip/geosite fields).
+        rules.push(serde_json::json!({ "ip_is_private": true, "outbound": "direct" }));
+        rules.push(serde_json::json!({
+            "domain_suffix": [".lan", ".local", ".internal", ".home.arpa"],
+            "outbound": "direct"
+        }));
+    }
+
+    // User-defined rules evaluated top-to-bottom
+    for rule in user_rules {
+        if rule.enabled.unwrap_or(true) {
+            if let Some(json_rule) = crate::config::rules::build_singbox_rule(rule) {
+                rules.push(json_rule);
+            }
+        }
+    }
+
+    // Rule-set references (injected as individual rule entries)
+    for rs in rule_sets {
+        rules.push(serde_json::json!({
+            "rule_set": [rs.tag],
+            "outbound": "direct"
+        }));
+    }
+
+    rules
+}
+
+pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
+    let mut changed = false;
+
+    if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|v| v.as_array_mut()) {
+        for inbound in inbounds {
+            if inbound.get("type").and_then(|v| v.as_str()) == Some("tun") {
+                inbound["address"] = serde_json::json!(["172.19.0.1/30"]);
+                inbound["auto_route"] = serde_json::json!(true);
+                inbound["strict_route"] = serde_json::json!(true);
+                inbound["stack"] = serde_json::json!("gvisor");
+                inbound["sniff"] = serde_json::json!(true);
+                inbound["sniff_override_destination"] = serde_json::json!(true);
+                changed = true;
+            }
+        }
+    }
+
+    if has_vless_websocket_outbound(config_val) {
+        let udp_reject = serde_json::json!({
+            "network": "udp",
+            "action": "reject",
+            "method": "drop"
+        });
+
+        if let Some(route) = config_val.get_mut("route").and_then(|v| v.as_object_mut()) {
+            let rules = route
+                .entry("rules".to_string())
+                .or_insert_with(|| serde_json::json!([]));
+            if let Some(rule_list) = rules.as_array_mut() {
+                let already_present = rule_list.iter().any(|rule| {
+                    rule.get("network").and_then(|v| v.as_str()) == Some("udp")
+                        && rule.get("action").and_then(|v| v.as_str()) == Some("reject")
+                });
+
+                if !already_present {
+                    let insert_at = rule_list
+                        .iter()
+                        .position(|rule| rule.get("protocol").and_then(|v| v.as_str()) != Some("dns"))
+                        .unwrap_or(rule_list.len());
+                    rule_list.insert(insert_at, udp_reject);
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    changed
+}
+
+fn has_vless_websocket_outbound(config_val: &Value) -> bool {
+    config_val
+        .get("outbounds")
+        .and_then(|v| v.as_array())
+        .map(|outbounds| {
+            outbounds.iter().any(|outbound| {
+                outbound.get("type").and_then(|v| v.as_str()) == Some("vless")
+                    && outbound
+                        .get("transport")
+                        .and_then(|v| v.get("type"))
+                        .and_then(|v| v.as_str())
+                        .map(|transport| transport == "ws" || transport == "httpupgrade")
+                        .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 pub fn resolve_dns_address(configured: Option<&str>) -> String {
@@ -169,4 +253,79 @@ fn get_system_dns_address() -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_route_excludes_proxy_server_ips() {
+        let addresses = build_route_exclude_addresses(
+            "192.168.8.1",
+            &["139.59.105.103/32".to_string(), "2001:db8::1/128".to_string()],
+        );
+
+        assert!(addresses.contains(&"192.168.8.1/32".to_string()));
+        assert!(addresses.contains(&"139.59.105.103/32".to_string()));
+        assert!(addresses.contains(&"2001:db8::1/128".to_string()));
+    }
+
+    #[test]
+    fn test_tun_compatibility_profile_uses_ipv4_only_and_sniff_override() {
+        let mut config = serde_json::json!({
+            "inbounds": [{
+                "type": "tun",
+                "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+                "auto_route": false,
+                "strict_route": false,
+                "stack": "system",
+                "sniff": true,
+                "sniff_override_destination": false
+            }],
+            "outbounds": [{
+                "type": "vless",
+                "tag": "node",
+                "transport": { "type": "ws" }
+            }],
+            "route": {
+                "rules": [{ "protocol": "dns", "action": "hijack-dns" }],
+                "final": "proxy"
+            }
+        });
+
+        assert!(apply_tun_compatibility_profile(&mut config));
+        let tun = &config["inbounds"][0];
+        assert_eq!(tun["address"], serde_json::json!(["172.19.0.1/30"]));
+        assert_eq!(tun["auto_route"], serde_json::json!(true));
+        assert_eq!(tun["strict_route"], serde_json::json!(true));
+        assert_eq!(tun["stack"], serde_json::json!("gvisor"));
+        assert_eq!(tun["sniff_override_destination"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_tun_compatibility_profile_rejects_udp_for_vless_ws() {
+        let mut config = serde_json::json!({
+            "inbounds": [{ "type": "tun" }],
+            "outbounds": [{
+                "type": "vless",
+                "tag": "node",
+                "transport": { "type": "ws" }
+            }],
+            "route": {
+                "rules": [
+                    { "protocol": "dns", "action": "hijack-dns" },
+                    { "ip_is_private": true, "outbound": "direct" }
+                ],
+                "final": "proxy"
+            }
+        });
+
+        apply_tun_compatibility_profile(&mut config);
+        let rules = config["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["protocol"].as_str().unwrap(), "dns");
+        assert_eq!(rules[1]["network"].as_str().unwrap(), "udp");
+        assert_eq!(rules[1]["action"].as_str().unwrap(), "reject");
+        assert_eq!(rules[1]["method"].as_str().unwrap(), "drop");
+    }
 }
