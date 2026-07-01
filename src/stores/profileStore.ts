@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { storeHelper, type Profile } from '../utils/store';
+import { storeHelper, type Profile, type ProxyNode } from '../utils/store';
 import { useLogStore } from './logStore';
 import { useToastStore } from './toastStore';
 import { useConnectionStore } from './connectionStore';
@@ -19,7 +19,7 @@ interface ProfileState {
   profiles: Profile[];
   activeProfileId: string | null;
   selectedProfileId: string | null;
-  nodes: any[];
+  nodes: ProxyNode[];
   selectedNodeTag: string | null;
   nodeGeoCache: Record<string, string>;
   activatingNodeTag: string | null;
@@ -41,7 +41,7 @@ interface ProfileState {
   // Actions
   initProfiles: () => Promise<void>;
   refreshNodes: (profileId?: string) => Promise<void>;
-  selectNode: (node: any) => Promise<void>;
+  selectNode: (node: { tag: string }) => Promise<void>;
   setImportName: (name: string) => void;
   setImportContent: (content: string) => void;
   setImportError: (err: string | null) => void;
@@ -51,7 +51,7 @@ interface ProfileState {
   deleteProfile: (profileId: string) => Promise<void>;
   switchProfile: (profileId: string) => Promise<void>;
   testAllNodes: () => Promise<void>;
-  updateNodesList: (newNodes: any[]) => void;
+  updateNodesList: (newNodes: ProxyNode[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
   fetchNodeGeo: (server: string, tag: string) => Promise<void>;
 }
@@ -194,7 +194,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
     try {
       // Fetch outbounds for the specific profile (or fall back to active config)
-      const outbounds = await invoke<any[]>('get_profile_outbounds', { profileId: pid });
+      const outbounds = await invoke<ProxyNode[]>('get_profile_outbounds', { profileId: pid });
       set({ nodes: outbounds || [] });
 
       const profile = get().profiles.find((p) => p.id === pid);
@@ -202,7 +202,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
       if (!tag || !(outbounds || []).some((n) => n.tag === tag)) {
         try {
-          const active = await invoke<any>('get_active_outbound');
+          const active = await invoke<ProxyNode>('get_active_outbound');
           tag = active?.tag || outbounds?.[0]?.tag || null;
         } catch {
           tag = outbounds?.[0]?.tag || null;

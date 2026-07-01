@@ -1,4 +1,5 @@
 import { Store } from '@tauri-apps/plugin-store';
+import type { RoutingRule } from './store';
 
 export const CONFIG_SCHEMA_VERSION = 2;
 
@@ -12,8 +13,8 @@ async function getRoutingStore(): Promise<Store> {
 
 async function migrateV1toV2(routingStore: Store): Promise<void> {
   // v1 had no 'enabled' field on RoutingRule — back-fill with true
-  const rules = await routingStore.get<any[]>('rules') ?? [];
-  const migrated = rules.map((r: any) => ({ enabled: true, ...r }));
+  const rules = await routingStore.get<RoutingRule[]>('rules') ?? [];
+  const migrated = rules.map((r) => ({ enabled: true, ...r }));
   await routingStore.set('rules', migrated);
   await routingStore.save();
 }

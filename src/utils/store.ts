@@ -57,6 +57,54 @@ export interface RuleSet {
 export type DnsStrategy = 'prefer_ipv4' | 'prefer_ipv6' | 'ipv4_only' | 'ipv6_only';
 export type DnsMode = 'normal' | 'fakeip';
 
+export type ThemeMode = 'dark' | 'light' | 'system';
+
+export interface ProxyNode {
+  tag: string;
+  type: string;
+  server: string;
+  server_port?: number;
+  uuid?: string;
+  id?: string;
+  flow?: string;
+  password?: string;
+  method?: string;
+  auth?: string;
+  up_mbps?: number;
+  down_mbps?: number;
+  obfs?: {
+    type?: string;
+    password?: string;
+  };
+  congestion_control?: string;
+  udp_relay_mode?: string;
+  username?: string;
+  version?: number;
+  udp_over_tcp?: boolean;
+  tls?: {
+    enabled?: boolean;
+    insecure?: boolean;
+    server_name?: string;
+    alpn?: string[];
+    reality?: {
+      enabled?: boolean;
+      public_key?: string;
+      short_id?: string;
+    };
+    utls?: {
+      fingerprint?: string;
+    };
+  };
+  network?: string;
+  transport?: {
+    type?: string;
+    path?: string;
+    headers?: Record<string, string>;
+    service_name?: string;
+  };
+  [key: string]: unknown;
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 export interface Settings {
   // Core behavior
@@ -108,11 +156,13 @@ export interface Settings {
 
   // Legacy SNI bypass
   dnsAddress: string;
+  theme: ThemeMode;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   proxyMode: 'tun',
   closeToTray: true,
+  theme: 'dark',
   autostart: false,
   httpPort: 7890,
   socksPort: 7891,
@@ -188,7 +238,7 @@ export const storeHelper = {
       const saved: Partial<Settings> = {};
       for (const [key, val] of entries) {
         if (key in DEFAULT_SETTINGS && val !== null && val !== undefined) {
-          (saved as any)[key] = val;
+          (saved as Record<string, unknown>)[key] = val;
         }
       }
       return { ...DEFAULT_SETTINGS, ...saved };

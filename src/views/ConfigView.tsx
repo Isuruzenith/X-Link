@@ -4,7 +4,7 @@ import { ViewShell } from '../components/ViewShell';
 import { useProfileStore, getCountryCode } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
-import type { Profile } from '../utils/store';
+import type { Profile, ProxyNode } from '../utils/store';
 
 function ProfileHeaderCard({
   selectedProfile,
@@ -17,13 +17,13 @@ function ProfileHeaderCard({
 }: {
   selectedProfile: Profile;
   activeProfileId: string | null;
-  nodes: any[];
+  nodes: ProxyNode[];
   selectedNodeTag: string | null;
   isConnected: boolean;
   nodeGeoCache: Record<string, string>;
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
 }) {
-  const activeNode = selectedNodeTag ? nodes.find((n: any) => n.tag === selectedNodeTag) : null;
+  const activeNode = selectedNodeTag ? nodes.find((n: ProxyNode) => n.tag === selectedNodeTag) : null;
   const activeServerCode = activeNode
     ? (nodeGeoCache[activeNode.server] && nodeGeoCache[activeNode.server] !== 'loading' && nodeGeoCache[activeNode.server] !== 'unknown'
         ? nodeGeoCache[activeNode.server]
@@ -43,7 +43,7 @@ function ProfileHeaderCard({
           <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
             <Zap size={9} style={{ marginRight: '3px' }} /> {selectedProfile.nodeCount} Nodes
           </span>
-          {selectedProfile.type === 'subscription' && (selectedProfile as any).subscriptionUrl && (
+          {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
             <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
               <Link2 size={9} style={{ marginRight: '3px' }} /> Sub
             </span>
@@ -124,14 +124,14 @@ function ServerCard({
   fetchNodeGeo,
   activatingNodeTag
 }: {
-  node: any;
+  node: ProxyNode;
   selectedNodeTag: string | null;
-  selectNode: (node: any) => void;
+  selectNode: (node: ProxyNode) => void;
   isConnected: boolean;
-  selectedProfile: any;
+  selectedProfile: Profile;
   activeProfileId: string | null;
-  openEditor: (node: any) => void;
-  latencyResults: any;
+  openEditor: (node: ProxyNode) => void;
+  latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
   nodeGeoCache: Record<string, string>;
   fetchNodeGeo: (server: string, tag: string) => void;
   activatingNodeTag: string | null;

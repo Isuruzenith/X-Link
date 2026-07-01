@@ -6,7 +6,7 @@ import {
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
-import type { Settings } from '../utils/store';
+import type { Settings, DnsMode } from '../utils/store';
 import xLinkLogo from '../assets/X-Link-logo.png';
 
 const Inp = ({ value, onChange, placeholder, mono = false }: {
@@ -66,7 +66,7 @@ export function SettingsView() {
 
   const [settingsTab, setSettingsTab] = React.useState<SettingsSection>('general');
 
-  const sideNavItems: [SettingsSection, React.ComponentType<any>, string][] = [
+  const sideNavItems: [SettingsSection, React.ComponentType<{ className?: string; size?: number }>, string][] = [
     ['general', SettingsIcon, 'General'],
     ['tun',     Network,      'TUN Mode'],
     ['sniff',   Eye,          'Sniffing'],
@@ -144,7 +144,7 @@ export function SettingsView() {
                           </span>
                         </div>
                         <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(val) ? 'var(--status-err)' : undefined }}
-                          value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); updateSettings({ [key]: v } as any); }} />
+                          value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); updateSettings({ [key]: v } as Partial<Settings>); }} />
                       </div>
                     ))}
                   </div>
@@ -191,7 +191,7 @@ export function SettingsView() {
                 <div className="grid-2">
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">TUN Stack Implementation</label>
-                    <Sel value={settings.tunStack} onChange={(v) => updateSettings({ tunStack: v as any })} options={[
+                    <Sel value={settings.tunStack} onChange={(v) => updateSettings({ tunStack: v as Settings['tunStack'] })} options={[
                       { value: 'mixed', label: 'Mixed (gVisor TCP + system UDP)' },
                       { value: 'gvisor', label: 'gVisor (Full userspace)' },
                       { value: 'system', label: 'System (Kernel-level)' },
@@ -204,13 +204,13 @@ export function SettingsView() {
                     <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>9000 recommended. Use 1500 for strict environments.</span>
                   </div>
                 </div>
-                {[
+                {([
                   { key: 'tunAutoRoute', title: 'Auto Route', desc: 'Add routes to direct traffic into TUN interface' },
                   { key: 'tunAutoRedirect', title: 'Auto Redirect (nftables)', desc: 'Use nftables-based redirect on Linux' },
                   { key: 'tunStrictRoute', title: 'Strict Route', desc: 'Block unmatched traffic to prevent leaks' },
                   { key: 'tunEndpointIndependentNat', title: 'Endpoint Independent NAT', desc: 'Improves UDP NAT traversal (P2P, gaming)' },
-                ].map(({ key, title, desc }) => (
-                  <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => updateSettings({ [key]: v } as any)} disabled={!isElevated} />
+                ] as const).map(({ key, title, desc }) => (
+                  <SwitchRow key={key} title={title} desc={desc} checked={settings[key]} onChange={(v) => updateSettings({ [key]: v } as Partial<Settings>)} disabled={!isElevated} />
                 ))}
               </div>
               <div className="info-box">
@@ -229,13 +229,13 @@ export function SettingsView() {
                   checked={settings.sniffEnabled} onChange={(v) => updateSettings({ sniffEnabled: v })} />
                 <div style={{ opacity: settings.sniffEnabled ? 1 : 0.4, pointerEvents: settings.sniffEnabled ? 'auto' : 'none' }}>
                   <div className="grid-2">
-                    {[
+                    {([
                       { key: 'sniffHttp', title: 'HTTP Sniffing', desc: 'Extract hostname from HTTP Host header' },
                       { key: 'sniffTls', title: 'TLS/HTTPS Sniffing', desc: 'Extract SNI from TLS ClientHello' },
                       { key: 'sniffQuic', title: 'QUIC/HTTP3 Sniffing', desc: 'Extract SNI from QUIC Initial packets' },
                       { key: 'sniffOverrideDestination', title: 'Override Destination', desc: 'Use sniffed domain to override target IP' },
-                    ].map(({ key, title, desc }) => (
-                      <SwitchRow key={key} title={title} desc={desc} checked={(settings as any)[key]} onChange={(v) => updateSettings({ [key]: v } as any)} />
+                    ] as const).map(({ key, title, desc }) => (
+                      <SwitchRow key={key} title={title} desc={desc} checked={settings[key]} onChange={(v) => updateSettings({ [key]: v } as Partial<Settings>)} />
                     ))}
                   </div>
                 </div>
@@ -267,7 +267,7 @@ export function SettingsView() {
                 <div className="settings-section-heading">Resolution Mode</div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">DNS Mode</label>
-                  <Sel value={settings.dnsMode} onChange={(v) => updateSettings({ dnsMode: v as any })} options={[
+                  <Sel value={settings.dnsMode} onChange={(v) => updateSettings({ dnsMode: v as DnsMode })} options={[
                     { value: 'fakeip', label: 'FakeIP (recommended for TUN)' },
                     { value: 'normal', label: 'Normal (real IP resolution)' },
                   ]} />

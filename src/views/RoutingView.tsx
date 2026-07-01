@@ -157,7 +157,7 @@ export function RoutingView() {
                     <label className="form-label">Type</label>
                     <Sel
                       value={ruleSetForm.type}
-                      onChange={(v) => setRuleSetForm({ type: v as any })}
+                      onChange={(v) => setRuleSetForm({ type: v as 'remote' | 'local' })}
                       options={[{ value: 'remote', label: 'Remote' }, { value: 'local', label: 'Local' }]}
                     />
                   </div>
@@ -165,7 +165,7 @@ export function RoutingView() {
                     <label className="form-label">Format</label>
                     <Sel
                       value={ruleSetForm.format}
-                      onChange={(v) => setRuleSetForm({ format: v as any })}
+                      onChange={(v) => setRuleSetForm({ format: v as 'binary' | 'source' })}
                       options={[
                         { value: 'binary', label: 'Binary (.srs)' },
                         { value: 'source', label: 'Source (.json)' },

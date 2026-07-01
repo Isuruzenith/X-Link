@@ -152,7 +152,9 @@ export default function App() {
             pushLog(type, line);
           });
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     })();
 
     return () => {
@@ -161,7 +163,7 @@ export default function App() {
       unlistenStatus.then((f) => f());
       unlistenSettings.then((f) => f());
     };
-  }, []);
+  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
 
   // ── PORT CONFLICT DETECTOR ─────────────────────────────────────────────────
   useEffect(() => {
@@ -172,11 +174,13 @@ export default function App() {
         try {
           const res = await invoke<number | null>('check_port_conflict', { ports: [p] });
           if (res) conflicts.push(p);
-        } catch {}
+        } catch {
+          // ignore
+        }
       }
       setConflictingPorts(conflicts);
     })();
-  }, [activeTab, httpPort, socksPort, mixedPort]);
+  }, [activeTab, httpPort, socksPort, mixedPort, setConflictingPorts]);
 
   // ── TRAFFIC & STATUS POLLING ───────────────────────────────────────────────
   useEffect(() => {
@@ -208,10 +212,12 @@ export default function App() {
         } else {
           resetTrafficStats();
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     }, 1000);
     return () => clearInterval(poll);
-  }, []);
+  }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats]);
 
   return (
     <div className="app-root">

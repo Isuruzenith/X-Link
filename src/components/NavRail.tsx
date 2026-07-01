@@ -9,7 +9,7 @@ interface NavRailProps {
   onTabChange: (tab: TabId) => void;
 }
 
-const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
+const NAV_ITEMS: [TabId, React.ComponentType<{ className?: string; size?: number }>, string][] = [
   ['dashboard', Activity,  'Dashboard'],
   ['profiles',  Layers,    'Config'],
   ['routing',   Route,     'Routing'],
