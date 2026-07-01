@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Isuruzenith",
     "externalBin": [
       "binaries/sing-box"
     ],

@@ -572,8 +572,10 @@ pub async fn toggle_proxy(
         // Forcefully kill any sing-box processes system-wide to guarantee clean state
         #[cfg(target_os = "windows")]
         {
+            use std::os::windows::process::CommandExt;
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/IM", "sing-box.exe", "/T"])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
                 .output();
         }
         #[cfg(not(target_os = "windows"))]
@@ -630,8 +632,10 @@ pub async fn toggle_proxy(
     // Forcefully kill any existing sing-box processes system-wide before starting
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "sing-box.exe", "/T"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output();
         // Brief delay to let sockets fully release
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
