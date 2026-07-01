@@ -67,10 +67,7 @@ export function ConnectionsView() {
   const prevBytesRef = useRef<Record<string, { upload: number; download: number; time: number }>>({});
 
   useEffect(() => {
-    if (!isConnected) {
-      setConnections([]);
-      return;
-    }
+    if (!isConnected) return;
 
     const fetchConnections = async () => {
       try {
@@ -101,13 +98,17 @@ export function ConnectionsView() {
         prevBytesRef.current = nextRefs;
 
         setConnections(updatedList);
-      } catch {}
+      } catch {
+        // Silent catch to prevent UI crash on boot or network drop
+      }
     };
 
     fetchConnections();
     const interval = setInterval(fetchConnections, 1500);
     return () => clearInterval(interval);
   }, [isConnected]);
+
+  const visibleConnections = isConnected ? connections : [];
 
   // Kill connection handler
   const handleKill = async (id: string, dest: string) => {
@@ -134,7 +135,7 @@ export function ConnectionsView() {
   };
 
   // Filtering
-  const filtered = connections.filter((c) => {
+  const filtered = visibleConnections.filter((c) => {
     // Search query matching
     const query = searchQuery.toLowerCase();
     const matchesSearch =
@@ -155,8 +156,8 @@ export function ConnectionsView() {
 
   // Sorting
   const sorted = [...filtered].sort((a, b) => {
-    let valA: any = 0;
-    let valB: any = 0;
+    let valA: string | number = 0;
+    let valB: string | number = 0;
 
     if (sortBy === 'host') {
       valA = a.metadata.host || a.metadata.destinationIP || '';
@@ -192,7 +193,7 @@ export function ConnectionsView() {
       subtitle="Real-time network tunnels audit and packet statistics"
       actions={
         <div className="flex-row gap-12">
-          {connections.length > 0 && (
+          {visibleConnections.length > 0 && (
             <button className="btn danger sm" onClick={handleKillAll}>
               <ShieldAlert size={13} /> Close All
             </button>
@@ -216,15 +217,15 @@ export function ConnectionsView() {
           </div>
           
           <div className="seg-control">
-            {[
+            {([
               { key: 'all', label: 'All Tunnels' },
               { key: 'proxy', label: 'Proxy Tunnels' },
               { key: 'direct', label: 'Direct Tunnels' },
-            ].map((f) => (
+            ] as const).map((f) => (
               <div
                 key={f.key}
                 className={`seg-item ${filterType === f.key ? 'active' : ''}`}
-                onClick={() => setFilterType(f.key as any)}
+                onClick={() => setFilterType(f.key)}
               >
                 {f.label}
               </div>
@@ -232,7 +233,7 @@ export function ConnectionsView() {
           </div>
 
           <span style={{ fontSize: '12px', color: 'var(--text-low)', marginLeft: 'auto', fontWeight: 500 }}>
-            {sorted.length} / {connections.length} active sockets
+            {sorted.length} / {visibleConnections.length} active sockets
           </span>
         </div>
 
