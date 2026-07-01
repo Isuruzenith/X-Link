@@ -182,20 +182,12 @@ pub fn check_tun_support(app: tauri::AppHandle) -> bool {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = app;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        is_elevated::is_elevated()
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        is_elevated::is_elevated()
+        crate::os::is_elevated()
     }
 
     #[cfg(target_os = "linux")]
     {
-        if is_elevated::is_elevated() {
+        if crate::os::is_elevated() {
             return true;
         }
         
@@ -346,6 +338,10 @@ pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

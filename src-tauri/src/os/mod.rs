@@ -27,3 +27,15 @@ pub fn disable_system_proxy() -> Result<(), String> {
            .map_err(|e| format!("Failed to clear system proxy (fallback): {}", e))
     }
 }
+
+pub fn is_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        is_elevated::is_elevated()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        unsafe { libc::getuid() == 0 }
+    }
+}
+

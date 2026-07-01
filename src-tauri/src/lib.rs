@@ -59,7 +59,7 @@ pub fn run() {
                 let state = app_handle.state::<ProxyState>();
                 if let Ok(settings) = state.reload_settings(&app_handle) {
                     // Persistence: if running elevated and proxyMode is 'tun', ensure runas registry flag is set
-                    if is_elevated::is_elevated() && settings.proxy_mode == "tun" {
+                    if crate::os::is_elevated() && settings.proxy_mode == "tun" {
                         let _ = crate::commands::system::set_runas_admin(true);
                     }
                 }
@@ -122,6 +122,10 @@ pub fn run() {
 }
 
 pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+    }
     #[cfg(target_os = "windows")]
     {
         if let Ok(resource_dir) = app.path().resource_dir() {
