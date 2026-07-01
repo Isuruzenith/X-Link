@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.3.0...x-link-v0.4.0) (2026-07-01)
+
+
+### Features
+
+* initialize core backend architecture with state management, command modules, and configuration generation logic ([7a79ea8](https://github.com/Isuruzenith/X-Link/commit/7a79ea8b42f254b52d92a5662fd0b7cf747a359b))
+* initialize system proxy management, autostart functionality, and CI pipeline for Tauri project ([7e3ddeb](https://github.com/Isuruzenith/X-Link/commit/7e3ddeb6154aefdf481abde60ce13dc5f44d388b))
+
 ## [0.3.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.2.0...x-link-v0.3.0) (2026-07-01)
 
 
