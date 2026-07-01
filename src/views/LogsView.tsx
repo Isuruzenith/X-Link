@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
-import { Terminal, Copy, Trash2, Search, Info, AlertTriangle, ShieldAlert, Cpu } from 'lucide-react';
+import { Terminal, Copy, Trash2, Search } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useLogStore } from '../stores/logStore';
 import { useToastStore } from '../stores/toastStore';
@@ -15,13 +15,6 @@ export function LogsView() {
       endRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs, autoScroll]);
-
-  // Statistics counters
-  const totalCount = logs.length;
-  const infoCount = logs.filter((l) => l.type === 'info').length;
-  const warnCount = logs.filter((l) => l.type === 'warn').length;
-  const errorCount = logs.filter((l) => l.type === 'error').length;
-  const systemCount = logs.filter((l) => l.type === 'system').length;
 
   const filtered = logs.filter((l) => {
     if (levelFilter !== 'all' && l.type !== levelFilter) return false;
@@ -125,59 +118,6 @@ export function LogsView() {
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(100vh - 130px)' }}>
-        
-        {/* Metric summary tiles */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', flexShrink: 0 }}>
-          <div className="metric-tile" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px' }}>
-            <div style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-med)', padding: '6px', borderRadius: '8px', display: 'flex' }}>
-              <Terminal size={16} />
-            </div>
-            <div>
-              <div className="metric-tile-val" style={{ fontSize: '16px', lineHeight: '1.2' }}>{totalCount}</div>
-              <div className="metric-tile-label" style={{ fontSize: '9px', marginTop: '1px' }}>Total Logs</div>
-            </div>
-          </div>
-          
-          <div className="metric-tile" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px' }}>
-            <div style={{ background: 'rgba(59, 130, 246, 0.08)', color: 'var(--status-info)', padding: '6px', borderRadius: '8px', display: 'flex' }}>
-              <Info size={16} />
-            </div>
-            <div>
-              <div className="metric-tile-val" style={{ fontSize: '16px', lineHeight: '1.2', color: 'var(--text-high)' }}>{infoCount}</div>
-              <div className="metric-tile-label" style={{ fontSize: '9px', marginTop: '1px' }}>Info Logs</div>
-            </div>
-          </div>
-
-          <div className="metric-tile" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px' }}>
-            <div style={{ background: 'rgba(245, 158, 11, 0.08)', color: '#f59e0b', padding: '6px', borderRadius: '8px', display: 'flex', boxShadow: '0 0 8px rgba(245, 158, 11, 0.15)' }}>
-              <AlertTriangle size={16} />
-            </div>
-            <div>
-              <div className="metric-tile-val" style={{ fontSize: '16px', lineHeight: '1.2', color: '#f59e0b' }}>{warnCount}</div>
-              <div className="metric-tile-label" style={{ fontSize: '9px', marginTop: '1px' }}>Warnings</div>
-            </div>
-          </div>
-
-          <div className="metric-tile" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px' }}>
-            <div style={{ background: 'rgba(239, 68, 68, 0.08)', color: '#ef4444', padding: '6px', borderRadius: '8px', display: 'flex', boxShadow: '0 0 8px rgba(239, 68, 68, 0.15)' }}>
-              <ShieldAlert size={16} />
-            </div>
-            <div>
-              <div className="metric-tile-val" style={{ fontSize: '16px', lineHeight: '1.2', color: '#ef4444' }}>{errorCount}</div>
-              <div className="metric-tile-label" style={{ fontSize: '9px', marginTop: '1px' }}>Errors</div>
-            </div>
-          </div>
-
-          <div className="metric-tile" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px' }}>
-            <div style={{ background: 'rgba(16, 185, 129, 0.08)', color: '#10b981', padding: '6px', borderRadius: '8px', display: 'flex' }}>
-              <Cpu size={16} />
-            </div>
-            <div>
-              <div className="metric-tile-val" style={{ fontSize: '16px', lineHeight: '1.2', color: '#10b981' }}>{systemCount}</div>
-              <div className="metric-tile-label" style={{ fontSize: '9px', marginTop: '1px' }}>System</div>
-            </div>
-          </div>
-        </div>
 
         {/* Filter bar */}
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexShrink: 0 }}>
