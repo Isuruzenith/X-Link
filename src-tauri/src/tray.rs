@@ -100,6 +100,71 @@ fn get_selected_node_tag(app: &AppHandle) -> Option<String> {
     result
 }
 
+/// Reads the current proxyMode from settings.json ("system" or "tun")
+fn get_current_proxy_mode(app: &AppHandle) -> String {
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("settings.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(mode) = val.get("proxyMode").and_then(|v| v.as_str()) {
+                        return mode.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "system".to_string()
+}
+
+/// Writes the proxyMode value to settings.json (merges with existing settings)
+fn set_proxy_mode(app: &AppHandle, mode: &str) {
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("settings.json");
+        let mut settings = if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                .unwrap_or_else(|| serde_json::json!({}))
+        } else {
+            serde_json::json!({})
+        };
+        settings["proxyMode"] = serde_json::json!(mode);
+        let _ = std::fs::write(&path, serde_json::to_string_pretty(&settings).unwrap_or_default());
+    }
+}
+
+/// Formats bytes-per-second into a human-readable speed string
+fn format_speed(bytes_per_sec: u64) -> String {
+    if bytes_per_sec >= 1_048_576 {
+        format!("{:.1} MB/s", bytes_per_sec as f64 / 1_048_576.0)
+    } else if bytes_per_sec >= 1024 {
+        format!("{} KB/s", bytes_per_sec / 1024)
+    } else {
+        format!("{} B/s", bytes_per_sec)
+    }
+}
+
+/// Updates the tray icon tooltip with live speed data or connection status
+pub fn update_tray_tooltip(app: &AppHandle) {
+    let state = app.state::<crate::state::ProxyState>();
+    let status = state.get_status();
+
+    let tooltip = match status {
+        crate::state::ConnectionStatus::Connected => {
+            let down = state.download_speed.lock().map(|v| *v).unwrap_or(0);
+            let up = state.upload_speed.lock().map(|v| *v).unwrap_or(0);
+            format!("X-Link — \u{2193} {} \u{2191} {}", format_speed(down), format_speed(up))
+        }
+        crate::state::ConnectionStatus::Connecting => "X-Link — Connecting...".to_string(),
+        crate::state::ConnectionStatus::Disconnected => "X-Link — Disconnected".to_string(),
+    };
+
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(&tooltip));
+    }
+}
+
 fn get_disconnected_icon() -> tauri::image::Image<'static> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/System_tray_ico/disconnected.png"))
         .expect("Failed to load disconnected icon")
@@ -152,6 +217,8 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
         crate::state::ConnectionStatus::Disconnected => "Connect",
     };
 
+    let current_mode = get_current_proxy_mode(app);
+
     let menu = Menu::new(app).map_err(|e| e.to_string())?;
     
     let info_item = MenuItemBuilder::new(info_text).enabled(false).build(app).map_err(|e| e.to_string())?;
@@ -160,9 +227,25 @@ pub fn build_tray_menu(app: &AppHandle) -> Result<Menu<Wry>, String> {
     let toggle_item = MenuItemBuilder::with_id("toggle", toggle_text).build(app).map_err(|e| e.to_string())?;
     let restart_proxy_item = MenuItemBuilder::with_id("restart_proxy", "Restart Proxy").build(app).map_err(|e| e.to_string())?;
 
+    // Build Proxy Mode submenu
+    let mode_system = CheckMenuItemBuilder::with_id("mode:system", "System Proxy")
+        .checked(current_mode == "system")
+        .build(app)
+        .map_err(|e| e.to_string())?;
+    let mode_tun = CheckMenuItemBuilder::with_id("mode:tun", "TUN Mode")
+        .checked(current_mode == "tun")
+        .build(app)
+        .map_err(|e| e.to_string())?;
+    let mode_submenu = SubmenuBuilder::with_id(app, "proxy_mode", "Proxy Mode")
+        .item(&mode_system)
+        .item(&mode_tun)
+        .build()
+        .map_err(|e| e.to_string())?;
+
     menu.append(&info_item).map_err(|e| e.to_string())?;
     menu.append(&server_item).map_err(|e| e.to_string())?;
     menu.append(&sep1).map_err(|e| e.to_string())?;
+    menu.append(&mode_submenu).map_err(|e| e.to_string())?;
     
     // Add server nodes submenu when connected
     if status == crate::state::ConnectionStatus::Connected {
@@ -209,11 +292,12 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
 
     let tray = TrayIconBuilder::with_id("main")
         .icon(get_disconnected_icon())
+        .tooltip("X-Link — Disconnected")
         .menu(&menu)
         .on_menu_event(|app, event| {
             let id = event.id.as_ref().to_string();
+            // Handle node switch from tray
             if id.starts_with("node:") {
-                // Handle node switch from tray
                 let node_tag = id.strip_prefix("node:").unwrap_or("").to_string();
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -222,8 +306,30 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                         app_handle.clone(), state.clone(), node_tag
                     ).await;
                     update_tray(&app_handle);
-                    // Notify frontend of the node change
                     let _ = app_handle.emit("node-switched", ());
+                });
+                return;
+            }
+            // Handle proxy mode switch from tray
+            if id.starts_with("mode:") {
+                let new_mode = id.strip_prefix("mode:").unwrap_or("system").to_string();
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    set_proxy_mode(&app_handle, &new_mode);
+                    let state = app_handle.state::<crate::state::ProxyState>();
+                    let status = state.get_status();
+
+                    // If currently connected, restart proxy with the new mode
+                    if status != crate::state::ConnectionStatus::Disconnected {
+                        let selected_tag = crate::commands::config::get_selected_outbound_tag(&app_handle);
+                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), false, None).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        let _ = crate::commands::proxy::toggle_proxy(app_handle.clone(), state.clone(), true, selected_tag).await;
+                    }
+
+                    update_tray(&app_handle);
+                    // Notify frontend so Dashboard updates mode display
+                    let _ = app_handle.emit("settings-changed", ());
                 });
                 return;
             }
@@ -278,7 +384,7 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
     Ok(tray)
 }
 
-/// Triggers a dynamic redraw of the system tray icon and menu from any state transition
+/// Triggers a dynamic redraw of the system tray icon, menu, and tooltip from any state transition
 pub fn update_tray(app: &AppHandle) {
     let state = app.state::<crate::state::ProxyState>();
     let status = state.get_status();
@@ -295,6 +401,9 @@ pub fn update_tray(app: &AppHandle) {
             let _ = tray.set_menu(Some(menu));
         }
     }
+
+    // Also refresh the tooltip
+    update_tray_tooltip(app);
 }
 
 /// Alias for backward compatibility

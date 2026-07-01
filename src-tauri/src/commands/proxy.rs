@@ -858,6 +858,9 @@ pub async fn toggle_proxy(
                         if let Ok(mut conn) = state_clone.active_connections.lock() {
                             *conn = data.connections.len() as u32;
                         }
+
+                        // Update tray tooltip with live speed
+                        crate::tray::update_tray_tooltip(&app_handle);
                     } else {
                         consecutive_failures += 1;
                     }
@@ -877,6 +880,9 @@ pub async fn toggle_proxy(
         if let Ok(mut up_s) = state_clone.upload_speed.lock() { *up_s = 0; };
         if let Ok(mut down_s) = state_clone.download_speed.lock() { *down_s = 0; };
         if let Ok(mut conn) = state_clone.active_connections.lock() { *conn = 0; };
+
+        // Reset tooltip on disconnect
+        crate::tray::update_tray_tooltip(&app_handle);
     });
 
     // Enable system proxy if the final connection mode is 'system' (either by default or as a fallback)

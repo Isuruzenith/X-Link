@@ -134,6 +134,11 @@ export default function App() {
       setIsConnected(status === 'connected');
     });
 
+    // Listen to settings changes from system tray mode switching
+    const unlistenSettings = listen('settings-changed', () => {
+      initSettings();
+    });
+
     // Fetch initial log buffer from Rust sidecar manager
     (async () => {
       try {
@@ -153,6 +158,7 @@ export default function App() {
       unlistenLog.then((f) => f());
       unlistenTerm.then((f) => f());
       unlistenStatus.then((f) => f());
+      unlistenSettings.then((f) => f());
     };
   }, []);
 
