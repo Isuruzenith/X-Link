@@ -38,3 +38,11 @@ desktop.ini
 *.njsproj
 *.sln
 *.sw?
+
+# Local test configurations
+src-tauri/binaries/test_config*.json
+src-tauri/binaries/test_proxy*.json
+
+# Sidecar binaries (should be downloaded/placed locally, not in git)
+src-tauri/binaries/*.exe
+src-tauri/binaries/*.dll
