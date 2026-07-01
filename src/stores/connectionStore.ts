@@ -105,14 +105,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         }
       }
 
-      // TUN mode requires admin privileges — auto-trigger elevation if not already elevated
+      // TUN mode requires admin privileges — rollback to system proxy if not elevated
       if (settings.proxyMode === 'tun' && !isElevated) {
-        logStore.pushSystemLog('TUN mode requires Administrator privileges. Requesting elevation...');
-        try {
-          await invoke('request_elevation');
-        } catch (e) {
-          logStore.pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights: ${e}`);
-        }
+        logStore.pushSystemLog('TUN mode requires Administrator privileges. Not elevated. Rolling back to System Proxy mode...');
+        
+        const settingsStore = useSettingsStore.getState();
+        await settingsStore.updateSettings({ proxyMode: 'system' });
+        useToastStore.getState().addToast('warning', 'Switched to System Proxy (requires elevation for TUN)');
+        
+        // Re-trigger connect in system proxy mode
+        setTimeout(() => {
+          get().toggleConnect();
+        }, 500);
         return;
       }
 
@@ -147,6 +151,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   requestElevation: async () => {
     const logStore = useLogStore.getState();
     try {
+      logStore.pushSystemLog('Registering app to always run as Administrator on next launches...');
+      await invoke('set_runas_admin', { enabled: true });
+      logStore.pushSystemLog('Requesting session elevation...');
       await invoke('request_elevation');
     } catch (e) {
       logStore.pushSystemLog(`Elevation aborted: ${e}`);

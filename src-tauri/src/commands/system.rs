@@ -108,16 +108,144 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        let home_dir = dirs::home_dir().ok_or("Failed to get user home directory")?;
+        let launch_agents_dir = home_dir.join("Library").join("LaunchAgents");
+        let plist_file = launch_agents_dir.join("com.xlink.app.plist");
+
+        if enabled {
+            std::fs::create_dir_all(&launch_agents_dir)
+                .map_err(|e| format!("Failed to create LaunchAgents directory: {}", e))?;
+            
+            let content = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+                 <plist version=\"1.0\">\n\
+                 <dict>\n\
+                     <key>Label</key>\n\
+                     <string>com.xlink.app</string>\n\
+                     <key>ProgramArguments</key>\n\
+                     <array>\n\
+                         <string>{}</string>\n\
+                         <string>--minimized</string>\n\
+                     </array>\n\
+                     <key>RunAtLoad</key>\n\
+                     <true/>\n\
+                 </dict>\n\
+                 </plist>",
+                exe_str
+            );
+            
+            std::fs::write(&plist_file, content)
+                .map_err(|e| format!("Failed to write LaunchAgent plist: {}", e))?;
+        } else if plist_file.exists() {
+            std::fs::remove_file(&plist_file)
+                .map_err(|e| format!("Failed to delete LaunchAgent plist: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let home_dir = dirs::home_dir().ok_or("Failed to get user home directory")?;
+        let autostart_dir = home_dir.join(".config").join("autostart");
+        let desktop_file = autostart_dir.join("x-link.desktop");
+
+        if enabled {
+            std::fs::create_dir_all(&autostart_dir)
+                .map_err(|e| format!("Failed to create autostart directory: {}", e))?;
+            
+            let content = format!(
+                "[Desktop Entry]\n\
+                 Type=Application\n\
+                 Name=X-Link\n\
+                 Comment=X-Link Proxy Client\n\
+                 Exec=\"{}\" --minimized\n\
+                 Terminal=false\n\
+                 X-GNOME-Autostart-enabled=true\n",
+                exe_str
+            );
+            
+            std::fs::write(&desktop_file, content)
+                .map_err(|e| format!("Failed to write desktop autostart entry: {}", e))?;
+        } else if desktop_file.exists() {
+            std::fs::remove_file(&desktop_file)
+                .map_err(|e| format!("Failed to delete desktop autostart entry: {}", e))?;
+        }
+    }
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn check_tun_support() -> bool {
-    is_elevated::is_elevated()
+pub fn check_tun_support(app: tauri::AppHandle) -> bool {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        is_elevated::is_elevated()
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        is_elevated::is_elevated()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if is_elevated::is_elevated() {
+            return true;
+        }
+        
+        // Check sidecar capabilities on Linux
+        let current_exe = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => return false,
+        };
+        let current_dir = match current_exe.parent() {
+            Some(path) => path,
+            None => return false,
+        };
+        
+        let mut sidecar_path = None;
+        if let Ok(entries) = std::fs::read_dir(current_dir) {
+            for entry in entries.flatten() {
+                let filename = entry.file_name().to_string_lossy().into_owned();
+                if filename.starts_with("sing-box") {
+                    sidecar_path = Some(entry.path());
+                    break;
+                }
+            }
+        }
+
+        let sidecar_path = match sidecar_path {
+            Some(path) => path,
+            None => {
+                match app.path().resolve_resource("resources/sing-box") {
+                    Ok(path) => path,
+                    Err(_) => return false,
+                }
+            }
+        };
+
+        if let Ok(output) = std::process::Command::new("getcap").arg(&sidecar_path).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.contains("cap_net_admin") {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[tauri::command]
-pub fn request_elevation() -> Result<(), String> {
+pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -156,9 +284,63 @@ pub fn request_elevation() -> Result<(), String> {
         std::process::exit(0);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        Err("Elevation is only supported on Windows".to_string())
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get executable path: {}", e))?;
+        
+        let script = format!(
+            "do shell script \"'{}'\" with administrator privileges",
+            exe_path.to_str().ok_or("Invalid path encoding")?
+        );
+        
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .spawn()
+            .map_err(|e| format!("Failed to run osascript: {}", e))?;
+            
+        std::process::exit(0);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let current_dir = current_exe.parent().ok_or("Failed to get exe directory")?;
+        
+        let mut sidecar_path = None;
+        if let Ok(entries) = std::fs::read_dir(current_dir) {
+            for entry in entries.flatten() {
+                let filename = entry.file_name().to_string_lossy().into_owned();
+                if filename.starts_with("sing-box") {
+                    sidecar_path = Some(entry.path());
+                    break;
+                }
+            }
+        }
+
+        let sidecar_path = match sidecar_path {
+            Some(path) => path,
+            None => {
+                app.path().resolve_resource("resources/sing-box")
+                    .map_err(|e| format!("Failed to resolve sing-box sidecar path: {}", e))?
+            }
+        };
+
+        let output = std::process::Command::new("pkexec")
+            .args([
+                "setcap",
+                "cap_net_admin,cap_net_bind_service=+ep",
+                sidecar_path.to_str().ok_or("Invalid path encoding")?
+            ])
+            .output()
+            .map_err(|e| format!("Failed to run pkexec: {}", e))?;
+
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(format!("Failed to set capabilities: {}", err.trim()));
+        }
+        
+        Ok(())
     }
 }
 

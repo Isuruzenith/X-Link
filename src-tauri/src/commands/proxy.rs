@@ -576,6 +576,13 @@ pub async fn toggle_proxy(
                 .args(["/F", "/IM", "sing-box.exe", "/T"])
                 .output();
         }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg("sing-box")
+                .output();
+        }
 
         // Clear system proxy
         let _ = crate::os::disable_system_proxy();
@@ -627,6 +634,14 @@ pub async fn toggle_proxy(
             .args(["/F", "/IM", "sing-box.exe", "/T"])
             .output();
         // Brief delay to let sockets fully release
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg("sing-box")
+            .output();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
