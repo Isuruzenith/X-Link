@@ -5,22 +5,23 @@ export type ToastType = 'success' | 'error' | 'info' | 'warning';
 export interface Toast {
   id: string;
   type: ToastType;
+  title?: string;
   message: string;
   duration?: number;
 }
 
 interface ToastState {
   toasts: Toast[];
-  addToast: (type: ToastType, message: string, duration?: number) => void;
+  addToast: (type: ToastType, message: string, title?: string, duration?: number) => void;
   removeToast: (id: string) => void;
 }
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
 
-  addToast: (type, message, duration = 4000) => {
+  addToast: (type, message, title, duration = 4500) => {
     const id = crypto.randomUUID();
-    const toast: Toast = { id, type, message, duration };
+    const toast: Toast = { id, type, title, message, duration };
 
     set({ toasts: [...get().toasts, toast] });
 

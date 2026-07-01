@@ -327,7 +327,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       });
 
       logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
-      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" successfully loaded with ${result.nodeCount} nodes.`, 'Profile Imported');
       setTimeout(() => set({ importSuccess: false }), 3000);
       await get().refreshNodes(newProfile.id);
     } catch (err) {
@@ -382,7 +382,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       });
 
       logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
-      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" successfully loaded with ${result.nodeCount} nodes.`, 'Profile Imported');
       setTimeout(() => set({ importSuccess: false }), 3000);
       await get().refreshNodes(newProfile.id);
     } catch (err) {

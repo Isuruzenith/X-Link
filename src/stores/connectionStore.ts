@@ -111,7 +111,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         
         const settingsStore = useSettingsStore.getState();
         await settingsStore.updateSettings({ proxyMode: 'system' });
-        useToastStore.getState().addToast('warning', 'Switched to System Proxy (requires elevation for TUN)');
+        useToastStore.getState().addToast('warning', 'Switched to System Proxy mode (TUN requires Admin rights).', 'Fallback Activated');
         
         // Re-trigger connect in system proxy mode
         setTimeout(() => {
@@ -138,12 +138,12 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         if (result === 'started') {
           set({ isConnected: true, connectionStatus: 'connected' });
           logStore.pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);
-          useToastStore.getState().addToast('success', `Connected via Mixed port ${mixedPort}`);
+          useToastStore.getState().addToast('success', `Secured via Mixed port ${mixedPort}`, 'Connection Established');
         }
       } catch (e) {
         set({ connectionStatus: 'disconnected' });
         logStore.pushSystemLog(`Startup error: ${e}`);
-        useToastStore.getState().addToast('error', `Connection failed: ${e}`);
+        useToastStore.getState().addToast('error', `Proxy service failed to start: ${e}`, 'Connection Failed');
       }
     }
   },
