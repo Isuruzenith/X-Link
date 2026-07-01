@@ -1,7 +1,7 @@
-mod state;
 mod commands;
 pub mod config;
 pub mod os;
+mod state;
 pub mod tray;
 
 use state::ProxyState;
@@ -64,8 +64,6 @@ pub fn run() {
                     }
                 }
             });
-
-
 
             // Copy wintun.dll next to sing-box sidecar dynamically on boot to ensure TUN mode works
             // Run in a background thread to avoid blocking the setup hook with filesystem scans
@@ -132,20 +130,20 @@ pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
             let wintun_src = resource_dir.join("binaries").join("wintun.dll");
             if wintun_src.exists() {
                 let mut paths_to_try = vec![];
-                
+
                 // Try next to main exe (target/debug or production directory)
                 if let Ok(exe_path) = std::env::current_exe() {
                     if let Some(exe_dir) = exe_path.parent() {
                         paths_to_try.push(exe_dir.to_path_buf());
                     }
                 }
-                
+
                 // Try resources directory itself
                 paths_to_try.push(resource_dir.clone());
-                
+
                 // Try binaries directory inside resources
                 paths_to_try.push(resource_dir.join("binaries"));
-                
+
                 // Search for any subdirectory in resources (which could be the target sidecar folder)
                 if let Ok(entries) = std::fs::read_dir(&resource_dir) {
                     for entry in entries.flatten() {
@@ -167,7 +165,7 @@ pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
                         } else {
                             false
                         };
-                        
+
                         if contains_sing_box {
                             let dest = dir.join("wintun.dll");
                             if !dest.exists() {

@@ -1,6 +1,6 @@
+use serde::Serialize;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
-use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -19,15 +19,16 @@ pub async fn test_node_latency(server: String, port: u16) -> Result<u32, String>
     // Run the blocking TCP connect in a separate thread to avoid blocking the async runtime
     let result = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
-        let socket_addrs = addr.to_socket_addrs()
+        let socket_addrs = addr
+            .to_socket_addrs()
             .map_err(|e| format!("Invalid address or DNS lookup failed: {}", e))?;
-        
+
         for socket_addr in socket_addrs {
             if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)).is_ok() {
                 return Ok(start.elapsed().as_millis() as u32);
             }
         }
-        
+
         Err("Connection failed for all resolved addresses".to_string())
     })
     .await
@@ -81,7 +82,9 @@ pub async fn test_all_nodes(
                 match addr.to_socket_addrs() {
                     Ok(socket_addrs) => {
                         for socket_addr in socket_addrs {
-                            if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)).is_ok() {
+                            if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5))
+                                .is_ok()
+                            {
                                 return Ok(start.elapsed().as_millis() as u32);
                             }
                         }

@@ -1,14 +1,14 @@
-use tauri::State;
-use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
-use tauri::Emitter;
-use tokio::sync::oneshot;
-use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
-use std::sync::OnceLock;
-use std::path::Path;
 use crate::config::generator::TunSettings;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::OnceLock;
+use tauri::Emitter;
+use tauri::Manager;
+use tauri::State;
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
+use tokio::sync::oneshot;
+use tokio::sync::Mutex as AsyncMutex;
 
 fn get_toggle_lock() -> &'static AsyncMutex<()> {
     static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
@@ -61,7 +61,8 @@ pub struct ProxyStateSerialized {
 }
 
 // Global variable to keep track of connection start time
-static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
 
 fn spawn_singbox_sidecar(
     app: &tauri::AppHandle,
@@ -82,7 +83,9 @@ fn spawn_singbox_sidecar(
         })?;
 
     {
-        let mut process_lock = state.child_process.lock()
+        let mut process_lock = state
+            .child_process
+            .lock()
             .map_err(|e| format!("state_lock_poisoned: {}", e))?;
         *process_lock = Some(child);
     }
@@ -108,14 +111,18 @@ fn spawn_singbox_sidecar(
                         let _ = tx.send(payload.code);
                     }
 
-                    let is_active = if let Ok(active_id_guard) = state_for_logs.active_session_id.lock() {
-                        active_id_guard.as_ref() == Some(&session_id_clone)
-                    } else {
-                        false
-                    };
+                    let is_active =
+                        if let Ok(active_id_guard) = state_for_logs.active_session_id.lock() {
+                            active_id_guard.as_ref() == Some(&session_id_clone)
+                        } else {
+                            false
+                        };
 
                     if is_active {
-                        state_for_logs.set_status(&app_for_logs, crate::state::ConnectionStatus::Disconnected);
+                        state_for_logs.set_status(
+                            &app_for_logs,
+                            crate::state::ConnectionStatus::Disconnected,
+                        );
                         *CONNECTION_START_TIME.lock().unwrap() = None;
                         crate::tray::perform_clean_cleanup(&app_for_logs);
                         crate::tray::update_tray(&app_for_logs);
@@ -133,10 +140,15 @@ fn spawn_singbox_sidecar(
     Ok(term_rx)
 }
 
-async fn wait_for_startup_or_exit(term_rx: &mut oneshot::Receiver<Option<i32>>) -> Result<(), String> {
+async fn wait_for_startup_or_exit(
+    term_rx: &mut oneshot::Receiver<Option<i32>>,
+) -> Result<(), String> {
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     match term_rx.try_recv() {
-        Ok(code) => Err(format!("spawn_failed: exited early during startup with code {:?}", code)),
+        Ok(code) => Err(format!(
+            "spawn_failed: exited early during startup with code {:?}",
+            code
+        )),
         Err(oneshot::error::TryRecvError::Closed) => {
             Err("spawn_failed: child process terminated unexpectedly during startup".into())
         }
@@ -157,7 +169,12 @@ async fn probe_via_mixed_proxy(mixed_port: u16) -> Result<(), String> {
         .get("https://www.gstatic.com/generate_204")
         .send()
         .await
-        .map_err(|e| format!("mixed probe failed: node/outbound/config did not carry HTTPS traffic ({})", e))?
+        .map_err(|e| {
+            format!(
+                "mixed probe failed: node/outbound/config did not carry HTTPS traffic ({})",
+                e
+            )
+        })?
         .error_for_status()
         .map(|_| ())
         .map_err(|e| format!("mixed probe failed: upstream returned {}", e))
@@ -174,7 +191,12 @@ async fn probe_via_tun_route() -> Result<(), String> {
         .get("https://www.gstatic.com/generate_204")
         .send()
         .await
-        .map_err(|e| format!("TUN probe failed: OS traffic did not traverse TUN successfully ({})", e))?
+        .map_err(|e| {
+            format!(
+                "TUN probe failed: OS traffic did not traverse TUN successfully ({})",
+                e
+            )
+        })?
         .error_for_status()
         .map(|_| ())
         .map_err(|e| format!("TUN probe failed: upstream returned {}", e))
@@ -188,7 +210,6 @@ async fn run_startup_health_checks(mixed_port: u16, proxy_mode: &str) -> Result<
     Ok(())
 }
 
-
 fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> Result<(), String> {
     let content = std::fs::read_to_string(config_path)
         .map_err(|e| format!("Failed to read active config for fallback patching: {}", e))?;
@@ -198,14 +219,21 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
     match attempt {
         1 => {
             // Attempt 2 (attempt = 1): Firefox uTLS fingerprint
-            if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            if let Some(outbounds) = config_val
+                .get_mut("outbounds")
+                .and_then(|o| o.as_array_mut())
+            {
                 for outbound in outbounds {
                     let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
                     if ob_type == "vless" || ob_type == "vmess" || ob_type == "trojan" {
                         if let Some(tls) = outbound.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut()) {
+                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut())
+                            {
                                 utls.insert("enabled".to_string(), serde_json::Value::Bool(true));
-                                utls.insert("fingerprint".to_string(), serde_json::json!("firefox"));
+                                utls.insert(
+                                    "fingerprint".to_string(),
+                                    serde_json::json!("firefox"),
+                                );
                             }
                         }
                     }
@@ -214,12 +242,16 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
         }
         2 => {
             // Attempt 3 (attempt = 2): Disable uTLS completely (Native Go TLS)
-            if let Some(outbounds) = config_val.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            if let Some(outbounds) = config_val
+                .get_mut("outbounds")
+                .and_then(|o| o.as_array_mut())
+            {
                 for outbound in outbounds {
                     let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
                     if ob_type == "vless" || ob_type == "vmess" || ob_type == "trojan" {
                         if let Some(tls) = outbound.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut()) {
+                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut())
+                            {
                                 utls.insert("enabled".to_string(), serde_json::Value::Bool(false));
                             }
                         }
@@ -233,7 +265,9 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
             if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
                 if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
                     // Check if already contains bootstrap-dns tags
-                    if !servers.iter().any(|s| s.get("tag").and_then(|t| t.as_str()) == Some("fallback-bootstrap-1")) {
+                    if !servers.iter().any(|s| {
+                        s.get("tag").and_then(|t| t.as_str()) == Some("fallback-bootstrap-1")
+                    }) {
                         servers.push(serde_json::json!({
                             "tag": "fallback-bootstrap-1",
                             "address": "1.1.1.1",
@@ -246,7 +280,7 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
                         }));
                     }
                 }
-                
+
                 // Point proxy domain resolution rule to our fallback public DNS instead of local-dns
                 if let Some(rules) = dns.get_mut("rules").and_then(|r| r.as_array_mut()) {
                     for rule in rules {
@@ -261,8 +295,11 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
         _ => {}
     }
 
-    std::fs::write(config_path, serde_json::to_string_pretty(&config_val).unwrap())
-        .map_err(|e| format!("Failed to write fallback config: {}", e))?;
+    std::fs::write(
+        config_path,
+        serde_json::to_string_pretty(&config_val).unwrap(),
+    )
+    .map_err(|e| format!("Failed to write fallback config: {}", e))?;
     Ok(())
 }
 
@@ -281,7 +318,9 @@ fn stop_startup_child(app: &tauri::AppHandle, state: &crate::state::ProxyState) 
 }
 
 #[tauri::command]
-pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<ProxyStateSerialized, String> {
+pub fn get_proxy_status(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<ProxyStateSerialized, String> {
     let status = state.get_status();
     let uptime = if let Some(start) = *CONNECTION_START_TIME.lock().unwrap() {
         start.elapsed().as_secs()
@@ -290,7 +329,8 @@ pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<Pr
     };
 
     let settings = state.get_settings();
-    let tun_enabled = status == crate::state::ConnectionStatus::Connected && settings.proxy_mode == "tun";
+    let tun_enabled =
+        status == crate::state::ConnectionStatus::Connected && settings.proxy_mode == "tun";
 
     Ok(ProxyStateSerialized {
         status,
@@ -303,7 +343,9 @@ pub fn get_proxy_status(state: State<'_, crate::state::ProxyState>) -> Result<Pr
 }
 
 #[tauri::command]
-pub async fn get_traffic_stats(state: State<'_, crate::state::ProxyState>) -> Result<TrafficStats, String> {
+pub async fn get_traffic_stats(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<TrafficStats, String> {
     if !state.is_running() {
         return Ok(TrafficStats {
             upload_bytes: 0,
@@ -332,7 +374,12 @@ pub fn prepare_and_patch_config(
     // Reload settings from disk and update cache
     let settings = state.reload_settings(app)?;
 
-    let dns_address = crate::config::resolve_dns_address(if settings.dns_address.trim().is_empty() { None } else { Some(&settings.dns_address) });
+    let dns_address =
+        crate::config::resolve_dns_address(if settings.dns_address.trim().is_empty() {
+            None
+        } else {
+            Some(&settings.dns_address)
+        });
     let wifi_sharing = settings.wifi_sharing;
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
@@ -348,7 +395,8 @@ pub fn prepare_and_patch_config(
     // Write a default valid config if the file doesn't exist
     if !config_path.exists() {
         let mixed_port = settings.mixed_port;
-        let default_config = format!(r#"{{
+        let default_config = format!(
+            r#"{{
   "log": {{
     "level": "info",
     "timestamp": true
@@ -376,7 +424,9 @@ pub fn prepare_and_patch_config(
       "external_controller": "127.0.0.1:9090"
     }}
   }}
-}}"#, mixed_port);
+}}"#,
+            mixed_port
+        );
         std::fs::write(&config_path, default_config)
             .map_err(|e| format!("Failed to write default config: {}", e))?;
     }
@@ -387,17 +437,23 @@ pub fn prepare_and_patch_config(
     let config_val: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse active config JSON: {}", e))?;
 
-    let outbounds_val = config_val.get("outbounds")
+    let outbounds_val = config_val
+        .get("outbounds")
         .and_then(|o| o.as_array())
         .ok_or_else(|| "No outbounds found in active config".to_string())?;
 
-    let all_outbounds: Vec<crate::config::adapters::SingBoxOutbound> = serde_json::from_value(serde_json::Value::Array(outbounds_val.clone()))
-        .map_err(|e| format!("Failed to deserialize outbounds: {}", e))?;
+    let all_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
+        serde_json::from_value(serde_json::Value::Array(outbounds_val.clone()))
+            .map_err(|e| format!("Failed to deserialize outbounds: {}", e))?;
 
     // Filter to only include the actual node outbounds (excluding the selector, direct, and block outbounds)
     let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> = all_outbounds
         .into_iter()
-        .filter(|o| o.outbound_type != "selector" && o.outbound_type != "direct" && o.outbound_type != "block")
+        .filter(|o| {
+            o.outbound_type != "selector"
+                && o.outbound_type != "direct"
+                && o.outbound_type != "block"
+        })
         .collect();
 
     let tun_settings = load_tun_settings(app);
@@ -432,12 +488,14 @@ pub fn prepare_and_patch_config(
     });
 
     // Write the final config to active.json
-    std::fs::write(&config_path, serde_json::to_string_pretty(&final_config_val).unwrap())
-        .map_err(|e| format!("Failed to write active config: {}", e))?;
+    std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&final_config_val).unwrap(),
+    )
+    .map_err(|e| format!("Failed to write active config: {}", e))?;
 
     Ok((config_path, proxy_mode, api_port, api_secret))
 }
-
 
 #[allow(dead_code)]
 async fn hot_reload_via_api(
@@ -505,7 +563,10 @@ pub async fn switch_node_hot(
                 return Ok(());
             }
             Err(e) => {
-                state.push_log(format!("[System] Hot switch failed ({}), falling back to reload.", e));
+                state.push_log(format!(
+                    "[System] Hot switch failed ({}), falling back to reload.",
+                    e
+                ));
             }
         }
     }
@@ -562,13 +623,15 @@ pub async fn toggle_proxy(
     if !start {
         state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
         {
-            let mut process_lock = state.child_process.lock()
+            let mut process_lock = state
+                .child_process
+                .lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
             if let Some(child) = process_lock.take() {
                 let _ = child.kill();
             }
         }
-        
+
         // Forcefully kill any sing-box processes system-wide to guarantee clean state
         #[cfg(target_os = "windows")]
         {
@@ -588,7 +651,7 @@ pub async fn toggle_proxy(
 
         // Clear system proxy
         let _ = crate::os::disable_system_proxy();
-        
+
         // Clear global state
         if let Ok(mut session_lock) = state.active_session_id.lock() {
             *session_lock = None;
@@ -596,13 +659,19 @@ pub async fn toggle_proxy(
         *CONNECTION_START_TIME.lock().unwrap() = None;
 
         // Reset bandwidth metrics
-        if let Ok(mut up_s) = state.upload_speed.lock() { *up_s = 0; }
-        if let Ok(mut down_s) = state.download_speed.lock() { *down_s = 0; }
-        if let Ok(mut conn) = state.active_connections.lock() { *conn = 0; }
+        if let Ok(mut up_s) = state.upload_speed.lock() {
+            *up_s = 0;
+        }
+        if let Ok(mut down_s) = state.download_speed.lock() {
+            *down_s = 0;
+        }
+        if let Ok(mut conn) = state.active_connections.lock() {
+            *conn = 0;
+        }
 
         // Sync native system tray
         crate::tray::update_tray(&app);
-        
+
         return Ok("stopped".into());
     }
 
@@ -619,7 +688,10 @@ pub async fn toggle_proxy(
                     return Ok("started".into());
                 }
                 Err(e) => {
-                    state.push_log(format!("[System] Dynamic node switch failed: {}. Falling back to clean restart...", e));
+                    state.push_log(format!(
+                        "[System] Dynamic node switch failed: {}. Falling back to clean restart...",
+                        e
+                    ));
                 }
             }
         } else {
@@ -652,7 +724,9 @@ pub async fn toggle_proxy(
     // Clean up any stale state in state variable
     let mut killed_stale = false;
     {
-        let mut process_lock = state.child_process.lock()
+        let mut process_lock = state
+            .child_process
+            .lock()
             .map_err(|e| format!("state_lock_poisoned: {}", e))?;
         if let Some(child) = process_lock.take() {
             let _ = child.kill();
@@ -666,14 +740,15 @@ pub async fn toggle_proxy(
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 
-    let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None) {
-        Ok(res) => res,
-        Err(e) => {
-            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
-            crate::tray::update_tray(&app);
-            return Err(e);
-        }
-    };
+    let (config_path, resolved_proxy_mode, api_port, api_secret) =
+        match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None) {
+            Ok(res) => res,
+            Err(e) => {
+                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                crate::tray::update_tray(&app);
+                return Err(e);
+            }
+        };
 
     let mut current_mode = resolved_proxy_mode.clone();
     let mut attempt = 0;
@@ -700,7 +775,9 @@ pub async fn toggle_proxy(
                     state.push_log(format!("[System] Fallback patching failed: {}", e));
                 }
             } else if attempt == 4 && current_mode == "tun" {
-                state.push_log("[System] Retrying with Windows TUN compatibility profile...".to_string());
+                state.push_log(
+                    "[System] Retrying with Windows TUN compatibility profile...".to_string(),
+                );
                 if let Err(e) = apply_tun_compatibility_in_place(&config_path) {
                     state.push_log(format!("[System] TUN compatibility patching failed: {}", e));
                 }
@@ -723,7 +800,11 @@ pub async fn toggle_proxy(
             Ok(rx) => rx,
             Err(e) => {
                 last_error = e.clone();
-                state.push_log(format!("[System] Attempt {} failed to spawn: {}", attempt + 1, e));
+                state.push_log(format!(
+                    "[System] Attempt {} failed to spawn: {}",
+                    attempt + 1,
+                    e
+                ));
                 attempt += 1;
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 continue;
@@ -733,7 +814,11 @@ pub async fn toggle_proxy(
         if let Err(e) = wait_for_startup_or_exit(&mut term_rx).await {
             stop_startup_child(&app, &state);
             last_error = e.clone();
-            state.push_log(format!("[System] Attempt {} process exited early: {}", attempt + 1, e));
+            state.push_log(format!(
+                "[System] Attempt {} process exited early: {}",
+                attempt + 1,
+                e
+            ));
             attempt += 1;
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             continue;
@@ -749,14 +834,26 @@ pub async fn toggle_proxy(
             Err(probe_err) => {
                 stop_startup_child(&app, &state);
                 last_error = probe_err.clone();
-                state.push_log(format!("[System] Attempt {} probe failed: {}", attempt + 1, probe_err));
+                state.push_log(format!(
+                    "[System] Attempt {} probe failed: {}",
+                    attempt + 1,
+                    probe_err
+                ));
 
                 attempt += 1;
                 if attempt < 5 {
                     match attempt {
-                        1 => state.push_log("[System] Retrying with Firefox TLS fingerprint fallback...".to_string()),
-                        2 => state.push_log("[System] Retrying with Native TLS (uTLS disabled) fallback...".to_string()),
-                        3 => state.push_log("[System] Retrying with Public DNS bootstrap fallback...".to_string()),
+                        1 => state.push_log(
+                            "[System] Retrying with Firefox TLS fingerprint fallback..."
+                                .to_string(),
+                        ),
+                        2 => state.push_log(
+                            "[System] Retrying with Native TLS (uTLS disabled) fallback..."
+                                .to_string(),
+                        ),
+                        3 => state.push_log(
+                            "[System] Retrying with Public DNS bootstrap fallback...".to_string(),
+                        ),
                         _ => {}
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -768,35 +865,45 @@ pub async fn toggle_proxy(
     if !connected_successfully {
         if resolved_proxy_mode == "tun" {
             state.push_log("[System] TUN mode failed completely after all fallback attempts. Rolling back to System Proxy mode...".to_string());
-            
+
             // Switch mode dynamically
             current_mode = "system".to_string();
-            
+
             // Re-generate configuration for system proxy mode
-            let (retry_config_path, _, _, _) = prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), Some("system"))?;
-            
+            let (retry_config_path, _, _, _) = prepare_and_patch_config(
+                &app,
+                &state,
+                selected_outbound_tag.as_deref(),
+                Some("system"),
+            )?;
+
             let session_id = uuid::Uuid::new_v4().to_string();
             {
                 if let Ok(mut session_lock) = state.active_session_id.lock() {
                     *session_lock = Some(session_id.clone());
                 }
             }
-            
+
             let mut term_rx = spawn_singbox_sidecar(&app, &state, &retry_config_path, &session_id)
                 .map_err(|e| format!("System proxy fallback spawn failed: {}", e))?;
-                
-            wait_for_startup_or_exit(&mut term_rx).await
+
+            wait_for_startup_or_exit(&mut term_rx)
+                .await
                 .map_err(|e| format!("System proxy fallback process exited: {}", e))?;
-                
+
             let mixed_port = state.get_settings().mixed_port;
-            run_startup_health_checks(mixed_port, &current_mode).await
+            run_startup_health_checks(mixed_port, &current_mode)
+                .await
                 .map_err(|e| format!("System proxy fallback health check failed: {}", e))?;
-                
+
             state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
         } else {
             state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
-            return Err(format!("Connection failed after 5 fallback attempts: {}", last_error));
+            return Err(format!(
+                "Connection failed after 5 fallback attempts: {}",
+                last_error
+            ));
         }
     }
 
@@ -881,9 +988,15 @@ pub async fn toggle_proxy(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
 
-        if let Ok(mut up_s) = state_clone.upload_speed.lock() { *up_s = 0; };
-        if let Ok(mut down_s) = state_clone.download_speed.lock() { *down_s = 0; };
-        if let Ok(mut conn) = state_clone.active_connections.lock() { *conn = 0; };
+        if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+            *up_s = 0;
+        };
+        if let Ok(mut down_s) = state_clone.download_speed.lock() {
+            *down_s = 0;
+        };
+        if let Ok(mut conn) = state_clone.active_connections.lock() {
+            *conn = 0;
+        };
 
         // Reset tooltip on disconnect
         crate::tray::update_tray_tooltip(&app_handle);
@@ -911,7 +1024,9 @@ pub async fn toggle_proxy(
 }
 
 #[tauri::command]
-pub async fn get_active_connections(state: State<'_, crate::state::ProxyState>) -> Result<serde_json::Value, String> {
+pub async fn get_active_connections(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<serde_json::Value, String> {
     if !state.is_running() {
         return Ok(serde_json::json!({ "connections": [] }));
     }
@@ -938,7 +1053,10 @@ pub async fn get_active_connections(state: State<'_, crate::state::ProxyState>) 
 }
 
 #[tauri::command]
-pub async fn close_connection(id: String, state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+pub async fn close_connection(
+    id: String,
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<(), String> {
     if !state.is_running() {
         return Ok(());
     }
@@ -959,7 +1077,9 @@ pub async fn close_connection(id: String, state: State<'_, crate::state::ProxySt
 }
 
 #[tauri::command]
-pub async fn close_all_connections(state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+pub async fn close_all_connections(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<(), String> {
     if !state.is_running() {
         return Ok(());
     }

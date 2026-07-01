@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 pub mod clash;
 pub mod raw_uri;
@@ -30,12 +30,17 @@ pub fn detect_format(raw: &[u8]) -> SubscriptionFormat {
     }
 
     // 2. Check if Clash YAML
-    if trimmed.contains("proxies:") || (trimmed.contains("proxies") && trimmed.contains("- name:")) {
+    if trimmed.contains("proxies:") || (trimmed.contains("proxies") && trimmed.contains("- name:"))
+    {
         return SubscriptionFormat::ClashYaml;
     }
 
     // 3. Check if RawUriList
-    if trimmed.contains("vmess://") || trimmed.contains("vless://") || trimmed.contains("ss://") || trimmed.contains("trojan://") {
+    if trimmed.contains("vmess://")
+        || trimmed.contains("vless://")
+        || trimmed.contains("ss://")
+        || trimmed.contains("trojan://")
+    {
         return SubscriptionFormat::RawUriList;
     }
 
@@ -50,11 +55,17 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         base64_candidate.push('=');
     }
 
-    let decoded_bytes = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_candidate.as_bytes()) {
+    let decoded_bytes = match base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        base64_candidate.as_bytes(),
+    ) {
         Ok(decoded) => decoded,
         Err(_) => {
             // Also try URL-safe base64
-            match base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, base64_candidate.as_bytes()) {
+            match base64::Engine::decode(
+                &base64::engine::general_purpose::URL_SAFE,
+                base64_candidate.as_bytes(),
+            ) {
                 Ok(decoded) => decoded,
                 Err(_) => raw.to_vec(),
             }
@@ -70,15 +81,11 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             }
             let config: SingboxConfig = serde_json::from_slice(&decoded_bytes)
                 .map_err(|e| format!("Failed to parse sing-box native JSON: {}", e))?;
-            
+
             Ok(config.outbounds.unwrap_or_default())
         }
-        SubscriptionFormat::ClashYaml => {
-            clash::adapt(&decoded_bytes)
-        }
-        SubscriptionFormat::RawUriList => {
-            raw_uri::adapt(&decoded_bytes)
-        }
+        SubscriptionFormat::ClashYaml => clash::adapt(&decoded_bytes),
+        SubscriptionFormat::RawUriList => raw_uri::adapt(&decoded_bytes),
         SubscriptionFormat::Unknown => {
             let hint = String::from_utf8_lossy(&decoded_bytes);
             let limit = std::cmp::min(100, hint.len());

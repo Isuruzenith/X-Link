@@ -54,13 +54,19 @@ pub fn build_singbox_rule(rule: &RoutingRule) -> Option<Value> {
     let invert = rule.invert;
 
     let mut obj = match rule.rule_type.as_str() {
-        "domain"         => serde_json::json!({ "domain":         [&rule.value], "outbound": outbound }),
-        "domain_suffix"  => serde_json::json!({ "domain_suffix":  [&rule.value], "outbound": outbound }),
-        "domain_keyword" => serde_json::json!({ "domain_keyword": [&rule.value], "outbound": outbound }),
-        "domain_regex"   => serde_json::json!({ "domain_regex":   [&rule.value], "outbound": outbound }),
-        "ip_cidr"        => serde_json::json!({ "ip_cidr":        [&rule.value], "outbound": outbound }),
-        "geoip"          => serde_json::json!({ "geoip":          [&rule.value], "outbound": outbound }),
-        "geosite"        => serde_json::json!({ "geosite":        [&rule.value], "outbound": outbound }),
+        "domain" => serde_json::json!({ "domain":         [&rule.value], "outbound": outbound }),
+        "domain_suffix" => {
+            serde_json::json!({ "domain_suffix":  [&rule.value], "outbound": outbound })
+        }
+        "domain_keyword" => {
+            serde_json::json!({ "domain_keyword": [&rule.value], "outbound": outbound })
+        }
+        "domain_regex" => {
+            serde_json::json!({ "domain_regex":   [&rule.value], "outbound": outbound })
+        }
+        "ip_cidr" => serde_json::json!({ "ip_cidr":        [&rule.value], "outbound": outbound }),
+        "geoip" => serde_json::json!({ "geoip":          [&rule.value], "outbound": outbound }),
+        "geosite" => serde_json::json!({ "geosite":        [&rule.value], "outbound": outbound }),
         "port" => {
             if let Ok(p) = rule.value.parse::<u16>() {
                 serde_json::json!({ "port": [p], "outbound": outbound })
@@ -68,11 +74,13 @@ pub fn build_singbox_rule(rule: &RoutingRule) -> Option<Value> {
                 return None;
             }
         }
-        "port_range"   => serde_json::json!({ "port_range":   [&rule.value], "outbound": outbound }),
-        "protocol"     => serde_json::json!({ "protocol":     [&rule.value], "outbound": outbound }),
-        "process_name" => serde_json::json!({ "process_name": [&rule.value], "outbound": outbound }),
-        "rule_set"     => serde_json::json!({ "rule_set":     [&rule.value], "outbound": outbound }),
-        "network"      => serde_json::json!({ "network":       &rule.value,  "outbound": outbound }),
+        "port_range" => serde_json::json!({ "port_range":   [&rule.value], "outbound": outbound }),
+        "protocol" => serde_json::json!({ "protocol":     [&rule.value], "outbound": outbound }),
+        "process_name" => {
+            serde_json::json!({ "process_name": [&rule.value], "outbound": outbound })
+        }
+        "rule_set" => serde_json::json!({ "rule_set":     [&rule.value], "outbound": outbound }),
+        "network" => serde_json::json!({ "network":       &rule.value,  "outbound": outbound }),
         _ => return None,
     };
 
@@ -84,14 +92,16 @@ pub fn build_singbox_rule(rule: &RoutingRule) -> Option<Value> {
 
 fn map_outbound_action(action: &str) -> &str {
     match action {
-        "block"  => "block",
+        "block" => "block",
         "direct" => "direct",
-        _        => "proxy",
+        _ => "proxy",
     }
 }
 
 pub fn has_block_rule(user_rules: &[RoutingRule]) -> bool {
-    user_rules.iter().any(|r| r.enabled.unwrap_or(true) && r.outbound == "block")
+    user_rules
+        .iter()
+        .any(|r| r.enabled.unwrap_or(true) && r.outbound == "block")
 }
 
 #[cfg(test)]

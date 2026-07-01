@@ -1,12 +1,12 @@
-use std::net::IpAddr;
 use serde_json::Value;
+use std::net::IpAddr;
 #[cfg(target_os = "windows")]
 use std::process::Command;
 
 pub mod adapters;
 pub mod generator;
-pub mod validator;
 pub mod rules;
+pub mod validator;
 
 pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -> Vec<String> {
     let mut addresses = vec![
@@ -79,9 +79,7 @@ pub fn build_route_rules(
     user_rules: &[crate::config::rules::RoutingRule],
     rule_sets: &[crate::config::rules::RuleSet],
 ) -> Vec<Value> {
-    let mut rules = vec![
-        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
-    ];
+    let mut rules = vec![serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })];
 
     if bypass_lan {
         // Native, database-free private-network matching (no geoip/geosite
@@ -116,7 +114,10 @@ pub fn build_route_rules(
 pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
     let mut changed = false;
 
-    if let Some(inbounds) = config_val.get_mut("inbounds").and_then(|v| v.as_array_mut()) {
+    if let Some(inbounds) = config_val
+        .get_mut("inbounds")
+        .and_then(|v| v.as_array_mut())
+    {
         for inbound in inbounds {
             if inbound.get("type").and_then(|v| v.as_str()) == Some("tun") {
                 inbound["address"] = serde_json::json!(["172.19.0.1/30"]);
@@ -150,7 +151,9 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                 if !already_present {
                     let insert_at = rule_list
                         .iter()
-                        .position(|rule| rule.get("protocol").and_then(|v| v.as_str()) != Some("dns"))
+                        .position(|rule| {
+                            rule.get("protocol").and_then(|v| v.as_str()) != Some("dns")
+                        })
                         .unwrap_or(rule_list.len());
                     rule_list.insert(insert_at, udp_reject);
                     changed = true;
@@ -265,7 +268,10 @@ mod tests {
     fn test_route_excludes_proxy_server_ips() {
         let addresses = build_route_exclude_addresses(
             "192.168.8.1",
-            &["139.59.105.103/32".to_string(), "2001:db8::1/128".to_string()],
+            &[
+                "139.59.105.103/32".to_string(),
+                "2001:db8::1/128".to_string(),
+            ],
         );
 
         assert!(addresses.contains(&"192.168.8.1/32".to_string()));

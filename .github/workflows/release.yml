@@ -60,6 +60,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Sidecars
+        run: node scripts/setup-sidecars.cjs
+
       - name: Build Tauri release
         uses: tauri-apps/tauri-action@v0
         env:

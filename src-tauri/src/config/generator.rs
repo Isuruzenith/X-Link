@@ -1,9 +1,9 @@
-use std::collections::HashMap;
-use serde_json::Value;
 use super::adapters::SingBoxOutbound;
 use super::build_route_exclude_addresses;
-use super::resolve_server_ips;
 use super::resolve_dns_address;
+use super::resolve_server_ips;
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// User-configurable TUN and sniffing settings read from settings.json.
 #[derive(Debug, Clone)]
@@ -89,7 +89,10 @@ pub fn generate_singbox_config(
     let mut selector = HashMap::new();
     selector.insert("type".to_string(), Value::String("selector".to_string()));
     selector.insert("tag".to_string(), Value::String("proxy".to_string()));
-    selector.insert("outbounds".to_string(), Value::Array(node_tags.into_iter().map(Value::String).collect()));
+    selector.insert(
+        "outbounds".to_string(),
+        Value::Array(node_tags.into_iter().map(Value::String).collect()),
+    );
     if let Some(def_tag) = default_outbound_tag {
         selector.insert("default".to_string(), Value::String(def_tag.to_string()));
     }
@@ -137,14 +140,12 @@ pub fn generate_singbox_config(
 
     // Construct the dynamic inbounds array
     let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address, &server_ips);
-    let mut inbounds = vec![
-        serde_json::json!({
-            "type": "mixed",
-            "tag": "mixed-in",
-            "listen": listen_address,
-            "listen_port": mixed_port
-        })
-    ];
+    let mut inbounds = vec![serde_json::json!({
+        "type": "mixed",
+        "tag": "mixed-in",
+        "listen": listen_address,
+        "listen_port": mixed_port
+    })];
 
     if proxy_mode == "tun" {
         let mut tun_inbound = serde_json::json!({
@@ -174,9 +175,7 @@ pub fn generate_singbox_config(
         inbounds.push(tun_inbound);
     }
 
-    let mut route_rules = vec![
-        serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }),
-    ];
+    let mut route_rules = vec![serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })];
 
     if tun_settings.bypass_lan {
         route_rules.push(serde_json::json!({ "ip_is_private": true, "outbound": "direct" }));
@@ -192,9 +191,7 @@ pub fn generate_singbox_config(
         "auto_detect_interface": true
     });
 
-    let mut dns_rules = vec![
-        serde_json::json!({ "outbound": "direct", "server": "local-dns" })
-    ];
+    let mut dns_rules = vec![serde_json::json!({ "outbound": "direct", "server": "local-dns" })];
 
     let server_domains: Vec<String> = server_hosts
         .iter()
@@ -203,10 +200,13 @@ pub fn generate_singbox_config(
         .filter(|h| !h.is_empty())
         .collect();
     if !server_domains.is_empty() {
-        dns_rules.insert(0, serde_json::json!({
-            "domain": server_domains,
-            "server": "local-dns"
-        }));
+        dns_rules.insert(
+            0,
+            serde_json::json!({
+                "domain": server_domains,
+                "server": "local-dns"
+            }),
+        );
     }
 
     let is_fakeip = tun_settings.dns_mode == "fakeip";
@@ -291,7 +291,8 @@ mod tests {
             "127.0.0.1",
             &tun,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
         let inbounds_local = config_local["inbounds"].as_array().unwrap();
         assert!(!inbounds_local.is_empty());
@@ -308,7 +309,8 @@ mod tests {
             "0.0.0.0",
             &tun,
             None,
-        ).unwrap();
+        )
+        .unwrap();
         let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
         let inbounds_wifi = config_wifi["inbounds"].as_array().unwrap();
         assert!(!inbounds_wifi.is_empty());
@@ -320,22 +322,34 @@ mod tests {
     #[test]
     fn test_generate_singbox_config_alpn_self_healing() {
         let mut fields = std::collections::HashMap::new();
-        fields.insert("server".to_string(), serde_json::json!("azure.ezgateway.net"));
+        fields.insert(
+            "server".to_string(),
+            serde_json::json!("azure.ezgateway.net"),
+        );
         fields.insert("server_port".to_string(), serde_json::json!(443));
-        fields.insert("uuid".to_string(), serde_json::json!("88dacb71-7530-475b-9ed6-a431caef6b3f"));
-        fields.insert("tls".to_string(), serde_json::json!({
-            "enabled": true,
-            "insecure": true,
-            "server_name": "aka.ms",
-            "alpn": ["h2", "http/1.1"]
-        }));
-        fields.insert("transport".to_string(), serde_json::json!({
-            "type": "ws",
-            "path": "/azure",
-            "headers": {
-                "Host": "azure.ezgateway.net"
-            }
-        }));
+        fields.insert(
+            "uuid".to_string(),
+            serde_json::json!("88dacb71-7530-475b-9ed6-a431caef6b3f"),
+        );
+        fields.insert(
+            "tls".to_string(),
+            serde_json::json!({
+                "enabled": true,
+                "insecure": true,
+                "server_name": "aka.ms",
+                "alpn": ["h2", "http/1.1"]
+            }),
+        );
+        fields.insert(
+            "transport".to_string(),
+            serde_json::json!({
+                "type": "ws",
+                "path": "/azure",
+                "headers": {
+                    "Host": "azure.ezgateway.net"
+                }
+            }),
+        );
 
         let outbounds = vec![super::super::adapters::SingBoxOutbound {
             outbound_type: "vless".to_string(),
@@ -352,13 +366,15 @@ mod tests {
             "127.0.0.1",
             &tun,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
         let outbounds_arr = config["outbounds"].as_array().unwrap();
 
         // Find our node outbound
-        let node_outbound = outbounds_arr.iter()
+        let node_outbound = outbounds_arr
+            .iter()
             .find(|o| o["tag"].as_str() == Some("Zoom-SG-Kavishka-300GB"))
             .expect("Should find our node outbound");
 

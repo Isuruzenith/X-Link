@@ -1,9 +1,9 @@
-use std::sync::Mutex;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use tauri_plugin_shell::process::CommandChild;
-use serde::{Serialize, Deserialize};
-use tauri::Manager;
+use std::sync::Mutex;
 use tauri::Emitter;
+use tauri::Manager;
+use tauri_plugin_shell::process::CommandChild;
 
 /// Maximum lines retained in the Rust-side log buffer.
 const LOG_BUFFER_RUST_MAX: usize = 500;
@@ -149,40 +149,114 @@ impl ProxyState {
                     } else if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                         // Fallback: manually parse fields if partial settings json exists (e.g. from javascript store plugin)
                         let mut default_s = UserSettings::default();
-                        if let Some(v) = val.get("proxyMode").and_then(|v| v.as_str()) { default_s.proxy_mode = v.to_string(); }
-                        if let Some(v) = val.get("closeToTray").and_then(|v| v.as_bool()) { default_s.close_to_tray = v; }
-                        if let Some(v) = val.get("autostart").and_then(|v| v.as_bool()) { default_s.autostart = v; }
-                        if let Some(v) = val.get("httpPort").and_then(|v| v.as_u64()) { default_s.http_port = v as u16; }
-                        if let Some(v) = val.get("socksPort").and_then(|v| v.as_u64()) { default_s.socks_port = v as u16; }
-                        if let Some(v) = val.get("mixedPort").and_then(|v| v.as_u64()) { default_s.mixed_port = v as u16; }
-                        if let Some(v) = val.get("wifiSharing").and_then(|v| v.as_bool()) { default_s.wifi_sharing = v; }
-                        if let Some(v) = val.get("tunAutoRoute").and_then(|v| v.as_bool()) { default_s.tun_auto_route = v; }
-                        if let Some(v) = val.get("tunAutoRedirect").and_then(|v| v.as_bool()) { default_s.tun_auto_redirect = v; }
-                        if let Some(v) = val.get("tunStrictRoute").and_then(|v| v.as_bool()) { default_s.tun_strict_route = v; }
-                        if let Some(v) = val.get("tunStack").and_then(|v| v.as_str()) { default_s.tun_stack = v.to_string(); }
-                        if let Some(v) = val.get("tunMtu").and_then(|v| v.as_u64()) { default_s.tun_mtu = v as u32; }
-                        if let Some(v) = val.get("tunEndpointIndependentNat").and_then(|v| v.as_bool()) { default_s.tun_endpoint_independent_nat = v; }
-                        if let Some(v) = val.get("sniffEnabled").and_then(|v| v.as_bool()) { default_s.sniff_enabled = v; }
-                        if let Some(v) = val.get("sniffHttp").and_then(|v| v.as_bool()) { default_s.sniff_http = v; }
-                        if let Some(v) = val.get("sniffTls").and_then(|v| v.as_bool()) { default_s.sniff_tls = v; }
-                        if let Some(v) = val.get("sniffQuic").and_then(|v| v.as_bool()) { default_s.sniff_quic = v; }
-                        if let Some(v) = val.get("sniffOverrideDestination").and_then(|v| v.as_bool()) { default_s.sniff_override_destination = v; }
-                        if let Some(v) = val.get("apiEnabled").and_then(|v| v.as_bool()) { default_s.api_enabled = v; }
-                        if let Some(v) = val.get("apiPort").and_then(|v| v.as_u64()) { default_s.api_port = v as u16; }
-                        if let Some(v) = val.get("apiSecret").and_then(|v| v.as_str()) { default_s.api_secret = v.to_string(); }
-                        if let Some(v) = val.get("apiCors").and_then(|v| v.as_bool()) { default_s.api_cors = v; }
-                        if let Some(v) = val.get("primaryDns").and_then(|v| v.as_str()) { default_s.primary_dns = v.to_string(); }
-                        if let Some(v) = val.get("fallbackDns").and_then(|v| v.as_str()) { default_s.fallback_dns = v.to_string(); }
-                        if let Some(v) = val.get("directDns").and_then(|v| v.as_str()) { default_s.direct_dns = v.to_string(); }
-                        if let Some(v) = val.get("dnsStrategy").and_then(|v| v.as_str()) { default_s.dns_strategy = v.to_string(); }
-                        if let Some(v) = val.get("dnsMode").and_then(|v| v.as_str()) { default_s.dns_mode = v.to_string(); }
-                        if let Some(v) = val.get("fakeipRange").and_then(|v| v.as_str()) { default_s.fakeip_range = v.to_string(); }
-                        if let Some(v) = val.get("fakeipFilter").and_then(|v| v.as_str()) { default_s.fakeip_filter = v.to_string(); }
-                        if let Some(v) = val.get("dnsLeakProtection").and_then(|v| v.as_bool()) { default_s.dns_leak_protection = v; }
-                        if let Some(v) = val.get("dnsCaching").and_then(|v| v.as_bool()) { default_s.dns_caching = v; }
-                        if let Some(v) = val.get("finalOutbound").and_then(|v| v.as_str()) { default_s.final_outbound = v.to_string(); }
-                        if let Some(v) = val.get("bypassLan").and_then(|v| v.as_bool()) { default_s.bypass_lan = v; }
-                        if let Some(v) = val.get("dnsAddress").and_then(|v| v.as_str()) { default_s.dns_address = v.to_string(); }
+                        if let Some(v) = val.get("proxyMode").and_then(|v| v.as_str()) {
+                            default_s.proxy_mode = v.to_string();
+                        }
+                        if let Some(v) = val.get("closeToTray").and_then(|v| v.as_bool()) {
+                            default_s.close_to_tray = v;
+                        }
+                        if let Some(v) = val.get("autostart").and_then(|v| v.as_bool()) {
+                            default_s.autostart = v;
+                        }
+                        if let Some(v) = val.get("httpPort").and_then(|v| v.as_u64()) {
+                            default_s.http_port = v as u16;
+                        }
+                        if let Some(v) = val.get("socksPort").and_then(|v| v.as_u64()) {
+                            default_s.socks_port = v as u16;
+                        }
+                        if let Some(v) = val.get("mixedPort").and_then(|v| v.as_u64()) {
+                            default_s.mixed_port = v as u16;
+                        }
+                        if let Some(v) = val.get("wifiSharing").and_then(|v| v.as_bool()) {
+                            default_s.wifi_sharing = v;
+                        }
+                        if let Some(v) = val.get("tunAutoRoute").and_then(|v| v.as_bool()) {
+                            default_s.tun_auto_route = v;
+                        }
+                        if let Some(v) = val.get("tunAutoRedirect").and_then(|v| v.as_bool()) {
+                            default_s.tun_auto_redirect = v;
+                        }
+                        if let Some(v) = val.get("tunStrictRoute").and_then(|v| v.as_bool()) {
+                            default_s.tun_strict_route = v;
+                        }
+                        if let Some(v) = val.get("tunStack").and_then(|v| v.as_str()) {
+                            default_s.tun_stack = v.to_string();
+                        }
+                        if let Some(v) = val.get("tunMtu").and_then(|v| v.as_u64()) {
+                            default_s.tun_mtu = v as u32;
+                        }
+                        if let Some(v) = val
+                            .get("tunEndpointIndependentNat")
+                            .and_then(|v| v.as_bool())
+                        {
+                            default_s.tun_endpoint_independent_nat = v;
+                        }
+                        if let Some(v) = val.get("sniffEnabled").and_then(|v| v.as_bool()) {
+                            default_s.sniff_enabled = v;
+                        }
+                        if let Some(v) = val.get("sniffHttp").and_then(|v| v.as_bool()) {
+                            default_s.sniff_http = v;
+                        }
+                        if let Some(v) = val.get("sniffTls").and_then(|v| v.as_bool()) {
+                            default_s.sniff_tls = v;
+                        }
+                        if let Some(v) = val.get("sniffQuic").and_then(|v| v.as_bool()) {
+                            default_s.sniff_quic = v;
+                        }
+                        if let Some(v) = val
+                            .get("sniffOverrideDestination")
+                            .and_then(|v| v.as_bool())
+                        {
+                            default_s.sniff_override_destination = v;
+                        }
+                        if let Some(v) = val.get("apiEnabled").and_then(|v| v.as_bool()) {
+                            default_s.api_enabled = v;
+                        }
+                        if let Some(v) = val.get("apiPort").and_then(|v| v.as_u64()) {
+                            default_s.api_port = v as u16;
+                        }
+                        if let Some(v) = val.get("apiSecret").and_then(|v| v.as_str()) {
+                            default_s.api_secret = v.to_string();
+                        }
+                        if let Some(v) = val.get("apiCors").and_then(|v| v.as_bool()) {
+                            default_s.api_cors = v;
+                        }
+                        if let Some(v) = val.get("primaryDns").and_then(|v| v.as_str()) {
+                            default_s.primary_dns = v.to_string();
+                        }
+                        if let Some(v) = val.get("fallbackDns").and_then(|v| v.as_str()) {
+                            default_s.fallback_dns = v.to_string();
+                        }
+                        if let Some(v) = val.get("directDns").and_then(|v| v.as_str()) {
+                            default_s.direct_dns = v.to_string();
+                        }
+                        if let Some(v) = val.get("dnsStrategy").and_then(|v| v.as_str()) {
+                            default_s.dns_strategy = v.to_string();
+                        }
+                        if let Some(v) = val.get("dnsMode").and_then(|v| v.as_str()) {
+                            default_s.dns_mode = v.to_string();
+                        }
+                        if let Some(v) = val.get("fakeipRange").and_then(|v| v.as_str()) {
+                            default_s.fakeip_range = v.to_string();
+                        }
+                        if let Some(v) = val.get("fakeipFilter").and_then(|v| v.as_str()) {
+                            default_s.fakeip_filter = v.to_string();
+                        }
+                        if let Some(v) = val.get("dnsLeakProtection").and_then(|v| v.as_bool()) {
+                            default_s.dns_leak_protection = v;
+                        }
+                        if let Some(v) = val.get("dnsCaching").and_then(|v| v.as_bool()) {
+                            default_s.dns_caching = v;
+                        }
+                        if let Some(v) = val.get("finalOutbound").and_then(|v| v.as_str()) {
+                            default_s.final_outbound = v.to_string();
+                        }
+                        if let Some(v) = val.get("bypassLan").and_then(|v| v.as_bool()) {
+                            default_s.bypass_lan = v;
+                        }
+                        if let Some(v) = val.get("dnsAddress").and_then(|v| v.as_str()) {
+                            default_s.dns_address = v.to_string();
+                        }
                         settings = default_s;
                     }
                 }

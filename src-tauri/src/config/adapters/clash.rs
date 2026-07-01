@@ -1,10 +1,15 @@
-use std::collections::HashMap;
-use serde_json::Value;
 use super::SingBoxOutbound;
+use serde_json::Value;
+use std::collections::HashMap;
 
 fn parse_clash_tls(obj: &serde_json::Map<String, Value>, default_enabled: bool) -> Option<Value> {
-    let tls_enabled = obj.get("tls").and_then(|v| v.as_bool()).unwrap_or(default_enabled);
-    let sni = obj.get("servername").and_then(|v| v.as_str())
+    let tls_enabled = obj
+        .get("tls")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default_enabled);
+    let sni = obj
+        .get("servername")
+        .and_then(|v| v.as_str())
         .or_else(|| obj.get("sni").and_then(|v| v.as_str()));
     let reality_opts = obj.get("reality-opts").and_then(|v| v.as_object());
 
@@ -13,10 +18,16 @@ fn parse_clash_tls(obj: &serde_json::Map<String, Value>, default_enabled: bool) 
         tls.insert("enabled".to_string(), Value::Bool(true));
 
         if let Some(sni_val) = sni {
-            tls.insert("server_name".to_string(), Value::String(sni_val.to_string()));
+            tls.insert(
+                "server_name".to_string(),
+                Value::String(sni_val.to_string()),
+            );
         }
 
-        let skip_verify = obj.get("skip-cert-verify").and_then(|v| v.as_bool()).unwrap_or(false);
+        let skip_verify = obj
+            .get("skip-cert-verify")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         if skip_verify {
             tls.insert("insecure".to_string(), Value::Bool(true));
         }
@@ -26,7 +37,10 @@ fn parse_clash_tls(obj: &serde_json::Map<String, Value>, default_enabled: bool) 
             let mut utls = HashMap::new();
             utls.insert("enabled".to_string(), Value::Bool(true));
             utls.insert("fingerprint".to_string(), Value::String(fp.to_string()));
-            tls.insert("utls".to_string(), Value::Object(utls.into_iter().collect()));
+            tls.insert(
+                "utls".to_string(),
+                Value::Object(utls.into_iter().collect()),
+            );
         }
 
         if let Some(ro) = reality_opts {
@@ -38,7 +52,10 @@ fn parse_clash_tls(obj: &serde_json::Map<String, Value>, default_enabled: bool) 
             if let Some(sid) = ro.get("short-id").and_then(|v| v.as_str()) {
                 reality.insert("short_id".to_string(), Value::String(sid.to_string()));
             }
-            tls.insert("reality".to_string(), Value::Object(reality.into_iter().collect()));
+            tls.insert(
+                "reality".to_string(),
+                Value::Object(reality.into_iter().collect()),
+            );
         }
 
         return Some(Value::Object(tls.into_iter().collect()));
@@ -68,14 +85,22 @@ fn parse_clash_transport(obj: &serde_json::Map<String, Value>) -> Option<Value> 
                             transport_headers.insert(k.clone(), Value::String(v_str.to_string()));
                         }
                     }
-                    transport.insert("headers".to_string(), Value::Object(transport_headers.into_iter().collect()));
+                    transport.insert(
+                        "headers".to_string(),
+                        Value::Object(transport_headers.into_iter().collect()),
+                    );
                 }
             }
         }
         "grpc" => {
             if let Some(grpc_opts) = obj.get("grpc-opts").and_then(|o| o.as_object()) {
-                if let Some(service_name) = grpc_opts.get("grpc-service-name").and_then(|s| s.as_str()) {
-                    transport.insert("service_name".to_string(), Value::String(service_name.to_string()));
+                if let Some(service_name) =
+                    grpc_opts.get("grpc-service-name").and_then(|s| s.as_str())
+                {
+                    transport.insert(
+                        "service_name".to_string(),
+                        Value::String(service_name.to_string()),
+                    );
                 }
             }
         }
@@ -90,7 +115,10 @@ fn parse_clash_transport(obj: &serde_json::Map<String, Value>) -> Option<Value> 
                 }
                 if let Some(host) = h2_opts.get("host").and_then(|h| h.as_array()) {
                     if let Some(first_host) = host.first().and_then(|h| h.as_str()) {
-                        transport.insert("host".to_string(), Value::Array(vec![Value::String(first_host.to_string())]));
+                        transport.insert(
+                            "host".to_string(),
+                            Value::Array(vec![Value::String(first_host.to_string())]),
+                        );
                     }
                 }
             }
@@ -103,10 +131,11 @@ fn parse_clash_transport(obj: &serde_json::Map<String, Value>) -> Option<Value> 
 
 pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
     // Parse YAML into serde_json::Value
-    let doc: Value = serde_yaml::from_slice(raw)
-        .map_err(|e| format!("Failed to parse Clash YAML: {}", e))?;
+    let doc: Value =
+        serde_yaml::from_slice(raw).map_err(|e| format!("Failed to parse Clash YAML: {}", e))?;
 
-    let proxies = doc.get("proxies")
+    let proxies = doc
+        .get("proxies")
         .and_then(|p| p.as_array())
         .ok_or_else(|| "Clash subscription does not contain a 'proxies' array".to_string())?;
 
@@ -128,7 +157,11 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             None => continue,
         };
 
-        let server = obj.get("server").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let server = obj
+            .get("server")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
         let port = obj.get("port").and_then(|p| p.as_u64()).unwrap_or(0) as u16;
 
         let mut fields = HashMap::new();
@@ -218,21 +251,37 @@ proxies:
 "#;
         let res = adapt(yaml.as_bytes()).unwrap();
         assert_eq!(res.len(), 1);
-        
+
         let outbound = &res[0];
         assert_eq!(outbound.outbound_type, "shadowsocks");
         assert_eq!(outbound.tag, "Shadowsocks Node");
-        
-        let server = outbound.fields.get("server").and_then(|v| v.as_str()).unwrap();
+
+        let server = outbound
+            .fields
+            .get("server")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert_eq!(server, "1.2.3.4");
-        
-        let port = outbound.fields.get("server_port").and_then(|v| v.as_u64()).unwrap();
+
+        let port = outbound
+            .fields
+            .get("server_port")
+            .and_then(|v| v.as_u64())
+            .unwrap();
         assert_eq!(port, 8388);
-        
-        let method = outbound.fields.get("method").and_then(|v| v.as_str()).unwrap();
+
+        let method = outbound
+            .fields
+            .get("method")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert_eq!(method, "aes-256-gcm");
-        
-        let password = outbound.fields.get("password").and_then(|v| v.as_str()).unwrap();
+
+        let password = outbound
+            .fields
+            .get("password")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert_eq!(password, "secretpassword");
     }
 
@@ -260,18 +309,32 @@ proxies:
         let outbound = &res[0];
         assert_eq!(outbound.outbound_type, "vless");
         assert_eq!(outbound.tag, "Vless Reality Node");
-        
+
         let tls = outbound.fields.get("tls").unwrap().as_object().unwrap();
         assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
         assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "aka.ms");
-        
+
         let reality = tls.get("reality").unwrap().as_object().unwrap();
         assert_eq!(reality.get("enabled").unwrap().as_bool().unwrap(), true);
-        assert_eq!(reality.get("public_key").unwrap().as_str().unwrap(), "pbkkey");
-        assert_eq!(reality.get("short_id").unwrap().as_str().unwrap(), "shortid");
+        assert_eq!(
+            reality.get("public_key").unwrap().as_str().unwrap(),
+            "pbkkey"
+        );
+        assert_eq!(
+            reality.get("short_id").unwrap().as_str().unwrap(),
+            "shortid"
+        );
 
-        let transport = outbound.fields.get("transport").unwrap().as_object().unwrap();
+        let transport = outbound
+            .fields
+            .get("transport")
+            .unwrap()
+            .as_object()
+            .unwrap();
         assert_eq!(transport.get("type").unwrap().as_str().unwrap(), "grpc");
-        assert_eq!(transport.get("service_name").unwrap().as_str().unwrap(), "grpc-test");
+        assert_eq!(
+            transport.get("service_name").unwrap().as_str().unwrap(),
+            "grpc-test"
+        );
     }
 }
