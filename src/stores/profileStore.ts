@@ -21,6 +21,7 @@ interface ProfileState {
   selectedProfileId: string | null;
   nodes: any[];
   selectedNodeTag: string | null;
+  nodeGeoCache: Record<string, string>;
 
   // Import form state
   importName: string;
@@ -51,6 +52,7 @@ interface ProfileState {
   testAllNodes: () => Promise<void>;
   updateNodesList: (newNodes: any[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
+  fetchNodeGeo: (server: string, tag: string) => Promise<void>;
 }
 
 const detectNameFromContent = (text: string): string => {
@@ -83,12 +85,78 @@ const mapImportError = (raw: string): string => {
   return r;
 };
 
+export const getCountryCode = (tag: string): string | null => {
+  // Check if there is a flag emoji in the tag (surrogate pairs of Regional Indicator Symbols)
+  const match = tag.match(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/);
+  if (match) {
+    const flag = match[0];
+    const cp1 = flag.codePointAt(0);
+    const cp2 = flag.codePointAt(2);
+    if (cp1 && cp2) {
+      const char1 = String.fromCharCode(cp1 - 127397);
+      const char2 = String.fromCharCode(cp2 - 127397);
+      return (char1 + char2).toLowerCase();
+    }
+  }
+
+  const normalized = tag.toUpperCase();
+  const mappings: Record<string, string> = {
+    'UNITED STATES': 'us', 'USA': 'us', ' US ': 'us', 'US-': 'us', 'US_': 'us',
+    'SINGAPORE': 'sg', ' SG ': 'sg', 'SG-': 'sg', 'SG_': 'sg',
+    'JAPAN': 'jp', ' JP ': 'jp', 'JP-': 'jp', 'JP_': 'jp',
+    'HONG KONG': 'hk', ' HONGKONG': 'hk', ' HK ': 'hk', 'HK-': 'hk', 'HK_': 'hk',
+    'GERMANY': 'de', ' DE ': 'de', 'DE-': 'de', 'DE_': 'de',
+    'UNITED KINGDOM': 'gb', ' UK ': 'gb', ' UK-': 'gb', ' GB ': 'gb', 'LONDON': 'gb',
+    'FRANCE': 'fr', ' FR ': 'fr', 'FR-': 'fr', 'FR_': 'fr',
+    'NETHERLANDS': 'nl', ' NL ': 'nl', 'NL-': 'nl', 'NL_': 'nl',
+    'CANADA': 'ca', ' CA ': 'ca', 'CA-': 'ca', 'CA_': 'ca',
+    'AUSTRALIA': 'au', ' AU ': 'au', 'AU-': 'au', 'AU_': 'au',
+    'KOREA': 'kr', ' KR ': 'kr', 'KR-': 'kr', 'KR_': 'kr',
+    'TAIWAN': 'tw', ' TW ': 'tw', 'TW-': 'tw', 'TW_': 'tw',
+    'CHINA': 'cn', ' CN ': 'cn', 'CN-': 'cn', 'CN_': 'cn',
+    'INDIA': 'in', ' IN ': 'in', 'IN-': 'in', 'IN_': 'in',
+    'RUSSIA': 'ru', ' RU ': 'ru', 'RU-': 'ru', 'RU_': 'ru',
+    'TURKEY': 'tr', ' TR ': 'tr', 'TR-': 'tr', 'TR_': 'tr',
+    'VIETNAM': 'vn', ' VN ': 'vn', 'VN-': 'vn', 'VN_': 'vn',
+    'THAILAND': 'th', ' TH ': 'th', 'TH-': 'th', 'TH_': 'th',
+  };
+
+  for (const [key, code] of Object.entries(mappings)) {
+    if (normalized.includes(key)) {
+      return code;
+    }
+  }
+
+  // Prefix or boundaries checks
+  if (normalized.startsWith('US') || normalized.endsWith('US')) return 'us';
+  if (normalized.startsWith('SG') || normalized.endsWith('SG')) return 'sg';
+  if (normalized.startsWith('JP') || normalized.endsWith('JP')) return 'jp';
+  if (normalized.startsWith('HK') || normalized.endsWith('HK')) return 'hk';
+  if (normalized.startsWith('DE') || normalized.endsWith('DE')) return 'de';
+  if (normalized.startsWith('UK') || normalized.endsWith('UK') || normalized.startsWith('GB') || normalized.endsWith('GB')) return 'gb';
+  if (normalized.startsWith('FR') || normalized.endsWith('FR')) return 'fr';
+  if (normalized.startsWith('NL') || normalized.endsWith('NL')) return 'nl';
+  if (normalized.startsWith('CA') || normalized.endsWith('CA')) return 'ca';
+  if (normalized.startsWith('AU') || normalized.endsWith('AU')) return 'au';
+  if (normalized.startsWith('KR') || normalized.endsWith('KR')) return 'kr';
+  if (normalized.startsWith('TW') || normalized.endsWith('TW')) return 'tw';
+  if (normalized.startsWith('CN') || normalized.endsWith('CN')) return 'cn';
+  if (normalized.startsWith('IN') || normalized.endsWith('IN')) return 'in';
+  if (normalized.startsWith('RU') || normalized.endsWith('RU')) return 'ru';
+  if (normalized.startsWith('TR') || normalized.endsWith('TR')) return 'tr';
+  if (normalized.startsWith('VN') || normalized.endsWith('VN')) return 'vn';
+  if (normalized.startsWith('TH') || normalized.endsWith('TH')) return 'th';
+
+  return null;
+};
+
 export const useProfileStore = create<ProfileState>((set, get) => ({
   profiles: [],
   activeProfileId: null,
   selectedProfileId: null,
   nodes: [],
   selectedNodeTag: null,
+  nodeGeoCache: {},
   importName: '',
   importContent: '',
   importError: null,
@@ -426,4 +494,35 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   updateNodesList: (newNodes) => set({ nodes: newNodes }),
+
+  fetchNodeGeo: async (server, tag) => {
+    if (!server) return;
+    const { nodeGeoCache } = get();
+    if (nodeGeoCache[server]) return;
+
+    // Set loading placeholder
+    set((state) => ({
+      nodeGeoCache: { ...state.nodeGeoCache, [server]: 'loading' }
+    }));
+
+    try {
+      const res = await fetch(`https://freeipapi.com/api/json/${server}`);
+      if (!res.ok) throw new Error('API failed');
+      const data = await res.json();
+      if (data && data.countryCode && data.countryCode.length === 2) {
+        const code = data.countryCode.toLowerCase();
+        set((state) => ({
+          nodeGeoCache: { ...state.nodeGeoCache, [server]: code }
+        }));
+      } else {
+        throw new Error('Invalid response');
+      }
+    } catch {
+      // Fallback to tag parsing
+      const fallbackCode = getCountryCode(tag);
+      set((state) => ({
+        nodeGeoCache: { ...state.nodeGeoCache, [server]: fallbackCode || 'unknown' }
+      }));
+    }
+  },
 }));

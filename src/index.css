@@ -245,7 +245,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3) 14px;
   margin-bottom: var(--sp-5);
   height: 40px;
   overflow: hidden;
@@ -258,6 +258,7 @@ body {
   background: none;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
   box-shadow: 0 0 14px var(--accent-primary-glow);
 }
 

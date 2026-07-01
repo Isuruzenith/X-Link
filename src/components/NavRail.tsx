@@ -24,7 +24,7 @@ export function NavRail({ activeTab, onTabChange }: NavRailProps) {
       {/* Logo */}
       <div className="rail-logo">
         <div className="rail-logo-icon">
-          <img src={xLinkLogo} alt="X-Link" style={{ width: '28px', height: '28px', borderRadius: 'var(--r-md)' }} />
+          <img src={xLinkLogo} alt="X-Link" style={{ width: '28px', height: '28px', borderRadius: 'var(--r-md)', display: 'block' }} />
         </div>
         <span className="rail-logo-wordmark">X-Link</span>
       </div>
