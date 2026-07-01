@@ -9,6 +9,7 @@ export function ConfigView() {
   const {
     profiles,
     activeProfileId,
+    selectedProfileId,
     nodes,
     selectedNodeTag,
     importName,
@@ -27,13 +28,13 @@ export function ConfigView() {
     switchProfile,
     deleteProfile,
     testAllNodes,
-    activeProfile: getActiveProfile,
+    selectProfile,
   } = useProfileStore();
 
   const { isConnected } = useConnectionStore();
   const { openEditor } = useNodeEditorStore();
 
-  const activeProfile = getActiveProfile();
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) || null;
 
   const handleImportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,9 +72,21 @@ export function ConfigView() {
 
           {/* Import Form */}
           <div style={{ flexShrink: 0, padding: '16px', marginBottom: '16px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <FileUp size={14} /> Add Profile
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <FileUp size={14} /> Add Profile
+              </h3>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={pickFileAndImport}
+                disabled={isImporting}
+                style={{ padding: '0 8px', height: '24px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                title="Choose config file to import"
+              >
+                <FileUp size={12} /> Choose File
+              </button>
+            </div>
             <form onSubmit={handleImportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <input
                 className="text-input"
@@ -109,15 +122,6 @@ export function ConfigView() {
                   {isImporting ? <RefreshCw size={14} className="spin" /> : <CornerDownLeft size={16} />}
                 </button>
               </div>
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={pickFileAndImport}
-                disabled={isImporting}
-                style={{ width: '100%', height: '32px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <FileUp size={13} /> Choose File…
-              </button>
               {importError && (
                 <div style={{ background: 'var(--status-err-dim)', color: 'var(--status-err)', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <ShieldAlert size={12} /> {importError}
@@ -143,20 +147,23 @@ export function ConfigView() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {profiles.map((profile) => {
                   const isActive = profile.id === activeProfileId;
+                  const isSelected = profile.id === selectedProfileId;
                   const typeStyle = getProfileTypeColor(profile.type);
                   return (
                     <div
                       key={profile.id}
-                      className={`profile-item ${isActive ? 'active' : ''}`}
-                      onClick={() => !isActive && switchProfile(profile.id)}
-                      style={{ cursor: isActive ? 'default' : 'pointer', position: 'relative' }}
+                      className={`profile-item ${isSelected ? 'active' : ''}`}
+                      onClick={() => !isSelected && selectProfile(profile.id)}
+                      style={{ cursor: isSelected ? 'default' : 'pointer', position: 'relative' }}
                     >
                       <div className="profile-item-left">
                         <div className="profile-icon">
                           {profile.type === 'subscription' ? <Link2 size={18} /> : <Globe size={18} />}
                         </div>
                         <div className="profile-details">
-                          <span className="profile-name">{profile.name}</span>
+                          <span className="profile-name" title={profile.name}>
+                            {profile.name.length > 15 ? `${profile.name.slice(0, 15)}...` : profile.name}
+                          </span>
                           <div className="profile-meta">
                             <span style={{
                               fontSize: '9px',
@@ -177,13 +184,14 @@ export function ConfigView() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {isActive && isConnected && (
-                          <div title="Connected" style={{
+                        {isActive && (
+                          <div title={isConnected ? "Active & Connected" : "Active"} style={{
                             width: '8px', height: '8px', borderRadius: '50%',
-                            background: 'var(--status-ok)', boxShadow: '0 0 8px rgba(46, 213, 115, 0.6)',
+                            background: 'var(--status-ok)',
+                            boxShadow: isConnected ? '0 0 8px rgba(46, 213, 115, 0.6)' : 'none',
                           }} />
                         )}
-                        {!isActive && (
+                        {!isSelected && !isActive && (
                           <ArrowRight size={14} style={{ color: 'var(--text-low)', opacity: 0.5 }} />
                         )}
                         <button
@@ -211,24 +219,57 @@ export function ConfigView() {
 
         {/* Right panel: Node list for active profile */}
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {activeProfile ? (
+          {selectedProfile ? (
             <>
               <div style={{ padding: '20px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', marginBottom: '16px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '8px' }}>
-                      {activeProfile.name}
+                      {selectedProfile.name}
                     </h2>
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <span className="node-type-badge" style={{ fontSize: '11px', padding: '2px 8px', height: '20px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
-                        <Zap size={10} style={{ marginRight: '4px' }} /> {activeProfile.nodeCount} Nodes
+                        <Zap size={10} style={{ marginRight: '4px' }} /> {selectedProfile.nodeCount} Nodes
                       </span>
-                      {activeProfile.type === 'subscription' && activeProfile.subscriptionUrl && (
+                      {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
                         <span className="node-type-badge" style={{ fontSize: '11px', padding: '2px 8px', height: '20px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
                           <Link2 size={10} style={{ marginRight: '4px' }} /> Subscription
                         </span>
                       )}
                     </div>
+                  </div>
+                  <div>
+                    {selectedProfile.id === activeProfileId ? (
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'var(--status-ok-dim)',
+                        color: 'var(--status-ok)',
+                        border: '1px solid rgba(46, 213, 115, 0.2)',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 600
+                      }}>
+                        <Check size={14} /> Active
+                      </div>
+                    ) : (
+                      <button
+                        className="btn primary"
+                        onClick={() => switchProfile(selectedProfile.id)}
+                        style={{
+                          height: '32px',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '0 14px'
+                        }}
+                      >
+                        <Zap size={14} /> Activate Profile
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -255,52 +296,55 @@ export function ConfigView() {
                         key={i}
                         className={`node-card ${selectedNodeTag === node.tag ? 'active' : ''}`}
                         onClick={() => selectNode(node)}
-                        style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+                        style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 0 }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
-                          <Server size={14} style={{ color: selectedNodeTag === node.tag ? 'var(--accent-primary)' : 'var(--text-low)' }} />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
-                            <span className="node-name" title={node.tag}>{node.tag}</span>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+                          <Server size={14} style={{ color: selectedNodeTag === node.tag ? 'var(--accent-primary)' : 'var(--text-low)', flexShrink: 0 }} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+                            <span className="node-name" title={node.tag} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.tag}</span>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                               <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
-                              {isConnected && selectedNodeTag === node.tag && (
+                              {isConnected && selectedProfile.id === activeProfileId && selectedNodeTag === node.tag && (
                                 <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
                               )}
                             </div>
                           </div>
                         </div>
-                        <button
-                          className="btn-icon-only"
-                          style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', flexShrink: 0, borderRadius: '6px' }}
-                          onClick={(e) => { e.stopPropagation(); openEditor(node); }}
-                          title="Edit node configuration"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        {latencyResults[node.tag] && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              flexShrink: 0,
-                              fontVariantNumeric: 'tabular-nums',
-                              ...(latencyResults[node.tag].latencyMs !== null
-                                ? latencyResults[node.tag].latencyMs! < 200
-                                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
-                                  : latencyResults[node.tag].latencyMs! < 500
-                                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
-                                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
-                                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
-                            }}
-                            title={latencyResults[node.tag].error || undefined}
-                          >
-                            {latencyResults[node.tag].latencyMs !== null
-                              ? `${latencyResults[node.tag].latencyMs}ms`
-                              : 'timeout'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+                          {selectedProfile.id === activeProfileId && (
+                            <button
+                              className="btn-icon-only"
+                              style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', borderRadius: '6px' }}
+                              onClick={(e) => { e.stopPropagation(); openEditor(node); }}
+                              title="Edit node configuration"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                          )}
+                          {latencyResults[node.tag] && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontVariantNumeric: 'tabular-nums',
+                                ...(latencyResults[node.tag].latencyMs !== null
+                                  ? latencyResults[node.tag].latencyMs! < 200
+                                    ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
+                                    : latencyResults[node.tag].latencyMs! < 500
+                                      ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
+                                      : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
+                                  : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
+                              }}
+                              title={latencyResults[node.tag].error || undefined}
+                            >
+                              {latencyResults[node.tag].latencyMs !== null
+                                ? `${latencyResults[node.tag].latencyMs}ms`
+                                : 'timeout'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   DownloadCloud, UploadCloud, Clock, Server, Power,
   Shield, ShieldAlert, Network, Wifi, Zap
@@ -49,7 +50,13 @@ export function DashboardView() {
 
   const { settings, isElevated } = useSettingsStore();
   const activeProfile = useProfileStore((s) => s.activeProfile)();
-  const { nodes, selectedNodeTag, selectNode } = useProfileStore();
+  const { nodes, selectedNodeTag, selectNode, selectProfile } = useProfileStore();
+
+  useEffect(() => {
+    if (activeProfile) {
+      selectProfile(activeProfile.id);
+    }
+  }, [activeProfile?.id, selectProfile]);
 
   return (
     <ViewShell

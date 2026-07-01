@@ -602,7 +602,7 @@ body {
 .metric-tile-label { font-size: 11px; color: var(--text-low); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* Node Grid */
-.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--sp-2); }
+.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--sp-2); }
 .node-tile {
   background: var(--surface-overlay); border: 1px solid var(--border-subtle);
   border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);

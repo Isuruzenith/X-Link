@@ -18,6 +18,7 @@ interface ProfileState {
   // Multi-profile state
   profiles: Profile[];
   activeProfileId: string | null;
+  selectedProfileId: string | null;
   nodes: any[];
   selectedNodeTag: string | null;
 
@@ -49,6 +50,7 @@ interface ProfileState {
   switchProfile: (profileId: string) => Promise<void>;
   testAllNodes: () => Promise<void>;
   updateNodesList: (newNodes: any[]) => void;
+  selectProfile: (profileId: string) => Promise<void>;
 }
 
 const detectNameFromContent = (text: string): string => {
@@ -84,6 +86,7 @@ const mapImportError = (raw: string): string => {
 export const useProfileStore = create<ProfileState>((set, get) => ({
   profiles: [],
   activeProfileId: null,
+  selectedProfileId: null,
   nodes: [],
   selectedNodeTag: null,
   importName: '',
@@ -105,7 +108,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
     const profiles = await storeHelper.getProfiles();
     const activeProfileId = await storeHelper.getActiveProfileId();
-    set({ profiles, activeProfileId });
+    set({ profiles, activeProfileId, selectedProfileId: activeProfileId });
 
     if (activeProfileId) {
       await get().refreshNodes(activeProfileId);
@@ -113,7 +116,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   refreshNodes: async (profileId) => {
-    const pid = profileId || get().activeProfileId;
+    const pid = profileId || get().selectedProfileId || get().activeProfileId;
     if (!pid) {
       set({ nodes: [], selectedNodeTag: null });
       return;
@@ -152,22 +155,33 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   selectNode: async (node) => {
-    const { activeProfileId, profiles } = get();
+    const { selectedProfileId, activeProfileId, profiles } = get();
+    const targetProfileId = selectedProfileId || activeProfileId;
     const logStore = useLogStore.getState();
     const connectionStore = useConnectionStore.getState();
 
     set({ selectedNodeTag: node.tag });
 
-    // Update the profile's selectedNodeTag
-    if (activeProfileId) {
+    // Update the target profile's selectedNodeTag
+    if (targetProfileId) {
       const updatedProfiles = profiles.map((p) =>
-        p.id === activeProfileId ? { ...p, selectedNodeTag: node.tag } : p
+        p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
       );
       set({ profiles: updatedProfiles });
       await storeHelper.saveProfiles(updatedProfiles);
     }
 
-    if (connectionStore.isConnected) {
+    // Node-wise profile activation
+    if (targetProfileId && targetProfileId !== activeProfileId) {
+      try {
+        logStore.pushSystemLog(`Activating profile "${profiles.find((p) => p.id === targetProfileId)?.name}"...`);
+        await invoke('switch_profile', { profileId: targetProfileId, selectedNodeTag: node.tag });
+        await storeHelper.setActiveProfileId(targetProfileId);
+        set({ activeProfileId: targetProfileId });
+      } catch (err) {
+        logStore.pushSystemLog(`Failed to switch profile: ${err}`);
+      }
+    } else if (connectionStore.isConnected) {
       try {
         logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
         await invoke('switch_node_hot', { tag: node.tag });
@@ -236,6 +250,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({
         profiles: updatedProfiles,
         activeProfileId: newProfile.id,
+        selectedProfileId: newProfile.id,
         importSuccess: true,
         importName: '',
         importContent: '',
@@ -290,6 +305,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({
         profiles: updatedProfiles,
         activeProfileId: newProfile.id,
+        selectedProfileId: newProfile.id,
         importSuccess: true,
         importName: '',
         importContent: '',
@@ -334,15 +350,23 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       ? (updatedProfiles.length > 0 ? updatedProfiles[0].id : null)
       : activeProfileId;
 
-    set({ profiles: updatedProfiles, activeProfileId: newActiveId });
+    const { selectedProfileId } = get();
+    const newSelectedId = profileId === selectedProfileId
+      ? newActiveId
+      : selectedProfileId;
+
+    set({ profiles: updatedProfiles, activeProfileId: newActiveId, selectedProfileId: newSelectedId });
 
     // If we switched to a new active profile, load its nodes
     if (newActiveId && newActiveId !== activeProfileId) {
       try {
         await invoke('switch_profile', { profileId: newActiveId });
       } catch { /* ignore */ }
-      await get().refreshNodes(newActiveId);
-    } else if (!newActiveId) {
+    }
+
+    if (newSelectedId) {
+      await get().refreshNodes(newSelectedId);
+    } else {
       set({ nodes: [], selectedNodeTag: null });
     }
 
@@ -358,7 +382,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       await invoke('switch_profile', { profileId, selectedNodeTag: profile.selectedNodeTag });
       await storeHelper.setActiveProfileId(profileId);
-      set({ activeProfileId: profileId });
+      set({ activeProfileId: profileId, selectedProfileId: profileId });
       logStore.pushSystemLog(`Switched to profile "${profile.name}".`);
       await get().refreshNodes(profileId);
     } catch (err) {
@@ -366,10 +390,15 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }
   },
 
+  selectProfile: async (profileId) => {
+    set({ selectedProfileId: profileId });
+    await get().refreshNodes(profileId);
+  },
+
   testAllNodes: async () => {
-    const { activeProfileId } = get();
+    const pid = get().selectedProfileId || get().activeProfileId;
     const logStore = useLogStore.getState();
-    if (!activeProfileId) return;
+    if (!pid) return;
 
     set({ isTestingLatency: true, latencyResults: {} });
     logStore.pushSystemLog('Testing latency for all nodes...');
@@ -377,7 +406,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       const results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
         'test_all_nodes',
-        { profileId: activeProfileId }
+        { profileId: pid }
       );
 
       const latencyMap: Record<string, { latencyMs: number | null; error: string | null }> = {};
