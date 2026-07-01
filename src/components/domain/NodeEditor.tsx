@@ -1,80 +1,39 @@
 import React from 'react';
 import { X, RefreshCw, ShieldAlert, Info } from 'lucide-react';
+import { useNodeEditorStore } from '../../stores/nodeEditorStore';
 
 const PROTOCOL_LABELS: Record<string, string> = {
-  vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan',
-  shadowsocks: 'Shadowsocks', hysteria2: 'Hysteria2', tuic: 'TUIC v5',
-  wireguard: 'WireGuard', ssh: 'SSH', socks: 'SOCKS5', http: 'HTTP',
+  vless: 'VLESS',
+  vmess: 'VMess',
+  trojan: 'Trojan',
+  shadowsocks: 'Shadowsocks',
+  hysteria2: 'Hysteria2',
+  tuic: 'TUIC v5',
+  socks: 'SOCKS5',
+  http: 'HTTP',
 };
 
-interface NodeEditorProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSave: () => void;
-  isSaving: boolean;
-  saveError: string | null;
-  section: 'basic' | 'transport' | 'tls';
-  onSectionChange: (s: 'basic' | 'transport' | 'tls') => void;
-  // All the edit state
-  editTag: string; setEditTag: (v: string) => void;
-  editAddress: string; setEditAddress: (v: string) => void;
-  editPort: number; setEditPort: (v: number) => void;
-  editProtocol: string; setEditProtocol: (v: string) => void;
-  editUuid: string; setEditUuid: (v: string) => void;
-  editFlow: string; setEditFlow: (v: string) => void;
-  editPassword: string; setEditPassword: (v: string) => void;
-  editMethod: string; setEditMethod: (v: string) => void;
-  editNetwork: string; setEditNetwork: (v: string) => void;
-  editHeaderType: string; setEditHeaderType: (v: string) => void;
-  editPath: string; setEditPath: (v: string) => void;
-  editHost: string; setEditHost: (v: string) => void;
-  editServiceName: string; setEditServiceName: (v: string) => void;
-  editTlsEnabled: boolean; setEditTlsEnabled: (v: boolean) => void;
-  editAllowInsecure: boolean; setEditAllowInsecure: (v: boolean) => void;
-  editServerName: string; setEditServerName: (v: string) => void;
-  editAlpn: string; setEditAlpn: (v: string) => void;
-  editRealityEnabled: boolean; setEditRealityEnabled: (v: boolean) => void;
-  editFingerprint: string; setEditFingerprint: (v: string) => void;
-  editPublicKey: string; setEditPublicKey: (v: string) => void;
-  editShortId: string; setEditShortId: (v: string) => void;
-  editHy2Auth: string; setEditHy2Auth: (v: string) => void;
-  editHy2UpBw: string; setEditHy2UpBw: (v: string) => void;
-  editHy2DownBw: string; setEditHy2DownBw: (v: string) => void;
-  editHy2ObfsType: string; setEditHy2ObfsType: (v: string) => void;
-  editHy2ObfsPassword: string; setEditHy2ObfsPassword: (v: string) => void;
-  editTuicUuid: string; setEditTuicUuid: (v: string) => void;
-  editTuicPassword: string; setEditTuicPassword: (v: string) => void;
-  editTuicCongestion: string; setEditTuicCongestion: (v: string) => void;
-  editTuicUdpMode: string; setEditTuicUdpMode: (v: string) => void;
-  editWgSecretKey: string; setEditWgSecretKey: (v: string) => void;
-  editWgPeerPublicKey: string; setEditWgPeerPublicKey: (v: string) => void;
-  editWgPreSharedKey: string; setEditWgPreSharedKey: (v: string) => void;
-  editWgEndpoint: string; setEditWgEndpoint: (v: string) => void;
-  editWgAllowedIps: string; setEditWgAllowedIps: (v: string) => void;
-  editWgReserved: string; setEditWgReserved: (v: string) => void;
-  editWgMtu: number; setEditWgMtu: (v: number) => void;
-  editSshUser: string; setEditSshUser: (v: string) => void;
-  editSshPassword: string; setEditSshPassword: (v: string) => void;
-  editSshPrivateKey: string; setEditSshPrivateKey: (v: string) => void;
-  editSshHostKey: string; setEditSshHostKey: (v: string) => void;
-  editSocksUser: string; setEditSocksUser: (v: string) => void;
-  editSocksPassword: string; setEditSocksPassword: (v: string) => void;
-  editSocksVersion: number; setEditSocksVersion: (v: number) => void;
-  editSocksUdpOverTcp: boolean; setEditSocksUdpOverTcp: (v: boolean) => void;
-  editHttpUser: string; setEditHttpUser: (v: string) => void;
-  editHttpPassword: string; setEditHttpPassword: (v: string) => void;
-  editHttpTls: boolean; setEditHttpTls: (v: boolean) => void;
-}
-
 const Inp = ({ value, onChange, placeholder, type = 'text', mono = false }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; type?: string; mono?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: string;
+  mono?: boolean;
 }) => (
-  <input type={type} className="text-input" style={mono ? { fontFamily: 'var(--font-mono)', fontSize: '12px' } : undefined}
-    value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+  <input
+    type={type}
+    className="text-input"
+    style={mono ? { fontFamily: 'var(--font-mono)', fontSize: '12px' } : undefined}
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    placeholder={placeholder}
+  />
 );
 
 const Sel = ({ value, onChange, options }: {
-  value: string; onChange: (v: string) => void; options: { value: string; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
 }) => (
   <select className="select-input" value={value} onChange={(e) => onChange(e.target.value)}>
     {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -95,25 +54,27 @@ const SubCard = ({ title, children }: { title: string; children: React.ReactNode
   </div>
 );
 
-export function NodeEditor(props: NodeEditorProps) {
-  if (!props.isOpen) return null;
+export function NodeEditor() {
+  const store = useNodeEditorStore();
 
-  const isSpecial = ['wireguard', 'ssh', 'socks', 'http'].includes(props.editProtocol);
-  const noTransport = ['wireguard', 'ssh', 'socks', 'http', 'hysteria2', 'tuic'].includes(props.editProtocol);
+  if (!store.isOpen) return null;
+
+  const isSpecial = ['socks', 'http'].includes(store.editProtocol);
+  const noTransport = ['socks', 'http', 'hysteria2', 'tuic'].includes(store.editProtocol);
 
   return (
     <>
-      <div className="drawer-overlay" onClick={props.onClose} />
+      <div className="drawer-overlay" onClick={store.closeEditor} />
       <div className="drawer-panel">
         {/* Header */}
         <div className="drawer-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-high)' }}>Edit Node</span>
             <span className="type-chip" style={{ fontFamily: 'var(--font-mono)' }}>
-              {PROTOCOL_LABELS[props.editProtocol] || props.editProtocol}
+              {PROTOCOL_LABELS[store.editProtocol] || store.editProtocol}
             </span>
           </div>
-          <button className="btn-icon-only" onClick={props.onClose} style={{ border: 'none', background: 'transparent' }}>
+          <button className="btn-icon-only" onClick={store.closeEditor} style={{ border: 'none', background: 'transparent' }}>
             <X size={16} />
           </button>
         </div>
@@ -122,14 +83,22 @@ export function NodeEditor(props: NodeEditorProps) {
         {!isSpecial && (
           <div style={{ display: 'flex', gap: '2px', padding: '8px 20px 0', borderBottom: '1px solid var(--border-subtle)' }}>
             {(['basic', 'transport', 'tls'] as const).map((s) => (
-              <button key={s} onClick={() => props.onSectionChange(s)}
+              <button
+                key={s}
+                onClick={() => store.setSection(s)}
                 style={{
-                  padding: '8px 14px', background: 'transparent', border: 'none', cursor: 'pointer',
-                  fontSize: '12px', fontWeight: 500,
-                  color: props.section === s ? 'var(--accent-primary)' : 'var(--text-med)',
-                  borderBottom: props.section === s ? '2px solid var(--accent-primary)' : '2px solid transparent',
-                  textTransform: 'capitalize', transition: 'all 0.2s',
-                }}>
+                  padding: '8px 14px',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  color: store.section === s ? 'var(--accent-primary)' : 'var(--text-med)',
+                  borderBottom: store.section === s ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  textTransform: 'capitalize',
+                  transition: 'all 0.2s',
+                }}
+              >
                 {s === 'tls' ? 'TLS / Security' : s.charAt(0).toUpperCase() + s.slice(1)}
               </button>
             ))}
@@ -139,233 +108,261 @@ export function NodeEditor(props: NodeEditorProps) {
         {/* Body */}
         <div className="drawer-body">
           {/* BASIC */}
-          {(props.section === 'basic' || isSpecial) && (
+          {(store.section === 'basic' || isSpecial) && (
             <>
               <SubCard title="Common">
                 <div className="form-group">
                   <label className="form-label">Node Name (Tag) *</label>
-                  <Inp value={props.editTag} onChange={props.setEditTag} placeholder="my-proxy-sg" />
+                  <Inp value={store.editTag} onChange={(v) => store.setField('editTag', v)} placeholder="my-proxy-sg" />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Protocol Type</label>
-                  <Sel value={props.editProtocol} onChange={(v) => { props.setEditProtocol(v); props.onSectionChange('basic'); }} options={[
-                    { value: 'vless', label: 'VLESS' }, { value: 'vmess', label: 'VMess' },
-                    { value: 'trojan', label: 'Trojan' }, { value: 'shadowsocks', label: 'Shadowsocks' },
-                    { value: 'hysteria2', label: 'Hysteria2' }, { value: 'tuic', label: 'TUIC v5' },
-                    { value: 'wireguard', label: 'WireGuard' }, { value: 'ssh', label: 'SSH' },
-                    { value: 'socks', label: 'SOCKS5' }, { value: 'http', label: 'HTTP Proxy' },
-                  ]} />
+                  <Sel
+                    value={store.editProtocol}
+                    onChange={(v) => {
+                      store.setField('editProtocol', v);
+                      store.setSection('basic');
+                    }}
+                    options={[
+                      { value: 'vless', label: 'VLESS' },
+                      { value: 'vmess', label: 'VMess' },
+                      { value: 'trojan', label: 'Trojan' },
+                      { value: 'shadowsocks', label: 'Shadowsocks' },
+                      { value: 'hysteria2', label: 'Hysteria2' },
+                      { value: 'tuic', label: 'TUIC v5' },
+                      { value: 'socks', label: 'SOCKS5' },
+                      { value: 'http', label: 'HTTP Proxy' },
+                    ]}
+                  />
                 </div>
-                {props.editProtocol !== 'wireguard' && (
-                  <div className="editor-form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Server Address *</label>
-                      <Inp value={props.editAddress} onChange={props.setEditAddress} placeholder="sg.example.com" mono />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Port *</label>
-                      <input type="number" className="text-input" value={props.editPort} onChange={(e) => props.setEditPort(Number(e.target.value) || 443)} />
-                    </div>
+                <div className="editor-form-grid-2">
+                  <div className="form-group">
+                    <label className="form-label">Server Address *</label>
+                    <Inp value={store.editAddress} onChange={(v) => store.setField('editAddress', v)} placeholder="sg.example.com" mono />
                   </div>
-                )}
+                  <div className="form-group">
+                    <label className="form-label">Port *</label>
+                    <input
+                      type="number"
+                      className="text-input"
+                      value={store.editPort}
+                      onChange={(e) => store.setField('editPort', Number(e.target.value) || 443)}
+                    />
+                  </div>
+                </div>
               </SubCard>
 
-              {(props.editProtocol === 'vless' || props.editProtocol === 'vmess') && (
+              {(store.editProtocol === 'vless' || store.editProtocol === 'vmess') && (
                 <SubCard title="Authentication">
                   <div className="form-group">
                     <label className="form-label">UUID *</label>
-                    <Inp value={props.editUuid} onChange={props.setEditUuid} placeholder="a20d4836-4634-471b-b6c3-2f48acb0e9a5" mono />
+                    <Inp value={store.editUuid} onChange={(v) => store.setField('editUuid', v)} placeholder="uuid-here" mono />
                   </div>
-                  {props.editProtocol === 'vless' && (
+                  {store.editProtocol === 'vless' && (
                     <div className="form-group">
                       <label className="form-label">Flow (XTLS)</label>
-                      <Sel value={props.editFlow} onChange={props.setEditFlow} options={[
-                        { value: '', label: 'None' }, { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision' },
-                      ]} />
+                      <Sel
+                        value={store.editFlow}
+                        onChange={(v) => store.setField('editFlow', v)}
+                        options={[
+                          { value: '', label: 'None' },
+                          { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision' },
+                        ]}
+                      />
                     </div>
                   )}
                 </SubCard>
               )}
 
-              {props.editProtocol === 'trojan' && (
+              {store.editProtocol === 'trojan' && (
                 <SubCard title="Trojan Authentication">
                   <div className="form-group">
                     <label className="form-label">Password *</label>
-                    <input type="password" className="text-input" value={props.editPassword} onChange={(e) => props.setEditPassword(e.target.value)} placeholder="Trojan password" />
+                    <input
+                      type="password"
+                      className="text-input"
+                      value={store.editPassword}
+                      onChange={(e) => store.setField('editPassword', e.target.value)}
+                      placeholder="Trojan password"
+                    />
                   </div>
                 </SubCard>
               )}
 
-              {props.editProtocol === 'shadowsocks' && (
+              {store.editProtocol === 'shadowsocks' && (
                 <SubCard title="Shadowsocks">
                   <div className="form-group">
                     <label className="form-label">Password *</label>
-                    <input type="password" className="text-input" value={props.editPassword} onChange={(e) => props.setEditPassword(e.target.value)} />
+                    <input
+                      type="password"
+                      className="text-input"
+                      value={store.editPassword}
+                      onChange={(e) => store.setField('editPassword', e.target.value)}
+                    />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Encryption Method *</label>
-                    <Sel value={props.editMethod} onChange={props.setEditMethod} options={[
-                      { value: 'aes-256-gcm', label: 'AES-256-GCM' },
-                      { value: 'aes-128-gcm', label: 'AES-128-GCM' },
-                      { value: 'chacha20-ietf-poly1305', label: 'ChaCha20-Poly1305' },
-                      { value: '2022-blake3-aes-256-gcm', label: '2022-Blake3-AES-256-GCM' },
-                    ]} />
+                    <Sel
+                      value={store.editMethod}
+                      onChange={(v) => store.setField('editMethod', v)}
+                      options={[
+                        { value: 'aes-256-gcm', label: 'AES-256-GCM' },
+                        { value: 'aes-128-gcm', label: 'AES-128-GCM' },
+                        { value: 'chacha20-ietf-poly1305', label: 'ChaCha20-Poly1305' },
+                        { value: '2022-blake3-aes-256-gcm', label: '2022-Blake3-AES-256-GCM' },
+                      ]}
+                    />
                   </div>
                 </SubCard>
               )}
 
-              {props.editProtocol === 'hysteria2' && (
+              {store.editProtocol === 'hysteria2' && (
                 <SubCard title="Hysteria2">
                   <div className="form-group">
                     <label className="form-label">Auth Password *</label>
-                    <input type="password" className="text-input" value={props.editHy2Auth} onChange={(e) => props.setEditHy2Auth(e.target.value)} />
+                    <input
+                      type="password"
+                      className="text-input"
+                      value={store.editHy2Auth}
+                      onChange={(e) => store.setField('editHy2Auth', e.target.value)}
+                    />
                   </div>
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">Upload BW</label>
-                      <Inp value={props.editHy2UpBw} onChange={props.setEditHy2UpBw} placeholder="100 mbps" mono />
+                      <Inp value={store.editHy2UpBw} onChange={(v) => store.setField('editHy2UpBw', v)} placeholder="100 mbps" mono />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Download BW</label>
-                      <Inp value={props.editHy2DownBw} onChange={props.setEditHy2DownBw} placeholder="200 mbps" mono />
+                      <Inp value={store.editHy2DownBw} onChange={(v) => store.setField('editHy2DownBw', v)} placeholder="200 mbps" mono />
                     </div>
                   </div>
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">SNI</label>
-                      <Inp value={props.editServerName} onChange={props.setEditServerName} placeholder="your-server.com" />
+                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="your-server.com" />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Obfuscation</label>
-                      <Sel value={props.editHy2ObfsType} onChange={props.setEditHy2ObfsType} options={[{ value: '', label: 'None' }, { value: 'salamander', label: 'Salamander' }]} />
+                      <Sel
+                        value={store.editHy2ObfsType}
+                        onChange={(v) => store.setField('editHy2ObfsType', v)}
+                        options={[
+                          { value: '', label: 'None' },
+                          { value: 'salamander', label: 'Salamander' },
+                        ]}
+                      />
                     </div>
                   </div>
                 </SubCard>
               )}
 
-              {props.editProtocol === 'tuic' && (
+              {store.editProtocol === 'tuic' && (
                 <SubCard title="TUIC v5">
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">UUID *</label>
-                      <Inp value={props.editTuicUuid} onChange={props.setEditTuicUuid} placeholder="UUID" mono />
+                      <Inp value={store.editTuicUuid} onChange={(v) => store.setField('editTuicUuid', v)} placeholder="UUID" mono />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Password *</label>
-                      <input type="password" className="text-input" value={props.editTuicPassword} onChange={(e) => props.setEditTuicPassword(e.target.value)} />
+                      <input
+                        type="password"
+                        className="text-input"
+                        value={store.editTuicPassword}
+                        onChange={(e) => store.setField('editTuicPassword', e.target.value)}
+                      />
                     </div>
                   </div>
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">Congestion Control</label>
-                      <Sel value={props.editTuicCongestion} onChange={props.setEditTuicCongestion} options={[
-                        { value: 'bbr', label: 'BBR' }, { value: 'cubic', label: 'CUBIC' }, { value: 'new_reno', label: 'New Reno' },
-                      ]} />
+                      <Sel
+                        value={store.editTuicCongestion}
+                        onChange={(v) => store.setField('editTuicCongestion', v)}
+                        options={[
+                          { value: 'bbr', label: 'BBR' },
+                          { value: 'cubic', label: 'CUBIC' },
+                          { value: 'new_reno', label: 'New Reno' },
+                        ]}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">UDP Relay Mode</label>
-                      <Sel value={props.editTuicUdpMode} onChange={props.setEditTuicUdpMode} options={[
-                        { value: 'native', label: 'Native' }, { value: 'quic', label: 'QUIC' },
-                      ]} />
+                      <Sel
+                        value={store.editTuicUdpMode}
+                        onChange={(v) => store.setField('editTuicUdpMode', v)}
+                        options={[
+                          { value: 'native', label: 'Native' },
+                          { value: 'quic', label: 'QUIC' },
+                        ]}
+                      />
                     </div>
                   </div>
                 </SubCard>
               )}
 
-              {props.editProtocol === 'wireguard' && (
-                <SubCard title="WireGuard">
-                  <div className="form-group">
-                    <label className="form-label">Client Private Key *</label>
-                    <Inp value={props.editWgSecretKey} onChange={props.setEditWgSecretKey} placeholder="Base64 private key" mono />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Server Endpoint (host:port) *</label>
-                    <Inp value={props.editWgEndpoint} onChange={props.setEditWgEndpoint} placeholder="wg.example.com:51820" mono />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Peer Public Key *</label>
-                    <Inp value={props.editWgPeerPublicKey} onChange={props.setEditWgPeerPublicKey} placeholder="Base64 peer public key" mono />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Allowed IPs</label>
-                    <Inp value={props.editWgAllowedIps} onChange={props.setEditWgAllowedIps} placeholder="0.0.0.0/0, ::/0" mono />
-                  </div>
-                  <div className="editor-form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Reserved (comma sep.)</label>
-                      <Inp value={props.editWgReserved} onChange={props.setEditWgReserved} placeholder="0,0,0" mono />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">MTU</label>
-                      <input type="number" className="text-input" value={props.editWgMtu} onChange={(e) => props.setEditWgMtu(parseInt(e.target.value) || 1280)} />
-                    </div>
-                  </div>
-                </SubCard>
-              )}
-
-              {props.editProtocol === 'ssh' && (
-                <SubCard title="SSH">
-                  <div className="form-group">
-                    <label className="form-label">Username *</label>
-                    <Inp value={props.editSshUser} onChange={props.setEditSshUser} placeholder="root" mono />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Password</label>
-                    <input type="password" className="text-input" value={props.editSshPassword} onChange={(e) => props.setEditSshPassword(e.target.value)} placeholder="Leave empty for key auth" />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Private Key (PEM)</label>
-                    <textarea className="text-input" style={{ height: '70px', fontFamily: 'var(--font-mono)', fontSize: '11px', resize: 'vertical' }}
-                      value={props.editSshPrivateKey} onChange={(e) => props.setEditSshPrivateKey(e.target.value)}
-                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
-                  </div>
-                </SubCard>
-              )}
-
-              {props.editProtocol === 'socks' && (
+              {store.editProtocol === 'socks' && (
                 <SubCard title="SOCKS">
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">SOCKS Version</label>
-                      <Sel value={String(props.editSocksVersion)} onChange={(v) => props.setEditSocksVersion(parseInt(v))} options={[
-                        { value: '5', label: 'SOCKS5' }, { value: '4', label: 'SOCKS4' },
-                      ]} />
+                      <Sel
+                        value={String(store.editSocksVersion)}
+                        onChange={(v) => store.setField('editSocksVersion', parseInt(v))}
+                        options={[
+                          { value: '5', label: 'SOCKS5' },
+                          { value: '4', label: 'SOCKS4' },
+                        ]}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Username</label>
-                      <Inp value={props.editSocksUser} onChange={props.setEditSocksUser} placeholder="Optional" />
+                      <Inp value={store.editSocksUser} onChange={(v) => store.setField('editSocksUser', v)} placeholder="Optional" />
                     </div>
                   </div>
                   <div className="form-group">
                     <label className="form-label">Password</label>
-                    <input type="password" className="text-input" value={props.editSocksPassword} onChange={(e) => props.setEditSocksPassword(e.target.value)} placeholder="Optional" />
+                    <input
+                      type="password"
+                      className="text-input"
+                      value={store.editSocksPassword}
+                      onChange={(e) => store.setField('editSocksPassword', e.target.value)}
+                      placeholder="Optional"
+                    />
                   </div>
                   <div className="switch-container" style={{ padding: '10px 14px' }}>
                     <div className="switch-details">
                       <span className="switch-title" style={{ fontSize: '13px' }}>UDP over TCP</span>
                     </div>
-                    <Toggle checked={props.editSocksUdpOverTcp} onChange={props.setEditSocksUdpOverTcp} />
+                    <Toggle checked={store.editSocksUdpOverTcp} onChange={(v) => store.setField('editSocksUdpOverTcp', v)} />
                   </div>
                 </SubCard>
               )}
 
-              {props.editProtocol === 'http' && (
+              {store.editProtocol === 'http' && (
                 <SubCard title="HTTP Proxy">
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">Username</label>
-                      <Inp value={props.editHttpUser} onChange={props.setEditHttpUser} placeholder="Optional" />
+                      <Inp value={store.editHttpUser} onChange={(v) => store.setField('editHttpUser', v)} placeholder="Optional" />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Password</label>
-                      <input type="password" className="text-input" value={props.editHttpPassword} onChange={(e) => props.setEditHttpPassword(e.target.value)} placeholder="Optional" />
+                      <input
+                        type="password"
+                        className="text-input"
+                        value={store.editHttpPassword}
+                        onChange={(e) => store.setField('editHttpPassword', e.target.value)}
+                        placeholder="Optional"
+                      />
                     </div>
                   </div>
                   <div className="switch-container" style={{ padding: '10px 14px' }}>
                     <div className="switch-details">
                       <span className="switch-title" style={{ fontSize: '13px' }}>HTTPS (TLS)</span>
                     </div>
-                    <Toggle checked={props.editHttpTls} onChange={props.setEditHttpTls} />
+                    <Toggle checked={store.editHttpTls} onChange={(v) => store.setField('editHttpTls', v)} />
                   </div>
                 </SubCard>
               )}
@@ -373,81 +370,113 @@ export function NodeEditor(props: NodeEditorProps) {
           )}
 
           {/* TRANSPORT */}
-          {props.section === 'transport' && !noTransport && (
+          {store.section === 'transport' && !noTransport && (
             <SubCard title="Transport Layer">
               <div className="form-group">
                 <label className="form-label">Network Transport</label>
-                <Sel value={props.editNetwork} onChange={props.setEditNetwork} options={[
-                  { value: 'tcp', label: 'TCP (Raw)' }, { value: 'ws', label: 'WebSocket' },
-                  { value: 'grpc', label: 'gRPC' }, { value: 'http', label: 'HTTP/2' },
-                  { value: 'httpupgrade', label: 'HTTP Upgrade' },
-                ]} />
+                <Sel
+                  value={store.editNetwork}
+                  onChange={(v) => store.setField('editNetwork', v)}
+                  options={[
+                    { value: 'tcp', label: 'TCP (Raw)' },
+                    { value: 'ws', label: 'WebSocket' },
+                    { value: 'grpc', label: 'gRPC' },
+                    { value: 'http', label: 'HTTP/2' },
+                    { value: 'httpupgrade', label: 'HTTP Upgrade' },
+                  ]}
+                />
               </div>
-              {(props.editNetwork === 'ws' || props.editNetwork === 'http' || props.editNetwork === 'httpupgrade') && (
+              {(store.editNetwork === 'ws' || store.editNetwork === 'http' || store.editNetwork === 'httpupgrade') && (
                 <div className="editor-form-grid-2">
                   <div className="form-group">
                     <label className="form-label">Path</label>
-                    <Inp value={props.editPath} onChange={props.setEditPath} placeholder="/graphql" mono />
+                    <Inp value={store.editPath} onChange={(v) => store.setField('editPath', v)} placeholder="/graphql" mono />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Host Header</label>
-                    <Inp value={props.editHost} onChange={props.setEditHost} placeholder="cdn.example.com" mono />
+                    <Inp value={store.editHost} onChange={(v) => store.setField('editHost', v)} placeholder="cdn.example.com" mono />
                   </div>
                 </div>
               )}
-              {props.editNetwork === 'grpc' && (
+              {store.editNetwork === 'grpc' && (
                 <div className="form-group">
                   <label className="form-label">Service Name</label>
-                  <Inp value={props.editServiceName} onChange={props.setEditServiceName} placeholder="GunService" mono />
+                  <Inp value={store.editServiceName} onChange={(v) => store.setField('editServiceName', v)} placeholder="GunService" mono />
                 </div>
               )}
             </SubCard>
           )}
 
           {/* TLS */}
-          {props.section === 'tls' && !noTransport && (
+          {store.section === 'tls' && !noTransport && (
             <>
               <SubCard title="TLS Security">
                 <div className="form-group">
                   <label className="form-label">Security Mode</label>
-                  <Sel value={props.editTlsEnabled ? (props.editRealityEnabled ? 'reality' : 'tls') : 'none'}
+                  <Sel
+                    value={store.editTlsEnabled ? (store.editRealityEnabled ? 'reality' : 'tls') : 'none'}
                     onChange={(v) => {
-                      if (v === 'none') { props.setEditTlsEnabled(false); props.setEditRealityEnabled(false); }
-                      else if (v === 'tls') { props.setEditTlsEnabled(true); props.setEditRealityEnabled(false); }
-                      else { props.setEditTlsEnabled(true); props.setEditRealityEnabled(true); }
+                      if (v === 'none') {
+                        store.setField('editTlsEnabled', false);
+                        store.setField('editRealityEnabled', false);
+                      } else if (v === 'tls') {
+                        store.setField('editTlsEnabled', true);
+                        store.setField('editRealityEnabled', false);
+                      } else {
+                        store.setField('editTlsEnabled', true);
+                        store.setField('editRealityEnabled', true);
+                      }
                     }}
-                    options={[{ value: 'none', label: 'None' }, { value: 'tls', label: 'TLS/SSL' }, { value: 'reality', label: 'REALITY (XTLS)' }]} />
+                    options={[
+                      { value: 'none', label: 'None' },
+                      { value: 'tls', label: 'TLS/SSL' },
+                      { value: 'reality', label: 'REALITY (XTLS)' },
+                    ]}
+                  />
                 </div>
-                {props.editTlsEnabled && (
+                {store.editTlsEnabled && (
                   <div className="form-group">
                     <label className="form-label">uTLS Fingerprint</label>
-                    <Sel value={props.editFingerprint} onChange={props.setEditFingerprint} options={[
-                      { value: 'chrome', label: 'Chrome' }, { value: 'firefox', label: 'Firefox' },
-                      { value: 'edge', label: 'Edge' }, { value: 'safari', label: 'Safari' },
-                      { value: 'random', label: 'Random' },
-                    ]} />
+                    <Sel
+                      value={store.editFingerprint}
+                      onChange={(v) => store.setField('editFingerprint', v)}
+                      options={[
+                        { value: 'chrome', label: 'Chrome' },
+                        { value: 'firefox', label: 'Firefox' },
+                        { value: 'edge', label: 'Edge' },
+                        { value: 'safari', label: 'Safari' },
+                        { value: 'random', label: 'Random' },
+                      ]}
+                    />
                   </div>
                 )}
               </SubCard>
-              {props.editTlsEnabled && (
+              {store.editTlsEnabled && (
                 <SubCard title="TLS Parameters">
                   <div className="editor-form-grid-2">
                     <div className="form-group">
                       <label className="form-label">SNI</label>
-                      <Inp value={props.editServerName} onChange={props.setEditServerName} placeholder="aka.ms" mono />
+                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
                     </div>
                     <div className="form-group">
                       <label className="form-label">ALPN</label>
-                      <Inp value={props.editAlpn} onChange={props.setEditAlpn} placeholder="h2, http/1.1" mono />
+                      <Inp value={store.editAlpn} onChange={(v) => store.setField('editAlpn', v)} placeholder="h2, http/1.1" mono />
                     </div>
                   </div>
                   <div className="editor-checkbox-row" style={{ marginTop: '8px' }}>
-                    <input type="checkbox" id="nodeAllowInsecure" checked={props.editAllowInsecure} onChange={(e) => props.setEditAllowInsecure(e.target.checked)} />
-                    <label htmlFor="nodeAllowInsecure" className="editor-checkbox-label">Allow Insecure (skip cert verification)</label>
+                    <input
+                      type="checkbox"
+                      id="nodeAllowInsecure"
+                      checked={store.editAllowInsecure}
+                      onChange={(e) => store.setField('editAllowInsecure', e.target.checked)}
+                    />
+                    <label htmlFor="nodeAllowInsecure" className="editor-checkbox-label">
+                      Allow Insecure (skip cert verification)
+                    </label>
                   </div>
                 </SubCard>
               )}
-              {props.editTlsEnabled && props.editRealityEnabled && (
+              {store.editTlsEnabled && store.editRealityEnabled && (
                 <SubCard title="REALITY Configuration">
                   <div className="info-box" style={{ marginBottom: '12px' }}>
                     <Info size={12} />
@@ -455,16 +484,16 @@ export function NodeEditor(props: NodeEditorProps) {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Public Key (pbk) *</label>
-                    <Inp value={props.editPublicKey} onChange={props.setEditPublicKey} placeholder="Base64 public key..." mono />
+                    <Inp value={store.editPublicKey} onChange={(v) => store.setField('editPublicKey', v)} placeholder="Base64 public key..." mono />
                   </div>
                   <div className="editor-form-grid-2">
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Short ID (sid)</label>
-                      <Inp value={props.editShortId} onChange={props.setEditShortId} placeholder="97c4e5fcb1e8" mono />
+                      <Inp value={store.editShortId} onChange={(v) => store.setField('editShortId', v)} placeholder="97c4e5fcb1e8" mono />
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Destination SNI</label>
-                      <Inp value={props.editServerName} onChange={props.setEditServerName} placeholder="aka.ms" mono />
+                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
                     </div>
                   </div>
                 </SubCard>
@@ -472,18 +501,19 @@ export function NodeEditor(props: NodeEditorProps) {
             </>
           )}
 
-          {props.saveError && (
+          {store.saveError && (
             <div className="alert-box error" style={{ marginTop: '8px' }}>
-              <ShieldAlert size={14} /><span>{props.saveError}</span>
+              <ShieldAlert size={14} />
+              <span>{store.saveError}</span>
             </div>
           )}
         </div>
 
         {/* Footer */}
         <div className="drawer-footer">
-          <button className="btn secondary" onClick={props.onClose}>Cancel</button>
-          <button className="btn primary" onClick={props.onSave} disabled={props.isSaving} style={{ minWidth: '90px' }}>
-            {props.isSaving ? <><RefreshCw size={14} className="spin" /> Saving…</> : 'Save Node'}
+          <button className="btn secondary" onClick={store.closeEditor}>Cancel</button>
+          <button className="btn primary" onClick={store.saveEditor} disabled={store.isSaving} style={{ minWidth: '90px' }}>
+            {store.isSaving ? <><RefreshCw size={14} className="spin" /> Saving…</> : 'Save Node'}
           </button>
         </div>
       </div>
