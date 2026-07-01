@@ -2,7 +2,7 @@
 name = "xlink"
 version = "0.1.0"
 description = "X-Link Desktop Proxy Client"
-authors = ["Antigravity"]
+authors = ["Isuruzenith"]
 edition = "2021"
 
 [lib]
