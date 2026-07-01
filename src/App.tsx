@@ -8,6 +8,7 @@ import { ConfigView } from './views/ConfigView';
 import { RoutingView } from './views/RoutingView';
 import { LogsView } from './views/LogsView';
 import { SettingsView } from './views/SettingsView';
+import { ConnectionsView } from './views/ConnectionsView.tsx';
 import { NodeEditor } from './components/domain/NodeEditor';
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -127,6 +128,18 @@ export default function App() {
       pushSystemLog(`sing-box terminated (code ${e.payload ?? 'None'})`);
     });
 
+    // Listen to status changes from the backend (hot-reloads, swaps)
+    const unlistenStatus = listen<string>('proxy-status-changed', (e) => {
+      const status = e.payload as 'connected' | 'connecting' | 'disconnected';
+      setConnectionStatus(status);
+      setIsConnected(status === 'connected');
+    });
+
+    // Listen to settings changes from system tray mode switching
+    const unlistenSettings = listen('settings-changed', () => {
+      initSettings();
+    });
+
     // Fetch initial log buffer from Rust sidecar manager
     (async () => {
       try {
@@ -145,6 +158,8 @@ export default function App() {
     return () => {
       unlistenLog.then((f) => f());
       unlistenTerm.then((f) => f());
+      unlistenStatus.then((f) => f());
+      unlistenSettings.then((f) => f());
     };
   }, []);
 
@@ -203,9 +218,10 @@ export default function App() {
       <NavRail activeTab={activeTab} onTabChange={setActiveTab} />
       
       <div className="view-host">
-        {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView /></ErrorBoundary>}
+        {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
         {activeTab === 'profiles' && <ErrorBoundary fallbackTitle="Profiles Error"><ConfigView /></ErrorBoundary>}
         {activeTab === 'routing' && <ErrorBoundary fallbackTitle="Routing Error"><RoutingView /></ErrorBoundary>}
+        {activeTab === 'connections' && <ErrorBoundary fallbackTitle="Connections Monitor Error"><ConnectionsView /></ErrorBoundary>}
         {activeTab === 'logs' && <ErrorBoundary fallbackTitle="Logs Error"><LogsView /></ErrorBoundary>}
         {activeTab === 'settings' && <ErrorBoundary fallbackTitle="Settings Error"><SettingsView /></ErrorBoundary>}
       </div>

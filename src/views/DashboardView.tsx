@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   DownloadCloud, UploadCloud, Clock, Server, Power,
   Shield, ShieldAlert, Network, Wifi, Zap
@@ -6,7 +7,7 @@ import { TrafficChart } from '../components/TrafficChart';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { useProfileStore } from '../stores/profileStore';
+import { useProfileStore, getCountryCode } from '../stores/profileStore';
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -29,7 +30,11 @@ const formatUptime = (seconds: number): string => {
   return `${h}h ${m}m ${s}s`;
 };
 
-export function DashboardView() {
+interface DashboardViewProps {
+  onNavigateToTab?: (tab: 'connections') => void;
+}
+
+export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
   const {
     isConnected,
     connectionStatus,
@@ -49,7 +54,28 @@ export function DashboardView() {
 
   const { settings, isElevated } = useSettingsStore();
   const activeProfile = useProfileStore((s) => s.activeProfile)();
-  const { nodes, selectedNodeTag, selectNode } = useProfileStore();
+  const {
+    nodes,
+    selectedNodeTag,
+    selectNode,
+    selectProfile,
+    nodeGeoCache,
+    fetchNodeGeo,
+  } = useProfileStore();
+
+  useEffect(() => {
+    if (activeProfile) {
+      selectProfile(activeProfile.id);
+    }
+  }, [activeProfile?.id, selectProfile]);
+
+  const activeNode = selectedNodeTag ? nodes.find((n) => n.tag === selectedNodeTag) : null;
+
+  useEffect(() => {
+    if (isConnected && activeNode && activeNode.server && !nodeGeoCache[activeNode.server]) {
+      fetchNodeGeo(activeNode.server, activeNode.tag);
+    }
+  }, [isConnected, activeNode, nodeGeoCache, fetchNodeGeo]);
 
   return (
     <ViewShell
@@ -98,9 +124,31 @@ export function DashboardView() {
               </div>
             )}
             {isConnected && selectedNodeTag && (
-              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-low)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Zap size={10} style={{ color: 'var(--accent-primary)' }} />
-                <span style={{ color: 'var(--text-med)' }}>{selectedNodeTag}</span>
+              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-low)' }}>
+                  <Zap size={10} style={{ color: 'var(--accent-primary)' }} />
+                  <span style={{ color: 'var(--text-med)', fontWeight: 600 }}>{selectedNodeTag}</span>
+                </div>
+                {(() => {
+                  const activeServerCode = activeNode
+                    ? (nodeGeoCache[activeNode.server] && nodeGeoCache[activeNode.server] !== 'loading' && nodeGeoCache[activeNode.server] !== 'unknown'
+                        ? nodeGeoCache[activeNode.server]
+                        : getCountryCode(activeNode.tag))
+                    : null;
+                  if (!activeServerCode) return null;
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '16px', marginTop: '2px' }}>
+                      <img
+                        src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
+                        alt={activeServerCode}
+                        style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {isConnected && nodes.length > 1 && (
@@ -152,7 +200,11 @@ export function DashboardView() {
             { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime),            color: 'var(--status-warn)' },
             { icon: Server,        label: 'Connections',  value: `${activeConnections} active`,  color: 'var(--status-ok)' },
           ].map(({ icon: Icon, label, value, color }) => (
-            <div key={label} className="glass-panel metric-card">
+            <div
+              key={label}
+              className={`glass-panel metric-card ${label === 'Connections' ? 'clickable' : ''}`}
+              onClick={label === 'Connections' ? () => onNavigateToTab?.('connections') : undefined}
+            >
               <div className="metric-icon-box" style={{ color }}><Icon size={20} /></div>
               <div className="metric-info">
                 <span className="metric-label">{label}</span>

@@ -18,8 +18,11 @@ interface ProfileState {
   // Multi-profile state
   profiles: Profile[];
   activeProfileId: string | null;
+  selectedProfileId: string | null;
   nodes: any[];
   selectedNodeTag: string | null;
+  nodeGeoCache: Record<string, string>;
+  activatingNodeTag: string | null;
 
   // Import form state
   importName: string;
@@ -49,6 +52,8 @@ interface ProfileState {
   switchProfile: (profileId: string) => Promise<void>;
   testAllNodes: () => Promise<void>;
   updateNodesList: (newNodes: any[]) => void;
+  selectProfile: (profileId: string) => Promise<void>;
+  fetchNodeGeo: (server: string, tag: string) => Promise<void>;
 }
 
 const detectNameFromContent = (text: string): string => {
@@ -81,11 +86,79 @@ const mapImportError = (raw: string): string => {
   return r;
 };
 
+export const getCountryCode = (tag: string): string | null => {
+  // Check if there is a flag emoji in the tag (surrogate pairs of Regional Indicator Symbols)
+  const match = tag.match(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]/);
+  if (match) {
+    const flag = match[0];
+    const cp1 = flag.codePointAt(0);
+    const cp2 = flag.codePointAt(2);
+    if (cp1 && cp2) {
+      const char1 = String.fromCharCode(cp1 - 127397);
+      const char2 = String.fromCharCode(cp2 - 127397);
+      return (char1 + char2).toLowerCase();
+    }
+  }
+
+  const normalized = tag.toUpperCase();
+  const mappings: Record<string, string> = {
+    'UNITED STATES': 'us', 'USA': 'us', ' US ': 'us', 'US-': 'us', 'US_': 'us',
+    'SINGAPORE': 'sg', ' SG ': 'sg', 'SG-': 'sg', 'SG_': 'sg',
+    'JAPAN': 'jp', ' JP ': 'jp', 'JP-': 'jp', 'JP_': 'jp',
+    'HONG KONG': 'hk', ' HONGKONG': 'hk', ' HK ': 'hk', 'HK-': 'hk', 'HK_': 'hk',
+    'GERMANY': 'de', ' DE ': 'de', 'DE-': 'de', 'DE_': 'de',
+    'UNITED KINGDOM': 'gb', ' UK ': 'gb', ' UK-': 'gb', ' GB ': 'gb', 'LONDON': 'gb',
+    'FRANCE': 'fr', ' FR ': 'fr', 'FR-': 'fr', 'FR_': 'fr',
+    'NETHERLANDS': 'nl', ' NL ': 'nl', 'NL-': 'nl', 'NL_': 'nl',
+    'CANADA': 'ca', ' CA ': 'ca', 'CA-': 'ca', 'CA_': 'ca',
+    'AUSTRALIA': 'au', ' AU ': 'au', 'AU-': 'au', 'AU_': 'au',
+    'KOREA': 'kr', ' KR ': 'kr', 'KR-': 'kr', 'KR_': 'kr',
+    'TAIWAN': 'tw', ' TW ': 'tw', 'TW-': 'tw', 'TW_': 'tw',
+    'CHINA': 'cn', ' CN ': 'cn', 'CN-': 'cn', 'CN_': 'cn',
+    'INDIA': 'in', ' IN ': 'in', 'IN-': 'in', 'IN_': 'in',
+    'RUSSIA': 'ru', ' RU ': 'ru', 'RU-': 'ru', 'RU_': 'ru',
+    'TURKEY': 'tr', ' TR ': 'tr', 'TR-': 'tr', 'TR_': 'tr',
+    'VIETNAM': 'vn', ' VN ': 'vn', 'VN-': 'vn', 'VN_': 'vn',
+    'THAILAND': 'th', ' TH ': 'th', 'TH-': 'th', 'TH_': 'th',
+  };
+
+  for (const [key, code] of Object.entries(mappings)) {
+    if (normalized.includes(key)) {
+      return code;
+    }
+  }
+
+  // Prefix or boundaries checks
+  if (normalized.startsWith('US') || normalized.endsWith('US')) return 'us';
+  if (normalized.startsWith('SG') || normalized.endsWith('SG')) return 'sg';
+  if (normalized.startsWith('JP') || normalized.endsWith('JP')) return 'jp';
+  if (normalized.startsWith('HK') || normalized.endsWith('HK')) return 'hk';
+  if (normalized.startsWith('DE') || normalized.endsWith('DE')) return 'de';
+  if (normalized.startsWith('UK') || normalized.endsWith('UK') || normalized.startsWith('GB') || normalized.endsWith('GB')) return 'gb';
+  if (normalized.startsWith('FR') || normalized.endsWith('FR')) return 'fr';
+  if (normalized.startsWith('NL') || normalized.endsWith('NL')) return 'nl';
+  if (normalized.startsWith('CA') || normalized.endsWith('CA')) return 'ca';
+  if (normalized.startsWith('AU') || normalized.endsWith('AU')) return 'au';
+  if (normalized.startsWith('KR') || normalized.endsWith('KR')) return 'kr';
+  if (normalized.startsWith('TW') || normalized.endsWith('TW')) return 'tw';
+  if (normalized.startsWith('CN') || normalized.endsWith('CN')) return 'cn';
+  if (normalized.startsWith('IN') || normalized.endsWith('IN')) return 'in';
+  if (normalized.startsWith('RU') || normalized.endsWith('RU')) return 'ru';
+  if (normalized.startsWith('TR') || normalized.endsWith('TR')) return 'tr';
+  if (normalized.startsWith('VN') || normalized.endsWith('VN')) return 'vn';
+  if (normalized.startsWith('TH') || normalized.endsWith('TH')) return 'th';
+
+  return null;
+};
+
 export const useProfileStore = create<ProfileState>((set, get) => ({
   profiles: [],
   activeProfileId: null,
+  selectedProfileId: null,
   nodes: [],
   selectedNodeTag: null,
+  nodeGeoCache: {},
+  activatingNodeTag: null,
   importName: '',
   importContent: '',
   importError: null,
@@ -105,7 +178,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
     const profiles = await storeHelper.getProfiles();
     const activeProfileId = await storeHelper.getActiveProfileId();
-    set({ profiles, activeProfileId });
+    set({ profiles, activeProfileId, selectedProfileId: activeProfileId });
 
     if (activeProfileId) {
       await get().refreshNodes(activeProfileId);
@@ -113,7 +186,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   refreshNodes: async (profileId) => {
-    const pid = profileId || get().activeProfileId;
+    const pid = profileId || get().selectedProfileId || get().activeProfileId;
     if (!pid) {
       set({ nodes: [], selectedNodeTag: null });
       return;
@@ -152,29 +225,40 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   selectNode: async (node) => {
-    const { activeProfileId, profiles } = get();
+    if (!node || !node.tag) return;
+    const { selectedProfileId, activeProfileId, profiles } = get();
+    const targetProfileId = selectedProfileId || activeProfileId;
     const logStore = useLogStore.getState();
     const connectionStore = useConnectionStore.getState();
 
-    set({ selectedNodeTag: node.tag });
+    set({ selectedNodeTag: node.tag, activatingNodeTag: node.tag });
 
-    // Update the profile's selectedNodeTag
-    if (activeProfileId) {
-      const updatedProfiles = profiles.map((p) =>
-        p.id === activeProfileId ? { ...p, selectedNodeTag: node.tag } : p
-      );
-      set({ profiles: updatedProfiles });
-      await storeHelper.saveProfiles(updatedProfiles);
-    }
+    try {
+      // Update the target profile's selectedNodeTag
+      if (targetProfileId) {
+        const updatedProfiles = profiles.map((p) =>
+          p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
+        );
+        set({ profiles: updatedProfiles });
+        await storeHelper.saveProfiles(updatedProfiles);
+      }
 
-    if (connectionStore.isConnected) {
-      try {
+      // Node-wise profile activation
+      if (targetProfileId && targetProfileId !== activeProfileId) {
+        const targetProfileName = profiles.find((p) => p.id === targetProfileId)?.name || 'Unknown';
+        logStore.pushSystemLog(`Activating profile "${targetProfileName}"...`);
+        await invoke('switch_profile', { profileId: targetProfileId, selectedNodeTag: node.tag });
+        await storeHelper.setActiveProfileId(targetProfileId);
+        set({ activeProfileId: targetProfileId });
+      } else if (connectionStore.isConnected) {
         logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
         await invoke('switch_node_hot', { tag: node.tag });
         logStore.pushSystemLog(`Successfully switched to "${node.tag}".`);
-      } catch (err) {
-        logStore.pushSystemLog(`Failed to switch node: ${err}`);
       }
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to switch: ${err}`);
+    } finally {
+      set({ activatingNodeTag: null });
     }
   },
 
@@ -236,13 +320,14 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({
         profiles: updatedProfiles,
         activeProfileId: newProfile.id,
+        selectedProfileId: newProfile.id,
         importSuccess: true,
         importName: '',
         importContent: '',
       });
 
       logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
-      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" successfully loaded with ${result.nodeCount} nodes.`, 'Profile Imported');
       setTimeout(() => set({ importSuccess: false }), 3000);
       await get().refreshNodes(newProfile.id);
     } catch (err) {
@@ -290,13 +375,14 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({
         profiles: updatedProfiles,
         activeProfileId: newProfile.id,
+        selectedProfileId: newProfile.id,
         importSuccess: true,
         importName: '',
         importContent: '',
       });
 
       logStore.pushSystemLog(`Profile "${result.name}" imported! ${result.nodeCount} nodes.`);
-      useToastStore.getState().addToast('success', `Profile "${result.name}" imported with ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast('success', `Profile "${result.name}" successfully loaded with ${result.nodeCount} nodes.`, 'Profile Imported');
       setTimeout(() => set({ importSuccess: false }), 3000);
       await get().refreshNodes(newProfile.id);
     } catch (err) {
@@ -334,15 +420,23 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       ? (updatedProfiles.length > 0 ? updatedProfiles[0].id : null)
       : activeProfileId;
 
-    set({ profiles: updatedProfiles, activeProfileId: newActiveId });
+    const { selectedProfileId } = get();
+    const newSelectedId = profileId === selectedProfileId
+      ? newActiveId
+      : selectedProfileId;
+
+    set({ profiles: updatedProfiles, activeProfileId: newActiveId, selectedProfileId: newSelectedId });
 
     // If we switched to a new active profile, load its nodes
     if (newActiveId && newActiveId !== activeProfileId) {
       try {
         await invoke('switch_profile', { profileId: newActiveId });
       } catch { /* ignore */ }
-      await get().refreshNodes(newActiveId);
-    } else if (!newActiveId) {
+    }
+
+    if (newSelectedId) {
+      await get().refreshNodes(newSelectedId);
+    } else {
       set({ nodes: [], selectedNodeTag: null });
     }
 
@@ -358,7 +452,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       await invoke('switch_profile', { profileId, selectedNodeTag: profile.selectedNodeTag });
       await storeHelper.setActiveProfileId(profileId);
-      set({ activeProfileId: profileId });
+      set({ activeProfileId: profileId, selectedProfileId: profileId });
       logStore.pushSystemLog(`Switched to profile "${profile.name}".`);
       await get().refreshNodes(profileId);
     } catch (err) {
@@ -366,10 +460,15 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }
   },
 
+  selectProfile: async (profileId) => {
+    set({ selectedProfileId: profileId });
+    await get().refreshNodes(profileId);
+  },
+
   testAllNodes: async () => {
-    const { activeProfileId } = get();
+    const pid = get().selectedProfileId || get().activeProfileId;
     const logStore = useLogStore.getState();
-    if (!activeProfileId) return;
+    if (!pid) return;
 
     set({ isTestingLatency: true, latencyResults: {} });
     logStore.pushSystemLog('Testing latency for all nodes...');
@@ -377,7 +476,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       const results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
         'test_all_nodes',
-        { profileId: activeProfileId }
+        { profileId: pid }
       );
 
       const latencyMap: Record<string, { latencyMs: number | null; error: string | null }> = {};
@@ -397,4 +496,35 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   updateNodesList: (newNodes) => set({ nodes: newNodes }),
+
+  fetchNodeGeo: async (server, tag) => {
+    if (!server) return;
+    const { nodeGeoCache } = get();
+    if (nodeGeoCache[server]) return;
+
+    // Set loading placeholder
+    set((state) => ({
+      nodeGeoCache: { ...state.nodeGeoCache, [server]: 'loading' }
+    }));
+
+    try {
+      const res = await fetch(`https://freeipapi.com/api/json/${server}`);
+      if (!res.ok) throw new Error('API failed');
+      const data = await res.json();
+      if (data && data.countryCode && data.countryCode.length === 2) {
+        const code = data.countryCode.toLowerCase();
+        set((state) => ({
+          nodeGeoCache: { ...state.nodeGeoCache, [server]: code }
+        }));
+      } else {
+        throw new Error('Invalid response');
+      }
+    } catch {
+      // Fallback to tag parsing
+      const fallbackCode = getCountryCode(tag);
+      set((state) => ({
+        nodeGeoCache: { ...state.nodeGeoCache, [server]: fallbackCode || 'unknown' }
+      }));
+    }
+  },
 }));

@@ -92,14 +92,31 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         return;
       }
 
-      // TUN mode requires admin privileges — auto-trigger elevation if not already elevated
-      if (settings.proxyMode === 'tun' && !isElevated) {
-        logStore.pushSystemLog('TUN mode requires Administrator privileges. Requesting elevation...');
-        try {
-          await invoke('request_elevation');
-        } catch {
-          logStore.pushSystemLog(`Elevation denied — cannot start TUN mode without admin rights.`);
+      let outboundTag = selectedNodeTag;
+      if (!outboundTag) {
+        const nodes = profileStore.nodes;
+        if (nodes && nodes.length > 0) {
+          outboundTag = nodes[0].tag;
+          profileStore.selectNode(nodes[0]);
+          logStore.pushSystemLog(`No node selected. Automatically selecting first node "${outboundTag}".`);
+        } else {
+          logStore.pushSystemLog('Error: Active profile has no nodes to connect to.');
+          return;
         }
+      }
+
+      // TUN mode requires admin privileges — rollback to system proxy if not elevated
+      if (settings.proxyMode === 'tun' && !isElevated) {
+        logStore.pushSystemLog('TUN mode requires Administrator privileges. Not elevated. Rolling back to System Proxy mode...');
+        
+        const settingsStore = useSettingsStore.getState();
+        await settingsStore.updateSettings({ proxyMode: 'system' });
+        useToastStore.getState().addToast('warning', 'Switched to System Proxy mode (TUN requires Admin rights).', 'Fallback Activated');
+        
+        // Re-trigger connect in system proxy mode
+        setTimeout(() => {
+          get().toggleConnect();
+        }, 500);
         return;
       }
 
@@ -109,22 +126,24 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           logStore.pushSystemLog(`Error: Port ${conflict} is in use.`);
           return;
         }
-      } catch {}
+      } catch (err) {
+        logStore.pushSystemLog(`Port check failed: ${err}. Proceeding anyway...`);
+      }
 
-      logStore.pushSystemLog(`Booting X-Link Core using "${activeProfile.name}"...`);
+      logStore.pushSystemLog(`Booting X-Link Core using "${activeProfile.name}" [${outboundTag}]...`);
       set({ connectionStatus: 'connecting' });
 
       try {
-        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: selectedNodeTag });
+        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: outboundTag });
         if (result === 'started') {
           set({ isConnected: true, connectionStatus: 'connected' });
           logStore.pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);
-          useToastStore.getState().addToast('success', `Connected via Mixed port ${mixedPort}`);
+          useToastStore.getState().addToast('success', `Secured via Mixed port ${mixedPort}`, 'Connection Established');
         }
       } catch (e) {
         set({ connectionStatus: 'disconnected' });
         logStore.pushSystemLog(`Startup error: ${e}`);
-        useToastStore.getState().addToast('error', `Connection failed: ${e}`);
+        useToastStore.getState().addToast('error', `Proxy service failed to start: ${e}`, 'Connection Failed');
       }
     }
   },
@@ -132,9 +151,17 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   requestElevation: async () => {
     const logStore = useLogStore.getState();
     try {
+      logStore.pushSystemLog('Registering app to always run as Administrator on next launches...');
+      try {
+        await invoke('set_runas_admin', { enabled: true });
+      } catch (err) {
+        logStore.pushSystemLog(`Warning: Failed to set run-as-admin auto-elevation: ${err}`);
+      }
+      logStore.pushSystemLog('Requesting session elevation...');
       await invoke('request_elevation');
     } catch (e) {
       logStore.pushSystemLog(`Elevation aborted: ${e}`);
+      useToastStore.getState().addToast('error', `Elevation failed: ${e}`, 'Elevation Error');
     }
   }
 }));

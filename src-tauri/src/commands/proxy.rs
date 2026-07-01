@@ -115,7 +115,7 @@ fn spawn_singbox_sidecar(
                     };
 
                     if is_active {
-                        state_for_logs.set_status(crate::state::ConnectionStatus::Disconnected);
+                        state_for_logs.set_status(&app_for_logs, crate::state::ConnectionStatus::Disconnected);
                         *CONNECTION_START_TIME.lock().unwrap() = None;
                         crate::tray::perform_clean_cleanup(&app_for_logs);
                         crate::tray::update_tray(&app_for_logs);
@@ -560,7 +560,7 @@ pub async fn toggle_proxy(
 
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
-        state.set_status(crate::state::ConnectionStatus::Disconnected);
+        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
         {
             let mut process_lock = state.child_process.lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
@@ -572,8 +572,17 @@ pub async fn toggle_proxy(
         // Forcefully kill any sing-box processes system-wide to guarantee clean state
         #[cfg(target_os = "windows")]
         {
+            use std::os::windows::process::CommandExt;
             let _ = std::process::Command::new("taskkill")
                 .args(["/F", "/IM", "sing-box.exe", "/T"])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = std::process::Command::new("pkill")
+                .arg("-f")
+                .arg("sing-box")
                 .output();
         }
 
@@ -618,15 +627,25 @@ pub async fn toggle_proxy(
         }
     }
 
-    state.set_status(crate::state::ConnectionStatus::Connecting);
+    state.set_status(&app, crate::state::ConnectionStatus::Connecting);
     crate::tray::update_tray(&app);
     // Forcefully kill any existing sing-box processes system-wide before starting
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         let _ = std::process::Command::new("taskkill")
             .args(["/F", "/IM", "sing-box.exe", "/T"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output();
         // Brief delay to let sockets fully release
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("pkill")
+            .arg("-f")
+            .arg("sing-box")
+            .output();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     }
 
@@ -650,7 +669,7 @@ pub async fn toggle_proxy(
     let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None) {
         Ok(res) => res,
         Err(e) => {
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(e);
         }
@@ -775,7 +794,7 @@ pub async fn toggle_proxy(
                 
             state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
         } else {
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(format!("Connection failed after 5 fallback attempts: {}", last_error));
         }
@@ -843,6 +862,9 @@ pub async fn toggle_proxy(
                         if let Ok(mut conn) = state_clone.active_connections.lock() {
                             *conn = data.connections.len() as u32;
                         }
+
+                        // Update tray tooltip with live speed
+                        crate::tray::update_tray_tooltip(&app_handle);
                     } else {
                         consecutive_failures += 1;
                     }
@@ -862,6 +884,9 @@ pub async fn toggle_proxy(
         if let Ok(mut up_s) = state_clone.upload_speed.lock() { *up_s = 0; };
         if let Ok(mut down_s) = state_clone.download_speed.lock() { *down_s = 0; };
         if let Ok(mut conn) = state_clone.active_connections.lock() { *conn = 0; };
+
+        // Reset tooltip on disconnect
+        crate::tray::update_tray_tooltip(&app_handle);
     });
 
     // Enable system proxy if the final connection mode is 'system' (either by default or as a fallback)
@@ -869,18 +894,87 @@ pub async fn toggle_proxy(
         let mixed_port = state.get_settings().mixed_port;
         if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", mixed_port) {
             crate::tray::perform_clean_cleanup(&app);
-            state.set_status(crate::state::ConnectionStatus::Disconnected);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(e);
         }
     }
 
     // Set connection global states
-    state.set_status(crate::state::ConnectionStatus::Connected);
+    state.set_status(&app, crate::state::ConnectionStatus::Connected);
     *CONNECTION_START_TIME.lock().unwrap() = Some(std::time::Instant::now());
 
     // Sync native system tray
     crate::tray::update_tray(&app);
 
     Ok("started".into())
+}
+
+#[tauri::command]
+pub async fn get_active_connections(state: State<'_, crate::state::ProxyState>) -> Result<serde_json::Value, String> {
+    if !state.is_running() {
+        return Ok(serde_json::json!({ "connections": [] }));
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections", api_port);
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                Ok(json)
+            } else {
+                Err("Failed to parse connections JSON".to_string())
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn close_connection(id: String, state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+    if !state.is_running() {
+        return Ok(());
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections/{}", api_port, id);
+
+    let client = reqwest::Client::new();
+    let mut req = client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn close_all_connections(state: State<'_, crate::state::ProxyState>) -> Result<(), String> {
+    if !state.is_running() {
+        return Ok(());
+    }
+    let api_port = state.get_settings().api_port;
+    let api_secret = state.get_settings().api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/connections", api_port);
+
+    let client = reqwest::Client::new();
+    let mut req = client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    match req.send().await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }

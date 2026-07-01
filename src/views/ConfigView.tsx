@@ -1,14 +1,216 @@
-import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Server, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
+import { useEffect } from 'react';
+import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
-import { useProfileStore } from '../stores/profileStore';
+import { useProfileStore, getCountryCode } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
 import type { Profile } from '../utils/store';
+
+function ProfileHeaderCard({
+  selectedProfile,
+  activeProfileId,
+  nodes,
+  selectedNodeTag,
+  isConnected,
+  nodeGeoCache,
+  latencyResults,
+}: {
+  selectedProfile: Profile;
+  activeProfileId: string | null;
+  nodes: any[];
+  selectedNodeTag: string | null;
+  isConnected: boolean;
+  nodeGeoCache: Record<string, string>;
+  latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
+}) {
+  const activeNode = selectedNodeTag ? nodes.find((n: any) => n.tag === selectedNodeTag) : null;
+  const activeServerCode = activeNode
+    ? (nodeGeoCache[activeNode.server] && nodeGeoCache[activeNode.server] !== 'loading' && nodeGeoCache[activeNode.server] !== 'unknown'
+        ? nodeGeoCache[activeNode.server]
+        : getCountryCode(activeNode.tag))
+    : null;
+  const isActiveProfile = selectedProfile.id === activeProfileId;
+  const activePing = activeNode && latencyResults[activeNode.tag] ? latencyResults[activeNode.tag] : null;
+
+  return (
+    <div style={{ padding: '16px 20px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', marginBottom: '16px', flexShrink: 0 }}>
+      {/* Top row: Profile name + badges */}
+      <div style={{ marginBottom: activeNode ? '12px' : '0' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '6px' }}>
+          {selectedProfile.name}
+        </h2>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
+            <Zap size={9} style={{ marginRight: '3px' }} /> {selectedProfile.nodeCount} Nodes
+          </span>
+          {selectedProfile.type === 'subscription' && (selectedProfile as any).subscriptionUrl && (
+            <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
+              <Link2 size={9} style={{ marginRight: '3px' }} /> Sub
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Active server details strip */}
+      {activeNode && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          padding: '10px 12px',
+          background: isActiveProfile && isConnected ? 'rgba(34,197,94,0.06)' : 'var(--surface-overlay)',
+          border: `1px solid ${isActiveProfile && isConnected ? 'rgba(34,197,94,0.15)' : 'var(--border-subtle)'}`,
+          borderRadius: 'var(--r-md)',
+        }}>
+          {/* Country flag */}
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '16px', flexShrink: 0 }}>
+            {activeServerCode ? (
+              <img
+                src={`https://flagcdn.com/w40/${activeServerCode}.png`}
+                alt={activeServerCode}
+                style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <Globe size={14} style={{ color: 'var(--text-low)' }} />
+            )}
+          </span>
+
+          {/* Server tag */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-high)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activeNode.tag}
+            </div>
+            <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>{activeNode.type}</span>
+          </div>
+
+          {/* Ping / Latency instead of LIVE badge */}
+          {activePing && (
+            <span style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontVariantNumeric: 'tabular-nums',
+              padding: '3px 8px',
+              borderRadius: 'var(--r-pill)',
+              flexShrink: 0,
+              ...(activePing.latencyMs !== null
+                ? activePing.latencyMs < 200
+                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
+                  : activePing.latencyMs < 500
+                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
+                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
+                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
+            }}>
+              {activePing.latencyMs !== null ? `${activePing.latencyMs}ms` : 'timeout'}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServerCard({
+  node,
+  selectedNodeTag,
+  selectNode,
+  isConnected,
+  selectedProfile,
+  activeProfileId,
+  openEditor,
+  latencyResults,
+  nodeGeoCache,
+  fetchNodeGeo,
+  activatingNodeTag
+}: {
+  node: any;
+  selectedNodeTag: string | null;
+  selectNode: (node: any) => void;
+  isConnected: boolean;
+  selectedProfile: any;
+  activeProfileId: string | null;
+  openEditor: (node: any) => void;
+  latencyResults: any;
+  nodeGeoCache: Record<string, string>;
+  fetchNodeGeo: (server: string, tag: string) => void;
+  activatingNodeTag: string | null;
+}) {
+  useEffect(() => {
+    const cachedCode = nodeGeoCache[node.server];
+    if (!cachedCode && node.server) {
+      fetchNodeGeo(node.server, node.tag);
+    }
+  }, [node.server, node.tag, nodeGeoCache, fetchNodeGeo]);
+
+  return (
+    <div
+      className={`node-card ${selectedNodeTag === node.tag ? 'active' : ''}`}
+      onClick={() => selectNode(node)}
+      style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 0 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
+          <span className="node-name" title={node.tag} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.tag}</span>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
+            {isConnected && selectedProfile.id === activeProfileId && selectedNodeTag === node.tag ? (
+              <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
+            ) : (
+              activatingNodeTag === node.tag && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div className="blink-dot" />
+                  <span style={{ fontSize: '9px', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>connecting</span>
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+        {selectedProfile.id === activeProfileId && (
+          <button
+            className="btn-icon-only"
+            style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', borderRadius: '6px' }}
+            onClick={(e) => { e.stopPropagation(); openEditor(node); }}
+            title="Edit node configuration"
+          >
+            <Edit3 size={13} />
+          </button>
+        )}
+        {latencyResults[node.tag] && (
+          <span
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              padding: '2px 6px',
+              borderRadius: '4px',
+              fontVariantNumeric: 'tabular-nums',
+              ...(latencyResults[node.tag].latencyMs !== null
+                ? latencyResults[node.tag].latencyMs! < 200
+                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
+                  : latencyResults[node.tag].latencyMs! < 500
+                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
+                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
+                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
+            }}
+            title={latencyResults[node.tag].error || undefined}
+          >
+            {latencyResults[node.tag].latencyMs !== null
+              ? `${latencyResults[node.tag].latencyMs}ms`
+              : 'timeout'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function ConfigView() {
   const {
     profiles,
     activeProfileId,
+    selectedProfileId,
     nodes,
     selectedNodeTag,
     importName,
@@ -24,16 +226,18 @@ export function ConfigView() {
     pickFileAndImport,
     importConfig,
     selectNode,
-    switchProfile,
     deleteProfile,
     testAllNodes,
-    activeProfile: getActiveProfile,
+    selectProfile,
+    nodeGeoCache,
+    fetchNodeGeo,
+    activatingNodeTag,
   } = useProfileStore();
 
   const { isConnected } = useConnectionStore();
   const { openEditor } = useNodeEditorStore();
 
-  const activeProfile = getActiveProfile();
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) || null;
 
   const handleImportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,9 +275,21 @@ export function ConfigView() {
 
           {/* Import Form */}
           <div style={{ flexShrink: 0, padding: '16px', marginBottom: '16px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <FileUp size={14} /> Add Profile
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <FileUp size={14} /> Add Profile
+              </h3>
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={pickFileAndImport}
+                disabled={isImporting}
+                style={{ padding: '0 8px', height: '24px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                title="Choose config file to import"
+              >
+                <FileUp size={12} /> Choose File
+              </button>
+            </div>
             <form onSubmit={handleImportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <input
                 className="text-input"
@@ -109,15 +325,6 @@ export function ConfigView() {
                   {isImporting ? <RefreshCw size={14} className="spin" /> : <CornerDownLeft size={16} />}
                 </button>
               </div>
-              <button
-                type="button"
-                className="btn secondary"
-                onClick={pickFileAndImport}
-                disabled={isImporting}
-                style={{ width: '100%', height: '32px', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <FileUp size={13} /> Choose File…
-              </button>
               {importError && (
                 <div style={{ background: 'var(--status-err-dim)', color: 'var(--status-err)', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <ShieldAlert size={12} /> {importError}
@@ -143,20 +350,23 @@ export function ConfigView() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {profiles.map((profile) => {
                   const isActive = profile.id === activeProfileId;
+                  const isSelected = profile.id === selectedProfileId;
                   const typeStyle = getProfileTypeColor(profile.type);
                   return (
                     <div
                       key={profile.id}
-                      className={`profile-item ${isActive ? 'active' : ''}`}
-                      onClick={() => !isActive && switchProfile(profile.id)}
-                      style={{ cursor: isActive ? 'default' : 'pointer', position: 'relative' }}
+                      className={`profile-item ${isSelected ? 'active' : ''}`}
+                      onClick={() => !isSelected && selectProfile(profile.id)}
+                      style={{ cursor: isSelected ? 'default' : 'pointer', position: 'relative' }}
                     >
                       <div className="profile-item-left">
                         <div className="profile-icon">
                           {profile.type === 'subscription' ? <Link2 size={18} /> : <Globe size={18} />}
                         </div>
                         <div className="profile-details">
-                          <span className="profile-name">{profile.name}</span>
+                          <span className="profile-name" title={profile.name}>
+                            {profile.name.length > 15 ? `${profile.name.slice(0, 15)}...` : profile.name}
+                          </span>
                           <div className="profile-meta">
                             <span style={{
                               fontSize: '9px',
@@ -177,13 +387,14 @@ export function ConfigView() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {isActive && isConnected && (
-                          <div title="Connected" style={{
+                        {isActive && (
+                          <div title={isConnected ? "Active & Connected" : "Active"} style={{
                             width: '8px', height: '8px', borderRadius: '50%',
-                            background: 'var(--status-ok)', boxShadow: '0 0 8px rgba(46, 213, 115, 0.6)',
+                            background: 'var(--status-ok)',
+                            boxShadow: isConnected ? '0 0 8px rgba(46, 213, 115, 0.6)' : 'none',
                           }} />
                         )}
-                        {!isActive && (
+                        {!isSelected && !isActive && (
                           <ArrowRight size={14} style={{ color: 'var(--text-low)', opacity: 0.5 }} />
                         )}
                         <button
@@ -211,27 +422,17 @@ export function ConfigView() {
 
         {/* Right panel: Node list for active profile */}
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {activeProfile ? (
+          {selectedProfile ? (
             <>
-              <div style={{ padding: '20px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', marginBottom: '16px', flexShrink: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '8px' }}>
-                      {activeProfile.name}
-                    </h2>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <span className="node-type-badge" style={{ fontSize: '11px', padding: '2px 8px', height: '20px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
-                        <Zap size={10} style={{ marginRight: '4px' }} /> {activeProfile.nodeCount} Nodes
-                      </span>
-                      {activeProfile.type === 'subscription' && activeProfile.subscriptionUrl && (
-                        <span className="node-type-badge" style={{ fontSize: '11px', padding: '2px 8px', height: '20px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
-                          <Link2 size={10} style={{ marginRight: '4px' }} /> Subscription
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ProfileHeaderCard
+                selectedProfile={selectedProfile}
+                activeProfileId={activeProfileId}
+                nodes={nodes}
+                selectedNodeTag={selectedNodeTag}
+                isConnected={isConnected}
+                nodeGeoCache={nodeGeoCache}
+                latencyResults={latencyResults}
+              />
 
               <div className="flex-row-between" style={{ marginBottom: '12px', flexShrink: 0, paddingLeft: '4px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Servers</h3>
@@ -251,57 +452,20 @@ export function ConfigView() {
                 {nodes.length > 0 ? (
                   <div className="node-grid">
                     {nodes.map((node, i) => (
-                      <div
+                      <ServerCard
                         key={i}
-                        className={`node-card ${selectedNodeTag === node.tag ? 'active' : ''}`}
-                        onClick={() => selectNode(node)}
-                        style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
-                          <Server size={14} style={{ color: selectedNodeTag === node.tag ? 'var(--accent-primary)' : 'var(--text-low)' }} />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
-                            <span className="node-name" title={node.tag}>{node.tag}</span>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                              <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
-                              {isConnected && selectedNodeTag === node.tag && (
-                                <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <button
-                          className="btn-icon-only"
-                          style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', flexShrink: 0, borderRadius: '6px' }}
-                          onClick={(e) => { e.stopPropagation(); openEditor(node); }}
-                          title="Edit node configuration"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        {latencyResults[node.tag] && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              flexShrink: 0,
-                              fontVariantNumeric: 'tabular-nums',
-                              ...(latencyResults[node.tag].latencyMs !== null
-                                ? latencyResults[node.tag].latencyMs! < 200
-                                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
-                                  : latencyResults[node.tag].latencyMs! < 500
-                                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
-                                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
-                                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
-                            }}
-                            title={latencyResults[node.tag].error || undefined}
-                          >
-                            {latencyResults[node.tag].latencyMs !== null
-                              ? `${latencyResults[node.tag].latencyMs}ms`
-                              : 'timeout'}
-                          </span>
-                        )}
-                      </div>
+                        node={node}
+                        selectedNodeTag={selectedNodeTag}
+                        selectNode={selectNode}
+                        isConnected={isConnected}
+                        selectedProfile={selectedProfile}
+                        activeProfileId={activeProfileId}
+                        openEditor={openEditor}
+                        latencyResults={latencyResults}
+                        nodeGeoCache={nodeGeoCache}
+                        fetchNodeGeo={fetchNodeGeo}
+                        activatingNodeTag={activatingNodeTag}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -314,7 +478,7 @@ export function ConfigView() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-low)' }}>
               <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', boxShadow: '0 0 30px rgba(74,158,255,0.05)' }}>
-                <Server size={36} style={{ strokeWidth: 1.5, color: 'var(--accent-primary)', opacity: 0.8 }} />
+                <Globe size={36} style={{ strokeWidth: 1.5, color: 'var(--accent-primary)', opacity: 0.8 }} />
               </div>
               <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-high)' }}>No Profile Selected</p>
               <p style={{ fontSize: '13px', marginTop: '8px', maxWidth: '280px', textAlign: 'center', lineHeight: '1.5' }}>

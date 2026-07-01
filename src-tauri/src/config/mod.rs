@@ -211,8 +211,10 @@ fn extract_ip_from_line(line: &str) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn get_system_dns_address() -> Option<String> {
+    use std::os::windows::process::CommandExt;
     let output = Command::new("ipconfig")
         .arg("/all")
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);

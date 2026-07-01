@@ -1,8 +1,8 @@
 import React from 'react';
-import { Activity, Layers, Route, Terminal, Settings } from 'lucide-react';
+import { Activity, Layers, Route, Terminal, Settings, Network } from 'lucide-react';
 import xLinkLogo from '../assets/X-Link-logo.png';
 
-export type TabId = 'dashboard' | 'profiles' | 'routing' | 'logs' | 'settings';
+export type TabId = 'dashboard' | 'profiles' | 'routing' | 'logs' | 'connections' | 'settings';
 
 interface NavRailProps {
   activeTab: TabId;
@@ -13,6 +13,7 @@ const NAV_ITEMS: [TabId, React.ComponentType<any>, string][] = [
   ['dashboard', Activity,  'Dashboard'],
   ['profiles',  Layers,    'Config'],
   ['routing',   Route,     'Routing'],
+  ['connections', Network,  'Connections'],
   ['logs',      Terminal,  'Logs'],
   ['settings',  Settings,  'Settings'],
 ];
@@ -24,7 +25,7 @@ export function NavRail({ activeTab, onTabChange }: NavRailProps) {
       {/* Logo */}
       <div className="rail-logo">
         <div className="rail-logo-icon">
-          <img src={xLinkLogo} alt="X-Link" style={{ width: '28px', height: '28px', borderRadius: 'var(--r-md)' }} />
+          <img src={xLinkLogo} alt="X-Link" style={{ width: '28px', height: '28px', borderRadius: 'var(--r-md)', display: 'block' }} />
         </div>
         <span className="rail-logo-wordmark">X-Link</span>
       </div>

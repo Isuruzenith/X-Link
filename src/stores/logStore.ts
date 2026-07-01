@@ -3,6 +3,7 @@ import { create } from 'zustand';
 export interface LogEntry {
   type: 'info' | 'warn' | 'error' | 'system';
   text: string;
+  timestamp: string;
 }
 
 interface LogState {
@@ -24,8 +25,12 @@ export const useLogStore = create<LogState>((set, get) => ({
   pushLog: (type, text) => {
     const formattedText = text.trim();
     if (!formattedText) return;
+    const now = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const timestamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    
     set((state) => ({
-      logs: [...state.logs, { type, text: formattedText }].slice(-500),
+      logs: [...state.logs, { type, text: formattedText, timestamp }].slice(-500),
     }));
   },
 

@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use tauri_plugin_shell::process::CommandChild;
 use serde::{Serialize, Deserialize};
 use tauri::Manager;
+use tauri::Emitter;
 
 /// Maximum lines retained in the Rust-side log buffer.
 const LOG_BUFFER_RUST_MAX: usize = 500;
@@ -209,10 +210,16 @@ impl ProxyState {
         }
     }
 
-    pub fn set_status(&self, status: ConnectionStatus) {
+    pub fn set_status(&self, app: &tauri::AppHandle, status: ConnectionStatus) {
         if let Ok(mut g) = self.connection_status.lock() {
             *g = status;
         }
+        let status_str = match status {
+            ConnectionStatus::Disconnected => "disconnected",
+            ConnectionStatus::Connecting => "connecting",
+            ConnectionStatus::Connected => "connected",
+        };
+        let _ = app.emit("proxy-status-changed", status_str);
     }
 
     pub fn is_running(&self) -> bool {

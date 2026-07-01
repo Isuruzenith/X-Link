@@ -29,11 +29,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Isuruzenith",
     "externalBin": [
       "binaries/sing-box"
-    ],
-    "resources": [
-      "binaries/wintun.dll"
     ],
     "icon": [
       "icons/32x32.png",
