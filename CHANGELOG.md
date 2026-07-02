@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.4.0...x-link-v0.5.0) (2026-07-02)
+
+
+### Features
+
+* add CI and release GitHub Actions workflows ([1941e2f](https://github.com/Isuruzenith/X-Link/commit/1941e2f535c6731300b101993bb12e3a161de5d4))
+* add CI/CD release workflow and system management commands for autostart, port checks, and versioning ([36aa8b9](https://github.com/Isuruzenith/X-Link/commit/36aa8b9f71cb7beffa9078b536a0c100d8caa193))
+* add support for parsing raw proxy URI schemes including Shadowsocks and VMess ([b7ec544](https://github.com/Isuruzenith/X-Link/commit/b7ec544e4ef7e57a77217118f4e701a933d3ca99))
+* implement node editor store and UI views for proxy configuration management ([f4bde2f](https://github.com/Isuruzenith/X-Link/commit/f4bde2fd596f4676c07cf085121820d84b47faf7))
+* implement system utility commands for cross-platform autostart, elevation, and environment checks with CI integration ([bc8ea13](https://github.com/Isuruzenith/X-Link/commit/bc8ea1359b218c5a71eeec18c0a18f5e69b4283f))
+
+
+### Bug Fixes
+
+* **ci/frontend:** fix rust format check, upgrade node, and clean up connections view warnings ([fe5312b](https://github.com/Isuruzenith/X-Link/commit/fe5312b8ade69aae605978cc502c8ba54475161f))
+* **tauri:** replace resource_dir with resolve for path resolver compatibility ([e5e2654](https://github.com/Isuruzenith/X-Link/commit/e5e265481bd8505bc21cae488e2611bb3c0ae732))
+* **tauri:** use resolve with BaseDirectory::Resource for path resolver compatibility ([7ad43cd](https://github.com/Isuruzenith/X-Link/commit/7ad43cd910dea518314b820ebb69da8cbf635a86))
+
 ## [0.4.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.3.0...x-link-v0.4.0) (2026-07-01)
 
 
