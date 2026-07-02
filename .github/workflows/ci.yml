@@ -49,8 +49,6 @@ jobs:
       matrix:
         platform: [macos-latest, ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
-    env:
-      PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 
     steps:
       - name: Checkout repository
@@ -61,7 +59,6 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo dpkg --add-architecture amd64
           sudo apt-get update
           sudo apt-get install -y \
             build-essential curl wget file \
@@ -70,12 +67,11 @@ jobs:
             libwebkit2gtk-4.1-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev
 
-      - name: Verify glib pkg-config resolution (Linux)
+      - name: Export pkg-config path (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig" >> $GITHUB_ENV
           pkg-config --modversion glib-2.0
-          pkg-config --cflags --libs glib-2.0
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -98,7 +94,11 @@ jobs:
         run: node scripts/setup-sidecars.cjs
 
       - name: Cargo Check
+        env:
+          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: Cargo Test
+        env:
+          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
         run: cargo test --manifest-path src-tauri/Cargo.toml
