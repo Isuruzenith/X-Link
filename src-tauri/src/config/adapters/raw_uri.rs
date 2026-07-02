@@ -5,7 +5,7 @@ use url::Url;
 
 fn decode_base64_padded(s: &str) -> Result<Vec<u8>, String> {
     let mut s = s.trim().to_string();
-    while s.len() % 4 != 0 {
+    while !s.len().is_multiple_of(4) {
         s.push('=');
     }
     base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &s)
@@ -223,8 +223,7 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         }
 
         // ── VMESS PARSING ────────────────────────────────────────────────────
-        if trimmed.starts_with("vmess://") {
-            let b64_part = &trimmed[8..];
+        if let Some(b64_part) = trimmed.strip_prefix("vmess://") {
             let parts: Vec<&str> = b64_part.split('#').collect();
             let b64_clean = parts[0];
             let fragment_tag = parts.get(1).map(|t| {

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useProfileStore } from './profileStore';
 import { useLogStore } from './logStore';
 import { useToastStore } from './toastStore';
+import type { ProxyNode } from '../utils/store';
 
 interface NodeEditorState {
   isOpen: boolean;
@@ -50,10 +51,10 @@ interface NodeEditorState {
   editHttpTls: boolean;
 
   // Actions
-  openEditor: (node: any) => void;
+  openEditor: (node: ProxyNode) => void;
   closeEditor: () => void;
   setSection: (section: 'basic' | 'transport' | 'tls') => void;
-  setField: (field: keyof Omit<NodeEditorState, 'isOpen' | 'isSaving' | 'saveError' | 'section' | 'openEditor' | 'closeEditor' | 'setSection' | 'setField' | 'saveEditor'>, value: any) => void;
+  setField: (field: keyof Omit<NodeEditorState, 'isOpen' | 'isSaving' | 'saveError' | 'section' | 'openEditor' | 'closeEditor' | 'setSection' | 'setField' | 'saveEditor'>, value: unknown) => void;
   saveEditor: () => Promise<void>;
 }
 
@@ -149,7 +150,7 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
 
   closeEditor: () => set({ isOpen: false }),
   setSection: (section) => set({ section }),
-  setField: (field, value) => set({ [field]: value } as any),
+  setField: (field, value) => set({ [field]: value } as unknown as Partial<NodeEditorState>),
 
   saveEditor: async () => {
     const profileStore = useProfileStore.getState();
@@ -165,7 +166,7 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
     }
 
     try {
-      const outbound: any = { type: state.editProtocol, tag: state.editTag.trim() };
+      const outbound: Partial<ProxyNode> = { type: state.editProtocol, tag: state.editTag.trim() };
 
       if (['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'socks', 'http'].includes(state.editProtocol)) {
         outbound.server = state.editAddress.trim();
@@ -219,11 +220,11 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
 
       const needTls = state.editTlsEnabled || ['hysteria2', 'tuic'].includes(state.editProtocol);
       if (needTls && !['socks', 'http', 'shadowsocks'].includes(state.editProtocol)) {
-        const tls: any = { enabled: true };
+        const tls: NonNullable<ProxyNode['tls']> = { enabled: true };
         if (state.editServerName.trim()) tls.server_name = state.editServerName.trim();
         if (state.editAllowInsecure) tls.insecure = true;
         if (state.editAlpn.trim()) tls.alpn = state.editAlpn.split(',').map((s) => s.trim()).filter(Boolean);
-        if (state.editFingerprint) tls.utls = { enabled: true, fingerprint: state.editFingerprint };
+        if (state.editFingerprint) tls.utls = { fingerprint: state.editFingerprint };
         if (state.editRealityEnabled && !['hysteria2', 'tuic'].includes(state.editProtocol)) {
           if (!state.editPublicKey.trim()) {
             set({ saveError: 'Reality Public Key required.', isSaving: false });
@@ -235,7 +236,7 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
       }
 
       if (state.editNetwork && state.editNetwork !== 'tcp' && !['socks', 'http', 'hysteria2', 'tuic'].includes(state.editProtocol)) {
-        const transport: any = { type: state.editNetwork };
+        const transport: NonNullable<ProxyNode['transport']> = { type: state.editNetwork };
         if (state.editPath.trim()) transport.path = state.editPath.trim();
         if (state.editHost.trim()) transport.headers = { Host: state.editHost.trim() };
         if (state.editServiceName.trim()) transport.service_name = state.editServiceName.trim();
@@ -243,14 +244,14 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
       }
 
       await invoke('update_node', { newOutbound: outbound });
-      const outbounds = await invoke<any[]>('get_config_outbounds');
+      const outbounds = await invoke<ProxyNode[]>('get_config_outbounds');
       profileStore.updateNodesList(outbounds || []);
 
       if (state.editTag.trim() !== profileStore.selectedNodeTag && profileStore.selectedNodeTag) {
-        const active = await invoke<any>('get_active_outbound').catch(() => null);
+        const active = await invoke<ProxyNode>('get_active_outbound').catch(() => null);
         if (active) profileStore.selectNode({ tag: active.tag });
       } else {
-        profileStore.selectNode({ tag: outbound.tag });
+        profileStore.selectNode({ tag: state.editTag.trim() });
       }
 
       logStore.pushSystemLog(`Node "${outbound.tag}" updated and validated.`);

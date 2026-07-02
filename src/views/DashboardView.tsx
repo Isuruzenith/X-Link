@@ -63,11 +63,12 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
     fetchNodeGeo,
   } = useProfileStore();
 
+  const activeProfileId = activeProfile?.id;
   useEffect(() => {
-    if (activeProfile) {
-      selectProfile(activeProfile.id);
+    if (activeProfileId) {
+      selectProfile(activeProfileId);
     }
-  }, [activeProfile?.id, selectProfile]);
+  }, [activeProfileId, selectProfile]);
 
   const activeNode = selectedNodeTag ? nodes.find((n) => n.tag === selectedNodeTag) : null;
 

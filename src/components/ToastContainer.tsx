@@ -38,7 +38,7 @@ export function ToastContainer() {
         bottom: '24px',
         left: '50%',
         transform: 'translateX(-50%)',
-        zIndex: 'var(--z-toast)' as any,
+        zIndex: 'var(--z-toast)' as React.CSSProperties['zIndex'],
         display: 'flex',
         flexDirection: 'column',
         gap: '10px',

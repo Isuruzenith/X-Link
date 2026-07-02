@@ -25,6 +25,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   settings: {
     proxyMode: 'tun',
     closeToTray: true,
+    theme: 'dark',
     autostart: false,
     httpPort: 7890,
     socksPort: 7891,
@@ -69,7 +70,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ settings: savedSettings });
 
     // Apply saved theme
-    const savedTheme = (savedSettings as any).theme as ThemeMode | undefined;
+    const savedTheme = savedSettings.theme;
     if (savedTheme) {
       get().setTheme(savedTheme);
     }
@@ -84,13 +85,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // Apply auto-start and admin elevation configurations via Tauri commands
     if (updates.proxyMode !== undefined) {
       if (updates.proxyMode === 'tun' && get().isElevated) {
-        try { await invoke('set_runas_admin', { enabled: true }); } catch {}
+        try { await invoke('set_runas_admin', { enabled: true }); } catch { /* ignore */ }
       } else if (updates.proxyMode === 'system') {
-        try { await invoke('set_runas_admin', { enabled: false }); } catch {}
+        try { await invoke('set_runas_admin', { enabled: false }); } catch { /* ignore */ }
       }
     }
     if (updates.autostart !== undefined) {
-      try { await invoke('set_autostart', { enabled: updates.autostart }); } catch {}
+      try { await invoke('set_autostart', { enabled: updates.autostart }); } catch { /* ignore */ }
     }
   },
 
@@ -111,7 +112,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const version = await invoke<string>('get_app_version');
       set({ appVersion: version });
-    } catch {}
+    } catch { /* ignore */ }
 
     try {
       const ver = await invoke<string>('get_singbox_version');
@@ -123,7 +124,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme });
-    storeHelper.saveSettings({ theme } as any);
+    storeHelper.saveSettings({ theme });
 
     const resolved = theme === 'system'
       ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')

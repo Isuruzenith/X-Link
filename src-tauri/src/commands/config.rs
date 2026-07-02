@@ -142,7 +142,7 @@ pub async fn import_config(
         if parsed
             .get("outbounds")
             .and_then(|o| o.as_array())
-            .map_or(true, |a| a.is_empty())
+            .is_none_or(|a| a.is_empty())
         {
             return Err("Config has no outbounds — nothing to connect to.".to_string());
         }

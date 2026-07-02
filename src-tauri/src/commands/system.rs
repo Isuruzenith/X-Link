@@ -222,7 +222,10 @@ pub fn check_tun_support(app: tauri::AppHandle) -> bool {
 
         let sidecar_path = match sidecar_path {
             Some(path) => path,
-            None => match app.path().resolve_resource("resources/sing-box") {
+            None => match app
+                .path()
+                .resolve("resources/sing-box", tauri::path::BaseDirectory::Resource)
+            {
                 Ok(path) => path,
                 Err(_) => return false,
             },
@@ -323,7 +326,7 @@ pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
             Some(path) => path,
             None => app
                 .path()
-                .resolve_resource("resources/sing-box")
+                .resolve("resources/sing-box", tauri::path::BaseDirectory::Resource)
                 .map_err(|e| format!("Failed to resolve sing-box sidecar path: {}", e))?,
         };
 

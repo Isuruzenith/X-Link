@@ -41,16 +41,29 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y \
+            build-essential curl wget file \
+            pkg-config libssl-dev \
+            libglib2.0-dev libgtk-3-dev \
+            libwebkit2gtk-4.1-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Export pkg-config path (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig" >> $GITHUB_ENV
+          pkg-config --modversion glib-2.0
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
 
       - name: Cache Cargo dependencies
         uses: swatinem/rust-cache@v2
@@ -67,6 +80,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
         with:
           tagName: ${{ needs.release-please.outputs.tag_name }}
           releaseName: 'X-Link ${{ needs.release-please.outputs.tag_name }}'
