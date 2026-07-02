@@ -222,7 +222,10 @@ pub fn check_tun_support(app: tauri::AppHandle) -> bool {
 
         let sidecar_path = match sidecar_path {
             Some(path) => path,
-            None => match app.path().resolve("resources/sing-box", tauri::path::BaseDirectory::Resource) {
+            None => match app
+                .path()
+                .resolve("resources/sing-box", tauri::path::BaseDirectory::Resource)
+            {
                 Ok(path) => path,
                 Err(_) => return false,
             },
