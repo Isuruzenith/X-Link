@@ -54,6 +54,9 @@ jobs:
       - name: Rust Formatting Check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      - name: Setup Sidecars
+        run: node scripts/setup-sidecars.cjs
+
       - name: Rust Clippy Lints
         env:
           PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
