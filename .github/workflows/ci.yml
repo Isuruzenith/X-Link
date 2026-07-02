@@ -93,12 +93,22 @@ jobs:
       - name: Setup Sidecars
         run: node scripts/setup-sidecars.cjs
 
-      - name: Cargo Check
+      - name: Cargo Check (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
         env:
           PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
-      - name: Cargo Test
+      - name: Cargo Check (non-Linux)
+        if: matrix.platform != 'ubuntu-22.04'
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo Test (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
         env:
           PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Cargo Test (non-Linux)
+        if: matrix.platform != 'ubuntu-22.04'
         run: cargo test --manifest-path src-tauri/Cargo.toml
