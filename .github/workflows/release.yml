@@ -30,6 +30,8 @@ jobs:
       matrix:
         platform: [macos-latest, ubuntu-22.04, windows-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
 
     steps:
       - name: Checkout repository
@@ -48,9 +50,6 @@ jobs:
             libglib2.0-dev libgtk-3-dev \
             libwebkit2gtk-4.1-dev libxdo-dev \
             libayatana-appindicator3-dev librsvg2-dev
-
-          # Ensure pkg-config can find .pc files
-          echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig" >> "$GITHUB_ENV"
 
       - name: Verify glib pkg-config resolution (Linux)
         if: matrix.platform == 'ubuntu-22.04'
