@@ -85,7 +85,7 @@ impl Default for UserSettings {
             api_cors: true,
             primary_dns: "https://1.1.1.1/dns-query".to_string(),
             fallback_dns: "https://8.8.8.8/dns-query".to_string(),
-            direct_dns: "223.5.5.5".to_string(),
+            direct_dns: "".to_string(),
             dns_strategy: "prefer_ipv4".to_string(),
             dns_mode: "fakeip".to_string(),
             fakeip_range: "198.18.0.0/15".to_string(),

@@ -271,7 +271,7 @@ export function SettingsView() {
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">Direct DNS (Local/Bypass)</label>
-                    <Inp value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="223.5.5.5" mono />
+                    <Inp value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="Auto (System DNS)" mono />
                   </div>
                 </div>
                 <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>
