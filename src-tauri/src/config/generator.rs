@@ -65,7 +65,7 @@ impl Default for TunSettings {
             socks_port: 7891,
             dns_caching: true,
             dns_strategy: "prefer_ipv4".to_string(),
-            direct_dns: "223.5.5.5".to_string(),
+            direct_dns: "8.8.8.8".to_string(),
             fakeip_filter: "geosite:private".to_string(),
             dns_leak_protection: true,
         }
