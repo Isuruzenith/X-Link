@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.1](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.0...x-link-v0.7.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* bypass local FakeIP DNS hijack in latency testing and server resolution to avoid false 0ms pings ([1260dd8](https://github.com/Isuruzenith/X-Link/commit/1260dd838857c3df209cff9645d08a6ef58298e1))
+* exclude IPv6 loopback from TUN routing and use explicit 127.0.0.1 devUrl to prevent dev mode white screen ([266c7d8](https://github.com/Isuruzenith/X-Link/commit/266c7d806276951ad3e2a543a1a116bfa9c8b82b))
+* implement configuration management module and latency command utilities for Tauri integration ([aae9b03](https://github.com/Isuruzenith/X-Link/commit/aae9b03a496cd3ea06a8d3caf4b9b6bf3bb53c24))
+* implement node latency testing with DoH support and configure backend state management ([f6e56b2](https://github.com/Isuruzenith/X-Link/commit/f6e56b2ec91f22570d0d9a3de4c1f7ac7b37d922))
+* resolve UI loading black/white screen in production by adding safe UUID fallback ([cd13db2](https://github.com/Isuruzenith/X-Link/commit/cd13db212d9e4a1088dff32155eb218c254da2db))
+* update default MTU migration to 1400 in store and bypass local proxy routing for Clash API latency checks ([9af3509](https://github.com/Isuruzenith/X-Link/commit/9af3509e57e21740468604946a840896277de73a))
+
+
+### Performance Improvements
+
+* defer fetchVersions and delay show_window to prevent black startup screen ([dd58d05](https://github.com/Isuruzenith/X-Link/commit/dd58d051eceebe97f5af8ab84193f285f709c3d5))
+
 ## [0.7.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.6.0...x-link-v0.7.0) (2026-07-04)
 
 
