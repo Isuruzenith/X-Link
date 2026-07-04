@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { storeHelper, type NodeUsageStats } from '../utils/store';
 
-let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let saveTimeout: any = null;
 const debouncedSave = (stats: Record<string, NodeUsageStats>) => {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {

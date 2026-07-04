@@ -36,7 +36,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     tunAutoRedirect: false,
     tunStrictRoute: true,
     tunStack: 'gvisor',
-    tunMtu: 1400,
+    tunMtu: 1500,
     tunEndpointIndependentNat: false,
     sniffEnabled: true,
     sniffHttp: true,

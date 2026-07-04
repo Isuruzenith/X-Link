@@ -113,7 +113,7 @@ impl Default for TunSettings {
             auto_redirect: false,
             strict_route: true,
             stack: "gvisor".to_string(),
-            mtu: 1400,
+            mtu: 1500,
             endpoint_independent_nat: false,
             sniff_enabled: true,
             sniff_http: true,
