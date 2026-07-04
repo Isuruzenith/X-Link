@@ -434,16 +434,23 @@ pub async fn prepare_and_patch_config(
     }
 
     // Get the active profile ID and load its outbounds instead of reading the stale/fallback active.json
-    let active_profile_id = match crate::commands::config::get_active_profile_id(app) {
-        Ok(Some(id)) => id,
-        _ => return Err("No active profile selected. Please select or import a profile before connecting.".to_string()),
-    };
+    let active_profile_id =
+        match crate::commands::config::get_active_profile_id(app) {
+            Ok(Some(id)) => id,
+            _ => return Err(
+                "No active profile selected. Please select or import a profile before connecting."
+                    .to_string(),
+            ),
+        };
 
-    let profile_nodes = crate::commands::config::get_profile_outbounds(app.clone(), active_profile_id)?;
-    
+    let profile_nodes =
+        crate::commands::config::get_profile_outbounds(app.clone(), active_profile_id)?;
+
     // Guard: If there are no nodes in the active profile, return an error
     if profile_nodes.is_empty() {
-        return Err("No server profiles found. Please import a profile before connecting.".to_string());
+        return Err(
+            "No server profiles found. Please import a profile before connecting.".to_string(),
+        );
     }
 
     let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
@@ -479,7 +486,7 @@ pub async fn prepare_and_patch_config(
     }
     // Allow CORS so the Tauri frontend (tauri://localhost) can communicate with the API
     clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
-    
+
     final_config_val["experimental"] = serde_json::json!({
         "clash_api": clash_api
     });
@@ -493,7 +500,9 @@ pub async fn prepare_and_patch_config(
     .map_err(|e| format!("Failed to write temporary config: {}", e))?;
 
     // Perform validation check
-    if let Err(err) = crate::config::validator::validate_singbox_config(app, &temp_config_path).await {
+    if let Err(err) =
+        crate::config::validator::validate_singbox_config(app, &temp_config_path).await
+    {
         let _ = std::fs::remove_file(&temp_config_path);
         return Err(format!("Configuration check failed: {}", err));
     }
@@ -566,17 +575,21 @@ pub async fn switch_node_hot(
     let api_enabled = settings.api_enabled;
 
     if state.get_status() == crate::state::ConnectionStatus::Connected && api_enabled {
-        let (config_path, _, _, _) = match prepare_and_patch_config(&app, &state, Some(&tag), None).await {
-            Ok(res) => res,
-            Err(e) => {
-                state.push_log(format!("[System] Config patch failed: {}", e));
-                return try_reload_proxy_config(&app, &state, Some(tag)).await;
-            }
-        };
+        let (config_path, _, _, _) =
+            match prepare_and_patch_config(&app, &state, Some(&tag), None).await {
+                Ok(res) => res,
+                Err(e) => {
+                    state.push_log(format!("[System] Config patch failed: {}", e));
+                    return try_reload_proxy_config(&app, &state, Some(tag)).await;
+                }
+            };
 
         // Try hot-reloading the configuration first so the running sing-box gets the updated active.json
         if let Err(e) = hot_reload_via_api(&config_path, api_port, &api_secret).await {
-            state.push_log(format!("[System] API config reload failed ({}), falling back to full reload.", e));
+            state.push_log(format!(
+                "[System] API config reload failed ({}), falling back to full reload.",
+                e
+            ));
             return try_reload_proxy_config(&app, &state, Some(tag)).await;
         }
 
@@ -797,15 +810,21 @@ pub async fn toggle_proxy(
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 
-    let (config_path, resolved_proxy_mode, api_port, api_secret) =
-        match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None).await {
-            Ok(res) => res,
-            Err(e) => {
-                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
-                crate::tray::update_tray(&app);
-                return Err(e);
-            }
-        };
+    let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(
+        &app,
+        &state,
+        selected_outbound_tag.as_deref(),
+        None,
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
+            return Err(e);
+        }
+    };
 
     let mut current_mode = resolved_proxy_mode.clone();
     let mut attempt = 0;
@@ -932,7 +951,8 @@ pub async fn toggle_proxy(
                 &state,
                 selected_outbound_tag.as_deref(),
                 Some("system"),
-            ).await?;
+            )
+            .await?;
 
             let session_id = uuid::Uuid::new_v4().to_string();
             {

@@ -423,7 +423,10 @@ pub fn delete_profile_config(app: tauri::AppHandle, profile_id: String) -> Resul
     Ok(())
 }
 
-pub fn set_active_profile_id_in_file(app: &tauri::AppHandle, profile_id: &str) -> Result<(), String> {
+pub fn set_active_profile_id_in_file(
+    app: &tauri::AppHandle,
+    profile_id: &str,
+) -> Result<(), String> {
     let mut path = app
         .path()
         .app_data_dir()
@@ -443,8 +446,7 @@ pub fn set_active_profile_id_in_file(app: &tauri::AppHandle, profile_id: &str) -
 
     let content = serde_json::to_string_pretty(&json)
         .map_err(|e| format!("Failed to serialize profiles.json: {}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write profiles.json: {}", e))?;
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write profiles.json: {}", e))?;
     Ok(())
 }
 

@@ -130,10 +130,12 @@ pub fn generate_singbox_config(
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
 
-
         // If TLS is enabled, ensure a default ALPN is specified if missing (default to "http/1.1")
         if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
-            let enabled = tls.get("enabled").and_then(|e| e.as_bool()).unwrap_or(false);
+            let enabled = tls
+                .get("enabled")
+                .and_then(|e| e.as_bool())
+                .unwrap_or(false);
             if enabled && tls.get("alpn").is_none() {
                 tls.insert("alpn".to_string(), serde_json::json!(["http/1.1"]));
             }
@@ -166,7 +168,7 @@ pub fn generate_singbox_config(
 
     // Construct the dynamic inbounds array
     let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address, &server_ips);
-    
+
     let mut inbounds = Vec::new();
     if tun_settings.use_separate_ports {
         inbounds.push(serde_json::json!({
@@ -207,7 +209,11 @@ pub fn generate_singbox_config(
             "sniff_override_destination": tun_settings.sniff_override_destination
         });
         if tun_settings.mtu != 0 {
-            let safe_mtu = if tun_settings.mtu == 1500 { 1400 } else { tun_settings.mtu };
+            let safe_mtu = if tun_settings.mtu == 1500 {
+                1400
+            } else {
+                tun_settings.mtu
+            };
             tun_inbound["mtu"] = serde_json::json!(safe_mtu);
         }
         if tun_settings.auto_redirect {
@@ -220,11 +226,8 @@ pub fn generate_singbox_config(
     }
 
     // Build route rules incorporating user routing rules from routing.json
-    let route_rules = crate::config::build_route_rules(
-        tun_settings.bypass_lan,
-        user_rules,
-        rule_sets,
-    );
+    let route_rules =
+        crate::config::build_route_rules(tun_settings.bypass_lan, user_rules, rule_sets);
 
     let route_section = serde_json::json!({
         "rules": route_rules,
@@ -268,7 +271,8 @@ pub fn generate_singbox_config(
     }
     if is_fakeip {
         if !tun_settings.fakeip_filter.trim().is_empty() {
-            let filters: Vec<String> = tun_settings.fakeip_filter
+            let filters: Vec<String> = tun_settings
+                .fakeip_filter
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
@@ -277,12 +281,12 @@ pub fn generate_singbox_config(
                 let mut rule = serde_json::json!({
                     "server": "local-dns"
                 });
-                
+
                 let mut geosite = Vec::new();
                 let mut domain = Vec::new();
                 let mut domain_suffix = Vec::new();
                 let mut domain_keyword = Vec::new();
-                
+
                 for f in filters {
                     if f.starts_with("geosite:") {
                         geosite.push(f.strip_prefix("geosite:").unwrap().trim().to_string());
@@ -294,7 +298,7 @@ pub fn generate_singbox_config(
                         domain_suffix.push(f);
                     }
                 }
-                
+
                 let mut has_matcher = false;
                 if !geosite.is_empty() {
                     rule["geosite"] = serde_json::json!(geosite);
@@ -312,7 +316,7 @@ pub fn generate_singbox_config(
                     rule["domain_keyword"] = serde_json::json!(domain_keyword);
                     has_matcher = true;
                 }
-                
+
                 if has_matcher {
                     dns_rules.push(rule);
                 }

@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::net::{TcpStream, ToSocketAddrs, IpAddr, SocketAddr};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 #[derive(Serialize, Clone, Debug)]
@@ -154,7 +154,9 @@ pub async fn test_all_nodes(
                 None => {
                     // Fallback to system resolution
                     let addr = format!("{}:{}", server, port);
-                    addr.to_socket_addrs().ok().and_then(|mut addrs| addrs.next().map(|sa| sa.ip()))
+                    addr.to_socket_addrs()
+                        .ok()
+                        .and_then(|mut addrs| addrs.next().map(|sa| sa.ip()))
                 }
             };
 
@@ -166,9 +168,7 @@ pub async fn test_all_nodes(
                     None => return Err("DNS resolution failed".to_string()),
                 };
                 let start = Instant::now();
-                if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5))
-                    .is_ok()
-                {
+                if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)).is_ok() {
                     return Ok(start.elapsed().as_millis() as u32);
                 }
                 Err("Connection failed".to_string())
