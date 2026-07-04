@@ -119,18 +119,22 @@ export default function App() {
 
     // Listen to sing-box logs emitted by Rust backend
     const unlistenLog = listen<string>('sing-box-log', (e) => {
-      const line = e.payload.trim();
+      let line = e.payload.trim();
       if (!line) return;
+      // Strip ANSI escape color codes to keep logs clean and prevent UI highlighting corruption
+      line = line.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
       let type: 'info' | 'warn' | 'error' | 'system' = 'info';
       if (line.toLowerCase().includes('warn')) {
         type = 'warn';
       } else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) {
-        // Downgrade harmless normal/idle WebSocket & telemetry connection closures to 'info' to avoid user panic
+        // Downgrade harmless normal/idle WebSocket, telemetry closures, and database warnings to 'info' to avoid user panic
         const isHarmlessClose = 
           line.toLowerCase().includes('ws closed: 1000') ||
           line.toLowerCase().includes('wsarecv: an existing connection was forcibly closed') ||
           line.toLowerCase().includes('wsarecv: a connection attempt failed') ||
-          line.toLowerCase().includes('connection download closed: raw-read');
+          line.toLowerCase().includes('connection download closed: raw-read') ||
+          line.toLowerCase().includes('failed to initialize geosite') ||
+          line.toLowerCase().includes('failed to initialize geoip');
           
         if (isHarmlessClose) {
           type = 'info';

@@ -106,8 +106,14 @@ pub fn build_singbox_rule(
         _ => return None,
     };
 
-    if invert {
-        obj["invert"] = serde_json::json!(true);
+    if let Some(map) = obj.as_object_mut() {
+        if map.get("outbound").and_then(|v| v.as_str()) == Some("block") {
+            map.remove("outbound");
+            map.insert("action".to_string(), serde_json::json!("reject"));
+        }
+        if invert {
+            map.insert("invert".to_string(), serde_json::json!(true));
+        }
     }
     Some(obj)
 }
@@ -204,7 +210,8 @@ mod tests {
     fn test_block_outbound() {
         let rule = make_rule("domain", "ads.example.com", "block");
         let json = build_singbox_rule(&rule, true, true).unwrap();
-        assert_eq!(json["outbound"].as_str().unwrap(), "block");
+        assert_eq!(json["action"].as_str().unwrap(), "reject");
+        assert!(json.get("outbound").is_none());
     }
 
     #[test]

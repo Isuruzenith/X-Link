@@ -201,9 +201,6 @@ pub fn generate_singbox_config(
     direct.insert("tag".to_string(), Value::String("direct".to_string()));
     final_outbounds.push(Value::Object(direct.into_iter().collect()));
 
-    // Unconditionally push block outbound
-    final_outbounds.push(serde_json::json!({ "type": "block", "tag": "block" }));
-
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
     // Construct the dynamic inbounds array
