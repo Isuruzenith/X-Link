@@ -187,7 +187,7 @@ const DEFAULT_SETTINGS: Settings = {
   tunAutoRedirect: false,
   tunStrictRoute: true,
   tunStack: 'gvisor',
-  tunMtu: 1500,
+  tunMtu: 1400,
   tunEndpointIndependentNat: false,
 
   sniffEnabled: true,

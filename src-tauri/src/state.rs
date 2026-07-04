@@ -71,7 +71,7 @@ impl Default for UserSettings {
             tun_auto_redirect: false,
             tun_strict_route: true,
             tun_stack: "gvisor".to_string(),
-            tun_mtu: 1500,
+            tun_mtu: 1400,
             tun_endpoint_independent_nat: false,
             multiplex: false,
             sniff_enabled: true,
