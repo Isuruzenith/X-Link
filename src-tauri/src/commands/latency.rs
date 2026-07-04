@@ -4,11 +4,7 @@ use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-async fn query_clash_api_delay(
-    api_port: u16,
-    api_secret: &str,
-    tag: &str,
-) -> Option<u32> {
+async fn query_clash_api_delay(api_port: u16, api_secret: &str, tag: &str) -> Option<u32> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .no_proxy()
@@ -18,8 +14,7 @@ async fn query_clash_api_delay(
     let encoded_tag = utf8_percent_encode(tag, NON_ALPHANUMERIC).to_string();
     let url = format!(
         "http://127.0.0.1:{}/proxies/{}/delay?url=http://www.gstatic.com/generate_204&timeout=2500",
-        api_port,
-        encoded_tag
+        api_port, encoded_tag
     );
 
     let mut request = client.get(&url);
@@ -158,7 +153,11 @@ pub async fn test_all_nodes(
     let state = app.state::<crate::state::ProxyState>();
     let status = state.get_status();
     let (api_enabled, api_port, api_secret) = if let Ok(settings) = state.settings.lock() {
-        (settings.api_enabled, settings.api_port, settings.api_secret.clone())
+        (
+            settings.api_enabled,
+            settings.api_port,
+            settings.api_secret.clone(),
+        )
     } else {
         (false, 9090, "".to_string())
     };
@@ -199,7 +198,8 @@ pub async fn test_all_nodes(
         handles.push(tokio::spawn(async move {
             // 1. Try Clash API if connected and enabled
             if is_connected && api_enabled {
-                if let Some(delay) = query_clash_api_delay(api_port, &api_secret_clone, &tag).await {
+                if let Some(delay) = query_clash_api_delay(api_port, &api_secret_clone, &tag).await
+                {
                     return LatencyResult {
                         tag,
                         latency_ms: Some(delay),
