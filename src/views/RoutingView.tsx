@@ -205,6 +205,11 @@ export function RoutingView() {
                   <span className="type-chip">{rs.type}</span>
                   <span className="type-chip" style={{ background: 'rgba(168,85,247,0.1)', color: '#d8b4fe', border: '1px solid rgba(168,85,247,0.2)' }}>{rs.format}</span>
                   <span className="type-chip">↻ {rs.updateInterval}</span>
+                  {rs.lastUpdated && (
+                    <span className="type-chip" style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      ✓ Cached
+                    </span>
+                  )}
                   <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
                     {rs.type === 'remote' && (
                       <button className="btn-icon-only" style={{ width: '24px', height: '24px' }} onClick={() => updateRuleSet(rs)} disabled={updatingRuleSet === rs.id}>
@@ -258,12 +263,23 @@ export function RoutingView() {
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Value</label>
-                  <Inp
-                    value={ruleForm.value}
-                    onChange={(v) => setRuleForm({ value: v })}
-                    placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
-                    mono
-                  />
+                  {ruleForm.type === 'rule_set' ? (
+                    <Sel
+                      value={ruleForm.value}
+                      onChange={(v) => setRuleForm({ value: v })}
+                      options={[
+                        { value: '', label: 'Select Rule Set...' },
+                        ...ruleSets.map((rs) => ({ value: rs.tag, label: rs.tag })),
+                      ]}
+                    />
+                  ) : (
+                    <Inp
+                      value={ruleForm.value}
+                      onChange={(v) => setRuleForm({ value: v })}
+                      placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
+                      mono
+                    />
+                  )}
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
                   <label className="form-label">Outbound</label>

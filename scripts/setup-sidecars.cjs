@@ -3,7 +3,7 @@ const https = require('https');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const SINGBOX_VERSION = '1.11.0';
+const SINGBOX_VERSION = '1.13.14';
 const WINTUN_VERSION = '0.14.1';
 
 const binariesDir = path.join(__dirname, '..', 'src-tauri', 'binaries');

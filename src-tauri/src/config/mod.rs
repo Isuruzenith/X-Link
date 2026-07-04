@@ -76,10 +76,20 @@ pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
 
 pub fn build_route_rules(
     bypass_lan: bool,
+    sniff_enabled: bool,
     user_rules: &[crate::config::rules::RoutingRule],
-    rule_sets: &[crate::config::rules::RuleSet],
+    _rule_sets: &[crate::config::rules::RuleSet],
+    geosite_db_exists: bool,
+    geoip_db_exists: bool,
 ) -> Vec<Value> {
-    let mut rules = vec![serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })];
+    let mut rules = vec![serde_json::json!({ "port": 53, "action": "hijack-dns" })];
+
+    if sniff_enabled {
+        rules.push(serde_json::json!({
+            "action": "sniff",
+            "sniffer": ["http", "tls", "quic"]
+        }));
+    }
 
     if bypass_lan {
         // Native, database-free private-network matching (no geoip/geosite
@@ -94,18 +104,12 @@ pub fn build_route_rules(
     // User-defined rules evaluated top-to-bottom
     for rule in user_rules {
         if rule.enabled.unwrap_or(true) {
-            if let Some(json_rule) = crate::config::rules::build_singbox_rule(rule) {
+            if let Some(json_rule) =
+                crate::config::rules::build_singbox_rule(rule, geosite_db_exists, geoip_db_exists)
+            {
                 rules.push(json_rule);
             }
         }
-    }
-
-    // Rule-set references (injected as individual rule entries)
-    for rs in rule_sets {
-        rules.push(serde_json::json!({
-            "rule_set": [rs.tag],
-            "outbound": "direct"
-        }));
     }
 
     rules
@@ -123,10 +127,37 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                 inbound["address"] = serde_json::json!(["172.19.0.1/30"]);
                 inbound["auto_route"] = serde_json::json!(true);
                 inbound["strict_route"] = serde_json::json!(true);
-                inbound["stack"] = serde_json::json!("gvisor");
-                inbound["sniff"] = serde_json::json!(true);
-                inbound["sniff_override_destination"] = serde_json::json!(true);
+                if inbound.get("stack").is_none() {
+                    inbound["stack"] = serde_json::json!("system");
+                }
+                // Remove legacy inbound fields
+                if let Some(map) = inbound.as_object_mut() {
+                    map.remove("sniff");
+                    map.remove("sniff_override_destination");
+                }
                 changed = true;
+            }
+        }
+    }
+
+    if changed {
+        // Ensure route rules have the sniff action
+        if let Some(rules) = config_val
+            .get_mut("route")
+            .and_then(|r| r.get_mut("rules"))
+            .and_then(|r| r.as_array_mut())
+        {
+            let has_sniff = rules
+                .iter()
+                .any(|r| r.get("action").and_then(|a| a.as_str()) == Some("sniff"));
+            if !has_sniff {
+                rules.insert(
+                    0,
+                    serde_json::json!({
+                        "action": "sniff",
+                        "sniffer": ["http", "tls", "quic"]
+                    }),
+                );
             }
         }
     }
@@ -152,7 +183,11 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                     let insert_at = rule_list
                         .iter()
                         .position(|rule| {
-                            rule.get("protocol").and_then(|v| v.as_str()) != Some("dns")
+                            let is_dns =
+                                rule.get("action").and_then(|v| v.as_str()) == Some("hijack-dns");
+                            let is_sniff =
+                                rule.get("action").and_then(|v| v.as_str()) == Some("sniff");
+                            !is_dns && !is_sniff
                         })
                         .unwrap_or(rule_list.len());
                     rule_list.insert(insert_at, udp_reject);
@@ -297,7 +332,7 @@ mod tests {
                 "transport": { "type": "ws" }
             }],
             "route": {
-                "rules": [{ "protocol": "dns", "action": "hijack-dns" }],
+                "rules": [{ "port": 53, "action": "hijack-dns" }],
                 "final": "proxy"
             }
         });
@@ -307,8 +342,12 @@ mod tests {
         assert_eq!(tun["address"], serde_json::json!(["172.19.0.1/30"]));
         assert_eq!(tun["auto_route"], serde_json::json!(true));
         assert_eq!(tun["strict_route"], serde_json::json!(true));
-        assert_eq!(tun["stack"], serde_json::json!("gvisor"));
-        assert_eq!(tun["sniff_override_destination"], serde_json::json!(true));
+        assert_eq!(tun["stack"], serde_json::json!("system"));
+        assert!(tun.get("sniff").is_none());
+        assert!(tun.get("sniff_override_destination").is_none());
+
+        let rules = config["route"]["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["action"].as_str().unwrap(), "sniff");
     }
 
     #[test]
@@ -322,7 +361,7 @@ mod tests {
             }],
             "route": {
                 "rules": [
-                    { "protocol": "dns", "action": "hijack-dns" },
+                    { "port": 53, "action": "hijack-dns" },
                     { "ip_is_private": true, "outbound": "direct" }
                 ],
                 "final": "proxy"
@@ -331,9 +370,10 @@ mod tests {
 
         apply_tun_compatibility_profile(&mut config);
         let rules = config["route"]["rules"].as_array().unwrap();
-        assert_eq!(rules[0]["protocol"].as_str().unwrap(), "dns");
-        assert_eq!(rules[1]["network"].as_str().unwrap(), "udp");
-        assert_eq!(rules[1]["action"].as_str().unwrap(), "reject");
-        assert_eq!(rules[1]["method"].as_str().unwrap(), "drop");
+        assert_eq!(rules[0]["action"].as_str().unwrap(), "sniff");
+        assert_eq!(rules[1]["port"].as_u64().unwrap(), 53);
+        assert_eq!(rules[2]["network"].as_str().unwrap(), "udp");
+        assert_eq!(rules[2]["action"].as_str().unwrap(), "reject");
+        assert_eq!(rules[2]["method"].as_str().unwrap(), "drop");
     }
 }

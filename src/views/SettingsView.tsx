@@ -69,10 +69,10 @@ export function SettingsView() {
 
   const sideNavItems: [SettingsSection, React.ComponentType<{ className?: string; size?: number }>, string][] = [
     ['general', SettingsIcon, 'General'],
-    ['tun',     Network,      'TUN Mode'],
-    ['sniff',   Eye,          'Sniffing'],
-    ['dns',     Dna,          'DNS'],
-    ['api',     Code2,        'API'],
+    ['tun', Network, 'TUN Mode'],
+    ['sniff', Eye, 'Sniffing'],
+    ['dns', Dna, 'DNS'],
+    ['api', Code2, 'API'],
   ];
 
   return (
@@ -106,6 +106,11 @@ export function SettingsView() {
                     <SwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => updateSettings({ closeToTray: v })} />
                     <SwitchRow title="Launch on System Login" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
                     <SwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => updateSettings({ wifiSharing: v })} />
+                  </div>
+
+                  <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="settings-section-heading">Connection Optimization</div>
+                    <SwitchRow title="Enable Multiplexing (Mux)" desc="Multiplexes multiple streams over a single connection to eliminate handshake latency." checked={settings.multiplex} onChange={(v) => updateSettings({ multiplex: v })} />
                   </div>
 
                   <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -280,8 +285,8 @@ export function SettingsView() {
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">DNS Query Strategy</label>
                     <Sel value={settings.dnsStrategy} onChange={(v) => updateSettings({ dnsStrategy: v as Settings['dnsStrategy'] })} options={[
-                      { value: 'ipv4_only', label: 'IPv4 Only (Default)' },
-                      { value: 'prefer_ipv4', label: 'Prefer IPv4' },
+                      { value: 'prefer_ipv4', label: 'Prefer IPv4 (Default)' },
+                      { value: 'ipv4_only', label: 'IPv4 Only' },
                       { value: 'prefer_ipv6', label: 'Prefer IPv6' },
                       { value: 'ipv6_only', label: 'IPv6 Only' },
                     ]} />

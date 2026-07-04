@@ -48,6 +48,7 @@ pub fn run() {
             commands::config::delete_profile_config,
             commands::config::switch_profile,
             commands::config::get_profile_outbounds,
+            commands::config::update_rule_set,
             commands::latency::test_node_latency,
             commands::latency::test_all_nodes
         ])

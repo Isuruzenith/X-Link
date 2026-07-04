@@ -54,6 +54,7 @@ pub struct UserSettings {
     pub bypass_lan: bool,
     pub dns_address: String,
     pub use_separate_ports: bool,
+    pub multiplex: bool,
 }
 
 impl Default for UserSettings {
@@ -72,12 +73,13 @@ impl Default for UserSettings {
             tun_stack: "gvisor".to_string(),
             tun_mtu: 1500,
             tun_endpoint_independent_nat: false,
+            multiplex: false,
             sniff_enabled: true,
             sniff_http: true,
             sniff_tls: true,
             sniff_quic: true,
             sniff_override_destination: false,
-            api_enabled: false,
+            api_enabled: true,
             api_port: 9090,
             api_secret: "".to_string(),
             api_cors: true,
@@ -261,6 +263,9 @@ impl ProxyState {
                         }
                         if let Some(v) = val.get("useSeparatePorts").and_then(|v| v.as_bool()) {
                             default_s.use_separate_ports = v;
+                        }
+                        if let Some(v) = val.get("multiplex").and_then(|v| v.as_bool()) {
+                            default_s.multiplex = v;
                         }
                         settings = default_s;
                     }

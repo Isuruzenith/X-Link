@@ -5,6 +5,71 @@ use super::resolve_server_ips;
 use serde_json::Value;
 use std::collections::HashMap;
 
+fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde_json::Value {
+    let address = address.trim();
+    let mut server_obj = serde_json::Map::new();
+    server_obj.insert("tag".to_string(), serde_json::json!(tag));
+    if let Some(d) = detour {
+        if !d.is_empty() {
+            server_obj.insert("detour".to_string(), serde_json::json!(d));
+        }
+    }
+
+    if address.starts_with("https://") {
+        server_obj.insert("type".to_string(), serde_json::json!("https"));
+        server_obj.insert("server".to_string(), serde_json::json!(address));
+    } else if address.starts_with("tls://") {
+        server_obj.insert("type".to_string(), serde_json::json!("tls"));
+        let stripped = address.strip_prefix("tls://").unwrap();
+        let (host, port) = if let Some(idx) = stripped.find(':') {
+            let (h, p_str) = stripped.split_at(idx);
+            let p = p_str[1..].parse::<u16>().unwrap_or(853);
+            (h.to_string(), p)
+        } else {
+            (stripped.to_string(), 853)
+        };
+        server_obj.insert("server".to_string(), serde_json::json!(host));
+        server_obj.insert("server_port".to_string(), serde_json::json!(port));
+    } else if address.starts_with("quic://") {
+        server_obj.insert("type".to_string(), serde_json::json!("quic"));
+        let stripped = address.strip_prefix("quic://").unwrap();
+        let (host, port) = if let Some(idx) = stripped.find(':') {
+            let (h, p_str) = stripped.split_at(idx);
+            let p = p_str[1..].parse::<u16>().unwrap_or(853);
+            (h.to_string(), p)
+        } else {
+            (stripped.to_string(), 853)
+        };
+        server_obj.insert("server".to_string(), serde_json::json!(host));
+        server_obj.insert("server_port".to_string(), serde_json::json!(port));
+    } else if address.starts_with("tcp://") {
+        server_obj.insert("type".to_string(), serde_json::json!("tcp"));
+        let stripped = address.strip_prefix("tcp://").unwrap();
+        let (host, port) = if let Some(idx) = stripped.find(':') {
+            let (h, p_str) = stripped.split_at(idx);
+            let p = p_str[1..].parse::<u16>().unwrap_or(53);
+            (h.to_string(), p)
+        } else {
+            (stripped.to_string(), 53)
+        };
+        server_obj.insert("server".to_string(), serde_json::json!(host));
+        server_obj.insert("server_port".to_string(), serde_json::json!(port));
+    } else {
+        server_obj.insert("type".to_string(), serde_json::json!("udp"));
+        let (host, port) = if let Some(idx) = address.find(':') {
+            let (h, p_str) = address.split_at(idx);
+            let p = p_str[1..].parse::<u16>().unwrap_or(53);
+            (h.to_string(), p)
+        } else {
+            (address.to_string(), 53)
+        };
+        server_obj.insert("server".to_string(), serde_json::json!(host));
+        server_obj.insert("server_port".to_string(), serde_json::json!(port));
+    }
+
+    serde_json::Value::Object(server_obj)
+}
+
 /// User-configurable TUN and sniffing settings read from settings.json.
 #[derive(Debug, Clone)]
 pub struct TunSettings {
@@ -38,6 +103,7 @@ pub struct TunSettings {
     pub direct_dns: String,
     pub fakeip_filter: String,
     pub dns_leak_protection: bool,
+    pub multiplex: bool,
 }
 
 impl Default for TunSettings {
@@ -47,7 +113,7 @@ impl Default for TunSettings {
             auto_redirect: false,
             strict_route: true,
             stack: "gvisor".to_string(),
-            mtu: 1400,
+            mtu: 1500,
             endpoint_independent_nat: false,
             sniff_enabled: true,
             sniff_http: true,
@@ -65,9 +131,10 @@ impl Default for TunSettings {
             socks_port: 7891,
             dns_caching: true,
             dns_strategy: "prefer_ipv4".to_string(),
-            direct_dns: "223.5.5.5".to_string(),
+            direct_dns: "8.8.8.8".to_string(),
             fakeip_filter: "geosite:private".to_string(),
             dns_leak_protection: true,
+            multiplex: false,
         }
     }
 }
@@ -83,7 +150,28 @@ pub fn generate_singbox_config(
     default_outbound_tag: Option<&str>,
     user_rules: &[crate::config::rules::RoutingRule],
     rule_sets: &[crate::config::rules::RuleSet],
+    app_data_dir: &std::path::Path,
 ) -> Result<String, String> {
+    let check_and_cleanup_db = |path: &std::path::Path| -> bool {
+        if path.exists() {
+            if let Ok(metadata) = path.metadata() {
+                if metadata.len() == 0 {
+                    let _ = std::fs::remove_file(path);
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    };
+
+    let geosite_db_exists = check_and_cleanup_db(&app_data_dir.join("geosite.db"))
+        || check_and_cleanup_db(std::path::Path::new("geosite.db"))
+        || check_and_cleanup_db(std::path::Path::new("src-tauri/geosite.db"));
+    let geoip_db_exists = check_and_cleanup_db(&app_data_dir.join("geoip.db"))
+        || check_and_cleanup_db(std::path::Path::new("geoip.db"))
+        || check_and_cleanup_db(std::path::Path::new("src-tauri/geoip.db"));
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
         if let Some(server_val) = outbound.fields.get("server") {
@@ -130,6 +218,23 @@ pub fn generate_singbox_config(
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
 
+        if tun_settings.multiplex {
+            let outbound_type = node.outbound_type.as_str();
+            if outbound_type == "vless" || outbound_type == "vmess" || outbound_type == "trojan" {
+                obj.insert(
+                    "multiplex".to_string(),
+                    serde_json::json!({
+                        "enabled": true,
+                        "protocol": "smux",
+                        "max_connections": 4,
+                        "min_streams": 4,
+                        "max_streams": 32,
+                        "padding": true
+                    }),
+                );
+            }
+        }
+
         // If TLS is enabled, ensure a default ALPN is specified if missing (default to "http/1.1")
         if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
             let enabled = tls
@@ -152,17 +257,27 @@ pub fn generate_singbox_config(
             }
         }
 
+        // Inject TCP Keep-Alive settings at the root level of dialing outbounds (as supported in sing-box v1.13.14)
+        let outbound_type = node.outbound_type.as_str();
+        if outbound_type != "selector" && outbound_type != "block" && outbound_type != "dns" {
+            obj.insert("tcp_keep_alive".to_string(), serde_json::json!("30s"));
+            obj.insert(
+                "tcp_keep_alive_interval".to_string(),
+                serde_json::json!("15s"),
+            );
+        }
+
         final_outbounds.push(Value::Object(obj));
     }
 
     // Unconditionally push the standard direct outbound (required for dns detour)
-    let mut direct = HashMap::new();
-    direct.insert("type".to_string(), Value::String("direct".to_string()));
-    direct.insert("tag".to_string(), Value::String("direct".to_string()));
-    final_outbounds.push(Value::Object(direct.into_iter().collect()));
-
-    // Unconditionally push block outbound
-    final_outbounds.push(serde_json::json!({ "type": "block", "tag": "block" }));
+    let direct = serde_json::json!({
+        "type": "direct",
+        "tag": "direct",
+        "tcp_keep_alive": "30s",
+        "tcp_keep_alive_interval": "15s"
+    });
+    final_outbounds.push(direct);
 
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
@@ -205,8 +320,6 @@ pub fn generate_singbox_config(
             "strict_route": tun_settings.strict_route,
             "stack": tun_settings.stack,
             "route_exclude_address": route_exclude_addresses,
-            "sniff": tun_settings.sniff_enabled,
-            "sniff_override_destination": tun_settings.sniff_override_destination
         });
         if tun_settings.mtu != 0 {
             let safe_mtu = if tun_settings.mtu == 1500 {
@@ -226,16 +339,50 @@ pub fn generate_singbox_config(
     }
 
     // Build route rules incorporating user routing rules from routing.json
-    let route_rules =
-        crate::config::build_route_rules(tun_settings.bypass_lan, user_rules, rule_sets);
+    let route_rules = crate::config::build_route_rules(
+        tun_settings.bypass_lan,
+        tun_settings.sniff_enabled,
+        user_rules,
+        rule_sets,
+        geosite_db_exists,
+        geoip_db_exists,
+    );
 
-    let route_section = serde_json::json!({
+    let mut route_section = serde_json::json!({
         "rules": route_rules,
         "final": tun_settings.final_outbound,
-        "auto_detect_interface": true
+        "auto_detect_interface": true,
+        "default_domain_resolver": "local-dns"
     });
 
-    let mut dns_rules = vec![serde_json::json!({ "outbound": "direct", "server": "local-dns" })];
+    if !rule_sets.is_empty() {
+        let mut singbox_rule_sets = Vec::new();
+        for rs in rule_sets {
+            let mut set_val = serde_json::json!({
+                "tag": rs.tag,
+                "type": rs.set_type,
+                "format": rs.format,
+            });
+            if rs.set_type == "remote" {
+                if let Some(ref url) = rs.url {
+                    set_val["url"] = serde_json::json!(url);
+                }
+                if !rs.update_interval.trim().is_empty() {
+                    set_val["update_interval"] = serde_json::json!(rs.update_interval);
+                }
+                // Detour remote rule-set downloads through the proxy outbound to support zero-package carriers
+                set_val["download_detour"] = serde_json::json!("proxy");
+            } else if rs.set_type == "local" {
+                if let Some(ref path) = rs.file_path {
+                    set_val["path"] = serde_json::json!(path);
+                }
+            }
+            singbox_rule_sets.push(set_val);
+        }
+        route_section["rule_set"] = serde_json::json!(singbox_rule_sets);
+    }
+
+    let mut dns_rules = Vec::new();
 
     let server_domains: Vec<String> = server_hosts
         .iter()
@@ -261,13 +408,15 @@ pub fn generate_singbox_config(
     };
 
     let mut dns_servers = vec![
-        serde_json::json!({ "tag": "local-dns", "address": local_dns_addr, "detour": "direct" }),
-        serde_json::json!({ "tag": "remote-dns", "address": tun_settings.primary_dns, "detour": "proxy" }),
+        parse_dns_server("local-dns", &local_dns_addr, Some("direct")),
+        parse_dns_server("remote-dns", &tun_settings.primary_dns, Some("proxy")),
     ];
     if !is_fakeip && !tun_settings.fallback_dns.trim().is_empty() {
-        dns_servers.push(serde_json::json!({
-            "tag": "remote-dns-fallback", "address": tun_settings.fallback_dns, "detour": "proxy"
-        }));
+        dns_servers.push(parse_dns_server(
+            "remote-dns-fallback",
+            &tun_settings.fallback_dns,
+            Some("proxy"),
+        ));
     }
     if is_fakeip {
         if !tun_settings.fakeip_filter.trim().is_empty() {
@@ -282,14 +431,23 @@ pub fn generate_singbox_config(
                     "server": "local-dns"
                 });
 
-                let mut geosite = Vec::new();
+                let mut rule_sets = Vec::new();
                 let mut domain = Vec::new();
                 let mut domain_suffix = Vec::new();
                 let mut domain_keyword = Vec::new();
 
                 for f in filters {
                     if f.starts_with("geosite:") {
-                        geosite.push(f.strip_prefix("geosite:").unwrap().trim().to_string());
+                        let category = f.strip_prefix("geosite:").unwrap().trim().to_string();
+                        if category == "private" {
+                            for suffix in
+                                &[".lan", ".local", ".internal", ".home.arpa", "localhost"]
+                            {
+                                domain_suffix.push(suffix.to_string());
+                            }
+                        } else {
+                            rule_sets.push(format!("geosite-{}", category));
+                        }
                     } else if f.starts_with("domain:") {
                         domain.push(f.strip_prefix("domain:").unwrap().trim().to_string());
                     } else if f.starts_with("keyword:") {
@@ -300,8 +458,8 @@ pub fn generate_singbox_config(
                 }
 
                 let mut has_matcher = false;
-                if !geosite.is_empty() {
-                    rule["geosite"] = serde_json::json!(geosite);
+                if !rule_sets.is_empty() {
+                    rule["rule_set"] = serde_json::json!(rule_sets);
                     has_matcher = true;
                 }
                 if !domain.is_empty() {
@@ -323,7 +481,13 @@ pub fn generate_singbox_config(
             }
         }
 
-        dns_servers.push(serde_json::json!({ "tag": "fakeip-dns", "address": "fakeip" }));
+        // Add the fakeip DNS server in type-based format (sing-box 1.12.0+ standard)
+        dns_servers.push(serde_json::json!({
+            "tag": "fakeip-dns",
+            "type": "fakeip",
+            "inet4_range": tun_settings.fakeip_range,
+            "inet6_range": "fc00::/18"
+        }));
         dns_rules.push(serde_json::json!({
             "query_type": ["A", "AAAA"],
             "server": "fakeip-dns"
@@ -338,19 +502,11 @@ pub fn generate_singbox_config(
             "final": "remote-dns"
         });
         section["disable_cache"] = serde_json::json!(!tun_settings.dns_caching);
-        if is_fakeip {
-            let fakeip_obj = serde_json::json!({
-                "enabled": true,
-                "inet4_range": tun_settings.fakeip_range,
-                "inet6_range": "fc00::/18"
-            });
-            section["fakeip"] = fakeip_obj;
-        }
         section
     } else {
         let mut section = serde_json::json!({
             "servers": [
-                { "tag": "local-dns", "address": local_dns_addr, "detour": "direct" }
+                parse_dns_server("local-dns", &local_dns_addr, Some("direct"))
             ],
             "rules": dns_rules
         });
@@ -399,6 +555,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
         let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
@@ -419,6 +576,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
         let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
@@ -478,6 +636,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
 
@@ -494,5 +653,116 @@ mod tests {
         // Check that "h2" has been stripped
         assert!(alpn.iter().all(|v| v.as_str() != Some("h2")));
         assert!(alpn.iter().any(|v| v.as_str() == Some("http/1.1")));
+    }
+
+    #[test]
+    fn test_generate_singbox_config_with_rule_sets() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "direct".to_string(),
+            tag: "direct".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        let tun = TunSettings::default();
+        let rule_sets = vec![
+            crate::config::rules::RuleSet {
+                id: "rs1".into(),
+                tag: "geosite-youtube".into(),
+                set_type: "remote".into(),
+                format: "binary".into(),
+                url: Some("https://example.com/youtube.srs".into()),
+                file_path: None,
+                update_interval: "1d".into(),
+            },
+            crate::config::rules::RuleSet {
+                id: "rs2".into(),
+                tag: "local-blocklist".into(),
+                set_type: "local".into(),
+                format: "source".into(),
+                url: None,
+                file_path: Some("C:/rules.json".into()),
+                update_interval: "".into(),
+            },
+        ];
+
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &rule_sets,
+            std::path::Path::new(""),
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let rule_sets_arr = config["route"]["rule_set"].as_array().unwrap();
+        assert_eq!(rule_sets_arr.len(), 2);
+
+        let rs1 = &rule_sets_arr[0];
+        assert_eq!(rs1["tag"].as_str().unwrap(), "geosite-youtube");
+        assert_eq!(rs1["type"].as_str().unwrap(), "remote");
+        assert_eq!(rs1["format"].as_str().unwrap(), "binary");
+        assert_eq!(
+            rs1["url"].as_str().unwrap(),
+            "https://example.com/youtube.srs"
+        );
+        assert_eq!(rs1["update_interval"].as_str().unwrap(), "1d");
+        assert_eq!(rs1["download_detour"].as_str().unwrap(), "proxy");
+
+        let rs2 = &rule_sets_arr[1];
+        assert_eq!(rs2["tag"].as_str().unwrap(), "local-blocklist");
+        assert_eq!(rs2["type"].as_str().unwrap(), "local");
+        assert_eq!(rs2["format"].as_str().unwrap(), "source");
+        assert_eq!(rs2["path"].as_str().unwrap(), "C:/rules.json");
+    }
+
+    #[test]
+    fn test_generate_singbox_config_multiplex() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "vless".to_string(),
+            tag: "Zoom-SG".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        let mut tun = TunSettings::default();
+        tun.multiplex = true;
+
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let outbounds_arr = config["outbounds"].as_array().unwrap();
+
+        let vless_outbound = outbounds_arr
+            .iter()
+            .find(|o| o["tag"].as_str() == Some("Zoom-SG"))
+            .expect("Should find VLESS outbound");
+
+        let multiplex = &vless_outbound["multiplex"];
+        assert_eq!(multiplex["enabled"].as_bool().unwrap(), true);
+        assert_eq!(multiplex["protocol"].as_str().unwrap(), "smux");
+        assert_eq!(multiplex["max_connections"].as_u64().unwrap(), 4);
+
+        assert_eq!(vless_outbound["tcp_keep_alive"].as_str().unwrap(), "30s");
+        assert_eq!(
+            vless_outbound["tcp_keep_alive_interval"].as_str().unwrap(),
+            "15s"
+        );
     }
 }

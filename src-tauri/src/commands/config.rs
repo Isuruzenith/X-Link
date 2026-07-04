@@ -124,6 +124,7 @@ pub async fn import_config(
     let tun_settings = load_tun_settings(&app);
     let mixed_port = state.get_settings().mixed_port;
     let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     let generated_config = generate_singbox_config(
         mixed_port,
@@ -135,6 +136,7 @@ pub async fn import_config(
         None,
         &user_rules,
         &rule_sets,
+        &app_data_dir,
     )?;
 
     // 4. Early guard: validate generated JSON has required structure before
@@ -562,4 +564,63 @@ pub fn get_active_profile_id(app: &tauri::AppHandle) -> Result<Option<String>, S
         }
     }
     Ok(None)
+}
+
+#[tauri::command]
+pub async fn update_rule_set(
+    app: tauri::AppHandle,
+    rule_set_id: String,
+    url: String,
+) -> Result<(), String> {
+    // 1. Load rule sets from file to find tag and format
+    let (_, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
+    let rule_set = rule_sets
+        .iter()
+        .find(|rs| rs.id == rule_set_id)
+        .ok_or_else(|| format!("Rule set with ID '{}' not found", rule_set_id))?;
+
+    let tag = &rule_set.tag;
+    let format = &rule_set.format;
+
+    // 2. Fetch the file from the URL
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to build http client: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .header("User-Agent", "xlink-client")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download rule set: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Server returned status error: {}",
+            response.status()
+        ));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response bytes: {}", e))?;
+
+    // 3. Save it to app_data_dir/rule_set/<tag>.<extension>
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut rule_set_dir = app_data_dir.clone();
+    rule_set_dir.push("rule_set");
+    std::fs::create_dir_all(&rule_set_dir)
+        .map_err(|e| format!("Failed to create rule_set directory: {}", e))?;
+
+    let extension = if format == "binary" { "srs" } else { "json" };
+    let mut dest_path = rule_set_dir;
+    dest_path.push(format!("{}.{}", tag, extension));
+
+    std::fs::write(&dest_path, &bytes)
+        .map_err(|e| format!("Failed to write rule-set cache file: {}", e))?;
+
+    Ok(())
 }

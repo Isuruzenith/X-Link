@@ -119,11 +119,30 @@ export default function App() {
 
     // Listen to sing-box logs emitted by Rust backend
     const unlistenLog = listen<string>('sing-box-log', (e) => {
-      const line = e.payload.trim();
+      let line = e.payload.trim();
       if (!line) return;
+      // eslint-disable-next-line no-control-regex
+      const ansiRegex = new RegExp('\\x1B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])', 'g');
+      line = line.replace(ansiRegex, '');
       let type: 'info' | 'warn' | 'error' | 'system' = 'info';
-      if (line.toLowerCase().includes('warn')) type = 'warn';
-      else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) type = 'error';
+      if (line.toLowerCase().includes('warn')) {
+        type = 'warn';
+      } else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) {
+        // Downgrade harmless normal/idle WebSocket, telemetry closures, and database warnings to 'info' to avoid user panic
+        const isHarmlessClose = 
+          line.toLowerCase().includes('ws closed: 1000') ||
+          line.toLowerCase().includes('wsarecv: an existing connection was forcibly closed') ||
+          line.toLowerCase().includes('wsarecv: a connection attempt failed') ||
+          line.toLowerCase().includes('connection download closed: raw-read') ||
+          line.toLowerCase().includes('failed to initialize geosite') ||
+          line.toLowerCase().includes('failed to initialize geoip');
+          
+        if (isHarmlessClose) {
+          type = 'info';
+        } else {
+          type = 'error';
+        }
+      }
       pushLog(type, line);
     });
 
@@ -169,7 +188,7 @@ export default function App() {
       unlistenStatus.then((f) => f());
       unlistenSettings.then((f) => f());
     };
-  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
+  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, initStats, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
 
   // ── PORT CONFLICT DETECTOR ─────────────────────────────────────────────────
   useEffect(() => {
