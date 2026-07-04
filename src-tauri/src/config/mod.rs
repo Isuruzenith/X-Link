@@ -78,7 +78,7 @@ pub fn build_route_rules(
     bypass_lan: bool,
     sniff_enabled: bool,
     user_rules: &[crate::config::rules::RoutingRule],
-    rule_sets: &[crate::config::rules::RuleSet],
+    _rule_sets: &[crate::config::rules::RuleSet],
     geosite_db_exists: bool,
     geoip_db_exists: bool,
 ) -> Vec<Value> {
@@ -110,14 +110,6 @@ pub fn build_route_rules(
                 rules.push(json_rule);
             }
         }
-    }
-
-    // Rule-set references (injected as individual rule entries)
-    for rs in rule_sets {
-        rules.push(serde_json::json!({
-            "rule_set": [rs.tag],
-            "outbound": "direct"
-        }));
     }
 
     rules
