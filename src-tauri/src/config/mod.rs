@@ -256,25 +256,116 @@ fn get_system_dns_address() -> Option<String> {
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
+
+    struct AdapterInfo {
+        _name: String,
+        is_virtual: bool,
+        dns_servers: Vec<String>,
+        has_gateway: bool,
+    }
+
+    let mut adapters = Vec::new();
+    let mut current_adapter: Option<AdapterInfo> = None;
     let mut in_dns_block = false;
+
     for line in text.lines() {
-        if line.contains("DNS Servers") {
-            in_dns_block = true;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
         }
 
-        if in_dns_block {
-            if let Some(ip) = extract_ip_from_line(line) {
-                // Ignore X-Link TUN virtual DNS address to prevent circular routing loops
-                if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
-                    return Some(ip);
-                }
+        // A line starting with no whitespace indicates the start of a new section/adapter
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            if let Some(adapter) = current_adapter.take() {
+                adapters.push(adapter);
             }
+            in_dns_block = false;
+            let section_name = trimmed.trim_end_matches(':').to_string();
+            current_adapter = Some(AdapterInfo {
+                _name: section_name,
+                is_virtual: false,
+                dns_servers: Vec::new(),
+                has_gateway: false,
+            });
+            continue;
+        }
 
-            if !line.starts_with(' ') && !line.starts_with('\t') && !line.contains("DNS Servers") {
-                in_dns_block = false;
+        if let Some(ref mut adapter) = current_adapter {
+            if line.contains("Description") {
+                if let Some(desc) = line.split(':').nth(1) {
+                    let desc_trimmed = desc.trim().to_string();
+                    let desc_lower = desc_trimmed.to_lowercase();
+                    // Identify virtual/TAP adapters
+                    if desc_lower.contains("tap")
+                        || desc_lower.contains("virtual")
+                        || desc_lower.contains("vpn")
+                        || desc_lower.contains("vmware")
+                        || desc_lower.contains("virtualbox")
+                        || desc_lower.contains("hyper-v")
+                        || desc_lower.contains("loopback")
+                        || desc_lower.contains("pseudo")
+                    {
+                        adapter.is_virtual = true;
+                    }
+                }
+            } else if line.contains("Default Gateway") {
+                if let Some(gw) = line.split(':').nth(1) {
+                    let gw_trimmed = gw.trim();
+                    if !gw_trimmed.is_empty() && gw_trimmed != "0.0.0.0" {
+                        adapter.has_gateway = true;
+                    }
+                }
+            } else if line.contains("DNS Servers") {
+                in_dns_block = true;
+                if let Some(ip) = extract_ip_from_line(line) {
+                    if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
+                        adapter.dns_servers.push(ip);
+                    }
+                }
+            } else if in_dns_block {
+                if let Some(ip) = extract_ip_from_line(line) {
+                    if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
+                        adapter.dns_servers.push(ip);
+                    }
+                } else {
+                    in_dns_block = false;
+                }
             }
         }
     }
+
+    if let Some(adapter) = current_adapter {
+        adapters.push(adapter);
+    }
+
+    // Prioritize non-virtual adapters with default gateways
+    for adapter in &adapters {
+        if !adapter.is_virtual && adapter.has_gateway && !adapter.dns_servers.is_empty() {
+            return Some(adapter.dns_servers[0].clone());
+        }
+    }
+
+    // Prioritize non-virtual adapters with DNS servers
+    for adapter in &adapters {
+        if !adapter.is_virtual && !adapter.dns_servers.is_empty() {
+            return Some(adapter.dns_servers[0].clone());
+        }
+    }
+
+    // Prioritize virtual adapters with default gateways
+    for adapter in &adapters {
+        if adapter.is_virtual && adapter.has_gateway && !adapter.dns_servers.is_empty() {
+            return Some(adapter.dns_servers[0].clone());
+        }
+    }
+
+    // Fallback to any adapter with DNS servers
+    for adapter in &adapters {
+        if !adapter.dns_servers.is_empty() {
+            return Some(adapter.dns_servers[0].clone());
+        }
+    }
+
     None
 }
 
