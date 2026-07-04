@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { storeHelper, type Profile, type ProxyNode } from '../utils/store';
+import { safeRandomUUID } from '../utils/uuid';
 import { useLogStore } from './logStore';
 import { useToastStore } from './toastStore';
 import { useConnectionStore } from './connectionStore';
@@ -313,7 +314,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({ isImporting: true });
       const fileName = path.split(/[\\/]/).pop() || 'Imported Config';
       const name = get().importName.trim() || fileName.replace(/\.[^/.]+$/, '');
-      const profileId = crypto.randomUUID();
+      const profileId = safeRandomUUID();
 
       const result = await invoke<ImportResult>('import_config', { filePath: path, name, profileId });
 
@@ -363,7 +364,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
     try {
       const name = importName.trim() || 'My Config';
-      const profileId = crypto.randomUUID();
+      const profileId = safeRandomUUID();
 
       // Detect if the content is a subscription URL
       const isUrl = importContent.trim().startsWith('http://') || importContent.trim().startsWith('https://');
