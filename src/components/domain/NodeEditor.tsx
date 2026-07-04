@@ -460,7 +460,18 @@ export function NodeEditor() {
                     </div>
                     <div className="form-group">
                       <label className="form-label">ALPN</label>
-                      <Inp value={store.editAlpn} onChange={(v) => store.setField('editAlpn', v)} placeholder="h2, http/1.1" mono />
+                      <Sel
+                        value={store.editAlpn}
+                        onChange={(v) => store.setField('editAlpn', v)}
+                        options={[
+                          { value: 'http/1.1', label: 'http/1.1 (Default HTTP)' },
+                          { value: 'h2', label: 'h2 (HTTP/2 Only)' },
+                          { value: 'h2, http/1.1', label: 'h2, http/1.1 (HTTP/2 & HTTP/1.1)' },
+                          { value: 'h3', label: 'h3 (HTTP/3 Only)' },
+                          { value: 'h2, h3, http/1.1', label: 'h2, h3, http/1.1 (All Protocols)' },
+                          { value: '', label: 'None / Auto' }
+                        ]}
+                      />
                     </div>
                   </div>
                   <div className="editor-checkbox-row" style={{ marginTop: '8px' }}>

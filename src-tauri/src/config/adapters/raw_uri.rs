@@ -614,9 +614,9 @@ mod tests {
         );
 
         let tls = node.fields.get("tls").unwrap().as_object().unwrap();
-        assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert!(tls.get("enabled").unwrap().as_bool().unwrap());
         assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "aka.ms");
-        assert_eq!(tls.get("insecure").unwrap().as_bool().unwrap(), true);
+        assert!(tls.get("insecure").unwrap().as_bool().unwrap());
         assert_eq!(
             tls.get("alpn").unwrap().as_array().unwrap()[0]
                 .as_str()
@@ -665,7 +665,7 @@ mod tests {
         );
 
         let tls = vmess.fields.get("tls").unwrap().as_object().unwrap();
-        assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert!(tls.get("enabled").unwrap().as_bool().unwrap());
         assert_eq!(
             tls.get("server_name").unwrap().as_str().unwrap(),
             "sni.host"

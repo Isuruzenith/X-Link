@@ -73,6 +73,7 @@ export function RoutingView() {
     setRuleSetForm,
     saveRoutingRule,
     deleteRoutingRule,
+    toggleRoutingRuleEnabled,
     saveRuleSet,
     deleteRuleSet,
     updateRuleSet,
@@ -302,6 +303,7 @@ export function RoutingView() {
           <div className="rules-table">
             <div className="rules-table-header">
               <span style={{ width: '28px' }}>#</span>
+              <span style={{ width: '50px' }}>Active</span>
               <span style={{ flex: '0 0 140px' }}>Type</span>
               <span style={{ flex: 1 }}>Value</span>
               <span style={{ flex: '0 0 100px' }}>Outbound</span>
@@ -309,8 +311,14 @@ export function RoutingView() {
               <span style={{ flex: '0 0 60px', textAlign: 'right' }}>Actions</span>
             </div>
             {routingRules.map((rule, i) => (
-              <div key={rule.id} className="rules-table-row">
+              <div key={rule.id} className="rules-table-row" style={rule.enabled === false ? { opacity: 0.4 } : undefined}>
                 <span style={{ width: '28px', color: 'var(--text-low)', fontSize: '11px' }}>{i + 1}</span>
+                <span style={{ width: '50px', display: 'flex', alignItems: 'center' }}>
+                  <Toggle
+                    checked={rule.enabled !== false}
+                    onChange={(checked) => toggleRoutingRuleEnabled(rule.id, checked)}
+                  />
+                </span>
                 <span style={{ flex: '0 0 140px' }}>
                   <span className="type-chip" style={{ fontFamily: 'var(--font-mono)' }}>{rule.type}{rule.invert ? ' !' : ''}</span>
                 </span>

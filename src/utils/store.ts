@@ -40,6 +40,7 @@ export interface RoutingRule {
   outbound: OutboundAction;
   invert: boolean;
   notes?: string;
+  enabled?: boolean;
 }
 
 export interface RuleSet {
@@ -105,6 +106,15 @@ export interface ProxyNode {
   [key: string]: unknown;
 }
 
+export interface NodeUsageStats {
+  totalUploadBytes: number;
+  totalDownloadBytes: number;
+  connectionCount: number;
+  firstUsedAt?: number;
+  lastUsedAt?: number;
+}
+
+
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 export interface Settings {
   // Core behavior
@@ -117,6 +127,7 @@ export interface Settings {
   socksPort: number;
   mixedPort: number;
   wifiSharing: boolean;
+  useSeparatePorts: boolean;
 
   // TUN Advanced
   tunAutoRoute: boolean;
@@ -168,12 +179,13 @@ const DEFAULT_SETTINGS: Settings = {
   socksPort: 7891,
   mixedPort: 7892,
   wifiSharing: false,
+  useSeparatePorts: false,
 
   tunAutoRoute: true,
   tunAutoRedirect: false,
   tunStrictRoute: true,
   tunStack: 'gvisor',
-  tunMtu: 1500,
+  tunMtu: 1400,
   tunEndpointIndependentNat: false,
 
   sniffEnabled: true,
@@ -215,6 +227,7 @@ const DEFAULT_RULE_SETS: RuleSet[] = [];
 let settingsStore: Store | null = null;
 let profilesStore: Store | null = null;
 let routingStore: Store | null = null;
+let statsStore: Store | null = null;
 
 async function getSettingsStore(): Promise<Store> {
   if (!settingsStore) settingsStore = await Store.load('settings.json');
@@ -227,6 +240,10 @@ async function getProfilesStore(): Promise<Store> {
 async function getRoutingStore(): Promise<Store> {
   if (!routingStore) routingStore = await Store.load('routing.json');
   return routingStore;
+}
+async function getStatsStore(): Promise<Store> {
+  if (!statsStore) statsStore = await Store.load('stats.json');
+  return statsStore;
 }
 
 export const storeHelper = {
@@ -414,6 +431,26 @@ export const storeHelper = {
       }
     } catch (e) {
       console.error('Failed to migrate legacy config:', e);
+    }
+  },
+
+  // ── SERVER STATS ──
+  async getStats(): Promise<Record<string, NodeUsageStats>> {
+    try {
+      const store = await getStatsStore();
+      return (await store.get<Record<string, NodeUsageStats>>('stats')) ?? {};
+    } catch {
+      return {};
+    }
+  },
+
+  async saveStats(stats: Record<string, NodeUsageStats>): Promise<void> {
+    try {
+      const store = await getStatsStore();
+      await store.set('stats', stats);
+      await store.save();
+    } catch (e) {
+      console.error('Failed to save stats:', e);
     }
   },
 };

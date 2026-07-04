@@ -53,6 +53,7 @@ pub struct UserSettings {
     pub final_outbound: String,
     pub bypass_lan: bool,
     pub dns_address: String,
+    pub use_separate_ports: bool,
 }
 
 impl Default for UserSettings {
@@ -92,6 +93,7 @@ impl Default for UserSettings {
             final_outbound: "proxy".to_string(),
             bypass_lan: true,
             dns_address: "".to_string(),
+            use_separate_ports: false,
         }
     }
 }
@@ -256,6 +258,9 @@ impl ProxyState {
                         }
                         if let Some(v) = val.get("dnsAddress").and_then(|v| v.as_str()) {
                             default_s.dns_address = v.to_string();
+                        }
+                        if let Some(v) = val.get("useSeparatePorts").and_then(|v| v.as_bool()) {
+                            default_s.use_separate_ports = v;
                         }
                         settings = default_s;
                     }

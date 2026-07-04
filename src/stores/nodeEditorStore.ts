@@ -81,7 +81,7 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
   editTlsEnabled: false,
   editAllowInsecure: false,
   editServerName: '',
-  editAlpn: '',
+  editAlpn: 'http/1.1',
   editRealityEnabled: false,
   editFingerprint: 'chrome',
   editPublicKey: '',
@@ -140,7 +140,9 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
       editTlsEnabled: !!node.tls?.enabled,
       editAllowInsecure: !!node.tls?.insecure,
       editServerName: node.tls?.server_name || '',
-      editAlpn: node.tls?.alpn?.join(', ') || '',
+      editAlpn: node.tls?.alpn
+        ? node.tls.alpn.map((s) => s.trim()).filter(Boolean).sort().join(', ')
+        : 'http/1.1',
       editRealityEnabled: !!node.tls?.reality?.enabled,
       editFingerprint: node.tls?.utls?.fingerprint || 'chrome',
       editPublicKey: node.tls?.reality?.public_key || '',

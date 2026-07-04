@@ -172,7 +172,7 @@ mod tests {
         let mut rule = make_rule("geoip", "cn", "proxy");
         rule.invert = true;
         let json = build_singbox_rule(&rule).unwrap();
-        assert_eq!(json["invert"].as_bool().unwrap(), true);
+        assert!(json["invert"].as_bool().unwrap());
     }
 
     #[test]

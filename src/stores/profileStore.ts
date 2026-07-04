@@ -6,6 +6,7 @@ import { useConnectionStore } from './connectionStore';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useSettingsStore } from './settingsStore';
 
 interface ImportResult {
   id: string;
@@ -21,7 +22,7 @@ interface ProfileState {
   selectedProfileId: string | null;
   nodes: ProxyNode[];
   selectedNodeTag: string | null;
-  nodeGeoCache: Record<string, string>;
+  nodeGeoCache: Record<string, any>;
   activatingNodeTag: string | null;
 
   // Import form state
@@ -251,7 +252,13 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         await storeHelper.setActiveProfileId(targetProfileId);
         set({ activeProfileId: targetProfileId });
       } else if (connectionStore.isConnected) {
-        logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
+        const apiEnabled = useSettingsStore.getState().settings.apiEnabled;
+        if (!apiEnabled) {
+          logStore.pushSystemLog(`Clash API is disabled. Reconnecting to switch active node to "${node.tag}"...`);
+          useToastStore.getState().addToast('warning', `Clash API is disabled. Reconnecting to switch server to "${node.tag}"...`, 'Reconnecting');
+        } else {
+          logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
+        }
         await invoke('switch_node_hot', { tag: node.tag });
         logStore.pushSystemLog(`Successfully switched to "${node.tag}".`);
       }
@@ -514,7 +521,15 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       if (data && data.countryCode && data.countryCode.length === 2) {
         const code = data.countryCode.toLowerCase();
         set((state) => ({
-          nodeGeoCache: { ...state.nodeGeoCache, [server]: code }
+          nodeGeoCache: { 
+            ...state.nodeGeoCache, 
+            [server]: {
+              countryCode: code,
+              countryName: data.countryName || '',
+              cityName: data.cityName || '',
+              regionName: data.regionName || ''
+            }
+          }
         }));
       } else {
         throw new Error('Invalid response');
@@ -523,7 +538,15 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       // Fallback to tag parsing
       const fallbackCode = getCountryCode(tag);
       set((state) => ({
-        nodeGeoCache: { ...state.nodeGeoCache, [server]: fallbackCode || 'unknown' }
+        nodeGeoCache: { 
+          ...state.nodeGeoCache, 
+          [server]: {
+            countryCode: fallbackCode || 'unknown',
+            countryName: fallbackCode ? fallbackCode.toUpperCase() : 'Unknown',
+            cityName: '',
+            regionName: ''
+          }
+        }
       }));
     }
   },

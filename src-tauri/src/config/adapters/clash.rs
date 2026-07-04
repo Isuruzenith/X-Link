@@ -311,11 +311,11 @@ proxies:
         assert_eq!(outbound.tag, "Vless Reality Node");
 
         let tls = outbound.fields.get("tls").unwrap().as_object().unwrap();
-        assert_eq!(tls.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert!(tls.get("enabled").unwrap().as_bool().unwrap());
         assert_eq!(tls.get("server_name").unwrap().as_str().unwrap(), "aka.ms");
 
         let reality = tls.get("reality").unwrap().as_object().unwrap();
-        assert_eq!(reality.get("enabled").unwrap().as_bool().unwrap(), true);
+        assert!(reality.get("enabled").unwrap().as_bool().unwrap());
         assert_eq!(
             reality.get("public_key").unwrap().as_str().unwrap(),
             "pbkkey"

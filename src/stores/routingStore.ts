@@ -24,6 +24,7 @@ interface RoutingState {
   setRuleSetForm: (form: Partial<Omit<RuleSet, 'id'>>) => void;
   saveRoutingRule: () => Promise<void>;
   deleteRoutingRule: (id: string) => Promise<void>;
+  toggleRoutingRuleEnabled: (id: string, enabled: boolean) => Promise<void>;
   saveRuleSet: () => Promise<void>;
   deleteRuleSet: (id: string) => Promise<void>;
   updateRuleSet: (rs: RuleSet) => Promise<void>;
@@ -72,6 +73,14 @@ export const useRoutingStore = create<RoutingState>((set, get) => ({
 
   deleteRoutingRule: async (id) => {
     const updated = get().routingRules.filter((r) => r.id !== id);
+    set({ routingRules: updated });
+    await storeHelper.saveRoutingRules(updated);
+  },
+
+  toggleRoutingRuleEnabled: async (id, enabled) => {
+    const updated = get().routingRules.map((r) =>
+      r.id === id ? { ...r, enabled } : r
+    );
     set({ routingRules: updated });
     await storeHelper.saveRoutingRules(updated);
   },

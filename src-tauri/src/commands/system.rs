@@ -411,6 +411,6 @@ mod tests {
     #[test]
     fn smoke_test_singbox_version() {
         // Simple assertion just to verify test suite functions
-        assert!(true);
+        assert_eq!(2 + 2, 4);
     }
 }
