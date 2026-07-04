@@ -1,6 +1,5 @@
 use serde_json::Value;
 use std::net::IpAddr;
-use std::time::Duration;
 #[cfg(target_os = "windows")]
 use std::process::Command;
 
@@ -16,7 +15,6 @@ pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -
         "192.168.0.0/16".to_string(),
         "127.0.0.0/8".to_string(),
         "169.254.0.0/16".to_string(),
-        "::1/128".to_string(),
         "fc00::/7".to_string(),
         "fe80::/10".to_string(),
     ];
@@ -37,100 +35,6 @@ pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -
     addresses
 }
 
-pub fn is_fake_ip(ip: IpAddr) -> bool {
-    if let IpAddr::V4(ipv4) = ip {
-        let octets = ipv4.octets();
-        octets[0] == 198 && (octets[1] == 18 || octets[1] == 19)
-    } else {
-        false
-    }
-}
-
-pub async fn resolve_hostname_doh(host: &str) -> Option<IpAddr> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Some(ip);
-    }
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .ok()?;
-
-    // Try Cloudflare DoH first
-    let url = format!("https://cloudflare-dns.com/dns-query?name={}&type=A", host);
-    if let Ok(response) = client
-        .get(&url)
-        .header("accept", "application/dns-json")
-        .send()
-        .await
-    {
-        #[derive(serde::Deserialize)]
-        struct DnsAnswer {
-            data: String,
-        }
-        #[derive(serde::Deserialize)]
-        struct DnsResponse {
-            #[serde(rename = "Answer")]
-            answer: Option<Vec<DnsAnswer>>,
-        }
-
-        if let Ok(dns_res) = response.json::<DnsResponse>().await {
-            if let Some(answers) = dns_res.answer {
-                for ans in answers {
-                    if let Ok(ip) = ans.data.trim().parse::<IpAddr>() {
-                        if !is_fake_ip(ip) {
-                            return Some(ip);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback to Google DoH
-    let url = format!("https://dns.google/resolve?name={}&type=A", host);
-    if let Ok(response) = client.get(&url).send().await {
-        #[derive(serde::Deserialize)]
-        struct DnsAnswer {
-            data: String,
-        }
-        #[derive(serde::Deserialize)]
-        struct DnsResponse {
-            #[serde(rename = "Answer")]
-            answer: Option<Vec<DnsAnswer>>,
-        }
-
-        if let Ok(dns_res) = response.json::<DnsResponse>().await {
-            if let Some(answers) = dns_res.answer {
-                for ans in answers {
-                    if let Ok(ip) = ans.data.trim().parse::<IpAddr>() {
-                        if !is_fake_ip(ip) {
-                            return Some(ip);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
-}
-
-pub fn resolve_hostname_doh_sync(host: &str) -> Option<IpAddr> {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        tokio::task::block_in_place(|| {
-            handle.block_on(resolve_hostname_doh(host))
-        })
-    } else {
-        if let Ok(rt) = tokio::runtime::Runtime::new() {
-            rt.block_on(resolve_hostname_doh(host))
-        } else {
-            None
-        }
-    }
-}
-
 pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
     use std::net::ToSocketAddrs;
     let mut ip_strings = Vec::new();
@@ -146,26 +50,10 @@ pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
                 IpAddr::V6(addr) => ip_strings.push(format!("{}/128", addr)),
             }
         } else {
-            // Try DoH first to bypass FakeIP
-            if let Some(ip) = resolve_hostname_doh_sync(trimmed) {
-                if !is_fake_ip(ip) {
-                    match ip {
-                        IpAddr::V4(addr) => ip_strings.push(format!("{}/32", addr)),
-                        IpAddr::V6(addr) => ip_strings.push(format!("{}/128", addr)),
-                    }
-                    continue;
-                }
-            }
-
-            // Fallback to system resolver (but skip FakeIPs)
             let host_port = format!("{}:443", trimmed);
             if let Ok(addrs) = host_port.to_socket_addrs() {
                 for addr in addrs {
-                    let ip = addr.ip();
-                    if is_fake_ip(ip) {
-                        continue;
-                    }
-                    match ip {
+                    match addr.ip() {
                         IpAddr::V4(a) => {
                             let cidr = format!("{}/32", a);
                             if !ip_strings.contains(&cidr) {

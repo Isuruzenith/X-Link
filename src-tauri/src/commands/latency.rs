@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 #[derive(Serialize, Clone, Debug)]
@@ -10,11 +10,78 @@ pub struct LatencyResult {
     pub error: Option<String>,
 }
 
+/// Resolves hostname using DNS-over-HTTPS (DoH) to bypass local FakeIP interception when VPN is active.
+async fn resolve_hostname_doh(host: &str) -> Option<IpAddr> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Some(ip);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .ok()?;
+
+    // Try Cloudflare DoH first
+    let url = format!("https://cloudflare-dns.com/dns-query?name={}&type=A", host);
+    if let Ok(response) = client
+        .get(&url)
+        .header("accept", "application/dns-json")
+        .send()
+        .await
+    {
+        #[derive(serde::Deserialize)]
+        struct DnsAnswer {
+            data: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct DnsResponse {
+            #[serde(rename = "Answer")]
+            answer: Option<Vec<DnsAnswer>>,
+        }
+
+        if let Ok(dns_res) = response.json::<DnsResponse>().await {
+            if let Some(answers) = dns_res.answer {
+                for ans in answers {
+                    if let Ok(ip) = ans.data.trim().parse::<IpAddr>() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to Google DoH
+    let url = format!("https://dns.google/resolve?name={}&type=A", host);
+    if let Ok(response) = client.get(&url).send().await {
+        #[derive(serde::Deserialize)]
+        struct DnsAnswer {
+            data: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct DnsResponse {
+            #[serde(rename = "Answer")]
+            answer: Option<Vec<DnsAnswer>>,
+        }
+
+        if let Ok(dns_res) = response.json::<DnsResponse>().await {
+            if let Some(answers) = dns_res.answer {
+                for ans in answers {
+                    if let Ok(ip) = ans.data.trim().parse::<IpAddr>() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Tests TCP connection latency to a server:port pair.
 /// Returns the connection time in milliseconds or an error message.
 #[tauri::command]
 pub async fn test_node_latency(server: String, port: u16) -> Result<u32, String> {
-    let ip = match crate::config::resolve_hostname_doh(&server).await {
+    let ip = match resolve_hostname_doh(&server).await {
         Some(ip) => ip,
         None => {
             // Fallback to system resolution
@@ -23,13 +90,7 @@ pub async fn test_node_latency(server: String, port: u16) -> Result<u32, String>
                 .to_socket_addrs()
                 .map_err(|e| format!("Invalid address or DNS lookup failed: {}", e))?;
             match socket_addrs.into_iter().next() {
-                Some(sa) => {
-                    let ip = sa.ip();
-                    if crate::config::is_fake_ip(ip) {
-                        return Err("DNS lookup returned FakeIP".to_string());
-                    }
-                    ip
-                }
+                Some(sa) => sa.ip(),
                 None => return Err("DNS lookup failed".to_string()),
             }
         }
@@ -88,23 +149,14 @@ pub async fn test_all_nodes(
         }
 
         handles.push(tokio::spawn(async move {
-            let ip = match crate::config::resolve_hostname_doh(&server).await {
+            let ip = match resolve_hostname_doh(&server).await {
                 Some(ip) => Some(ip),
                 None => {
                     // Fallback to system resolution
                     let addr = format!("{}:{}", server, port);
                     addr.to_socket_addrs()
                         .ok()
-                        .and_then(|mut addrs| {
-                            addrs.next().and_then(|sa| {
-                                let ip = sa.ip();
-                                if crate::config::is_fake_ip(ip) {
-                                    None
-                                } else {
-                                    Some(ip)
-                                }
-                            })
-                        })
+                        .and_then(|mut addrs| addrs.next().map(|sa| sa.ip()))
                 }
             };
 
@@ -155,10 +207,11 @@ pub async fn test_all_nodes(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[tokio::test]
     async fn test_resolve_hostname_doh() {
-        let ip = crate::config::resolve_hostname_doh("one.one.one.one").await;
+        let ip = resolve_hostname_doh("one.one.one.one").await;
         assert!(ip.is_some());
         let ip_addr = ip.unwrap();
         assert!(ip_addr.is_ipv4() || ip_addr.is_ipv6());

@@ -49,27 +49,21 @@ export default function App() {
   // ── INITIALIZATION ─────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      // Show the window immediately for a faster perceived startup speed
+      invoke('show_window').catch(() => {});
+
       // Run schema migration before any store reads
       await migrateStores();
 
       // Parallel initialization of stores and system parameters
-      try {
-        await Promise.all([
-          initSettings(),
-          checkElevated(),
-          initProfiles(),
-          initRouting(),
-          initStats(),
-        ]);
-      } catch (e) {
-        console.error('[App] Failed to initialize stores:', e);
-      }
-
-      // Show the window once stores are initialized and UI is ready
-      invoke('show_window').catch(() => {});
-
-      // Fetch versions in the background to prevent blocking app startup
-      fetchVersions().catch(() => {});
+      await Promise.all([
+        initSettings(),
+        checkElevated(),
+        fetchVersions(),
+        initProfiles(),
+        initRouting(),
+        initStats(),
+      ]);
 
       const updatedSettings = useSettingsStore.getState().settings;
       const elevated = useSettingsStore.getState().isElevated;
