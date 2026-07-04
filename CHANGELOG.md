@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.5.0...x-link-v0.6.0) (2026-07-04)
+
+
+### Features
+
+* implement full application core with system management, configuration, routing, and node editing capabilities ([6cef87e](https://github.com/Isuruzenith/X-Link/commit/6cef87ed345a49c6f118d91b2e08020b547a65b0))
+
 ## [0.5.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.4.0...x-link-v0.5.0) (2026-07-02)
 
 
