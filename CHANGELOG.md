@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.6.0...x-link-v0.7.0) (2026-07-04)
+
+
+### Features
+
+* add sing-box configuration generator with TUN and proxy routing support ([97e719e](https://github.com/Isuruzenith/X-Link/commit/97e719edcd3d88e3c4fd90fc4ed3573d9bded069))
+* implement configurable TUN settings and dynamic Sing-box configuration generation ([456353d](https://github.com/Isuruzenith/X-Link/commit/456353d9694a29bc11252db3495e547ba46819fa))
+* implement settings management system with UI view and backend configuration support ([bad1080](https://github.com/Isuruzenith/X-Link/commit/bad1080f6aaee64e7ec0b36a5cd6e2ac5ecbd4e5))
+* implement sing-box configuration generator and core routing management services ([34466b5](https://github.com/Isuruzenith/X-Link/commit/34466b57d9055eb7efa01f9185c9812cf8b39beb))
+* migrate configuration schemas for sing-box v1.13.14 compatibility ([2989c56](https://github.com/Isuruzenith/X-Link/commit/2989c56de2577a0751f037adac050115ecdf9079))
+
+
+### Bug Fixes
+
+* remove unconditional rule-sets direct routing to allow user-defined routing rules ([b6c5993](https://github.com/Isuruzenith/X-Link/commit/b6c5993f1662657421def58bb5095db2edf9a01a))
+* resolve ESLint errors and strong type nodeGeoCache ([15e11c5](https://github.com/Isuruzenith/X-Link/commit/15e11c5793db8cee8cf435fcac1e7b625250f524))
+* route DNS queries via port 53 hijack rule to prevent direct bypass ([8eeded2](https://github.com/Isuruzenith/X-Link/commit/8eeded2a554fa1fd03a99ed3327937f590ef91cc))
+
 ## [0.6.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.5.0...x-link-v0.6.0) (2026-07-04)
 
 
