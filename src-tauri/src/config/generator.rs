@@ -87,12 +87,26 @@ pub fn generate_singbox_config(
     rule_sets: &[crate::config::rules::RuleSet],
     app_data_dir: &std::path::Path,
 ) -> Result<String, String> {
-    let geosite_db_exists = app_data_dir.join("geosite.db").exists()
-        || std::path::Path::new("geosite.db").exists()
-        || std::path::Path::new("src-tauri/geosite.db").exists();
-    let geoip_db_exists = app_data_dir.join("geoip.db").exists()
-        || std::path::Path::new("geoip.db").exists()
-        || std::path::Path::new("src-tauri/geoip.db").exists();
+    let check_and_cleanup_db = |path: &std::path::Path| -> bool {
+        if path.exists() {
+            if let Ok(metadata) = path.metadata() {
+                if metadata.len() == 0 {
+                    let _ = std::fs::remove_file(path);
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
+    };
+
+    let geosite_db_exists = check_and_cleanup_db(&app_data_dir.join("geosite.db"))
+        || check_and_cleanup_db(std::path::Path::new("geosite.db"))
+        || check_and_cleanup_db(std::path::Path::new("src-tauri/geosite.db"));
+    let geoip_db_exists = check_and_cleanup_db(&app_data_dir.join("geoip.db"))
+        || check_and_cleanup_db(std::path::Path::new("geoip.db"))
+        || check_and_cleanup_db(std::path::Path::new("src-tauri/geoip.db"));
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
         if let Some(server_val) = outbound.fields.get("server") {
