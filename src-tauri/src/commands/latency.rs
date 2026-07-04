@@ -1,6 +1,39 @@
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::Serialize;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
+use tauri::Manager;
+
+async fn query_clash_api_delay(api_port: u16, api_secret: &str, tag: &str) -> Option<u32> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .no_proxy()
+        .build()
+        .ok()?;
+
+    let encoded_tag = utf8_percent_encode(tag, NON_ALPHANUMERIC).to_string();
+    let url = format!(
+        "http://127.0.0.1:{}/proxies/{}/delay?url=http://www.gstatic.com/generate_204&timeout=2500",
+        api_port, encoded_tag
+    );
+
+    let mut request = client.get(&url);
+    if !api_secret.is_empty() {
+        request = request.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    if let Ok(response) = request.send().await {
+        #[derive(serde::Deserialize)]
+        struct DelayResponse {
+            delay: u32,
+        }
+        if let Ok(res) = response.json::<DelayResponse>().await {
+            return Some(res.delay);
+        }
+    }
+
+    None
+}
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +150,19 @@ pub async fn test_all_nodes(
     app: tauri::AppHandle,
     profile_id: String,
 ) -> Result<Vec<LatencyResult>, String> {
+    let state = app.state::<crate::state::ProxyState>();
+    let status = state.get_status();
+    let (api_enabled, api_port, api_secret) = if let Ok(settings) = state.settings.lock() {
+        (
+            settings.api_enabled,
+            settings.api_port,
+            settings.api_secret.clone(),
+        )
+    } else {
+        (false, 9090, "".to_string())
+    };
+    let is_connected = status == crate::state::ConnectionStatus::Connected;
+
     let nodes = crate::commands::config::get_profile_outbounds(app, profile_id)?;
 
     let mut handles = Vec::new();
@@ -148,7 +194,21 @@ pub async fn test_all_nodes(
             continue;
         }
 
+        let api_secret_clone = api_secret.clone();
         handles.push(tokio::spawn(async move {
+            // 1. Try Clash API if connected and enabled
+            if is_connected && api_enabled {
+                if let Some(delay) = query_clash_api_delay(api_port, &api_secret_clone, &tag).await
+                {
+                    return LatencyResult {
+                        tag,
+                        latency_ms: Some(delay),
+                        error: None,
+                    };
+                }
+            }
+
+            // 2. Fallback to direct TCP ping
             let ip = match resolve_hostname_doh(&server).await {
                 Some(ip) => Some(ip),
                 None => {

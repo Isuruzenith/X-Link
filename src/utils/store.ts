@@ -1,4 +1,5 @@
 import { Store } from '@tauri-apps/plugin-store';
+import { safeRandomUUID } from './uuid';
 
 // ── LEGACY ACTIVE CONFIG (kept for migration) ───────────────────────────────
 export interface ActiveConfig {
@@ -186,7 +187,7 @@ const DEFAULT_SETTINGS: Settings = {
   tunAutoRedirect: false,
   tunStrictRoute: true,
   tunStack: 'gvisor',
-  tunMtu: 1500,
+  tunMtu: 1400,
   tunEndpointIndependentNat: false,
 
   sniffEnabled: true,
@@ -417,7 +418,7 @@ export const storeHelper = {
       if (legacy && (!existing || existing.length === 0)) {
         const now = Date.now();
         const migratedProfile: Profile = {
-          id: crypto.randomUUID(),
+          id: safeRandomUUID(),
           name: legacy.name,
           type: 'manual',
           importedAt: legacy.importedAt,
