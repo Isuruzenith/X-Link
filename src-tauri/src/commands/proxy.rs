@@ -44,6 +44,7 @@ pub fn load_tun_settings(app: &tauri::AppHandle) -> TunSettings {
         direct_dns: s.direct_dns.clone(),
         fakeip_filter: s.fakeip_filter.clone(),
         dns_leak_protection: s.dns_leak_protection,
+        multiplex: s.multiplex,
     }
 }
 

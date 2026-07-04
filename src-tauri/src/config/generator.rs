@@ -38,6 +38,7 @@ pub struct TunSettings {
     pub direct_dns: String,
     pub fakeip_filter: String,
     pub dns_leak_protection: bool,
+    pub multiplex: bool,
 }
 
 impl Default for TunSettings {
@@ -68,6 +69,7 @@ impl Default for TunSettings {
             direct_dns: "8.8.8.8".to_string(),
             fakeip_filter: "geosite:private".to_string(),
             dns_leak_protection: true,
+            multiplex: false,
         }
     }
 }
@@ -136,6 +138,23 @@ pub fn generate_singbox_config(
 
         // Ensure type and tag are correct
         obj.insert("tag".to_string(), Value::String(node.tag.clone()));
+
+        if tun_settings.multiplex {
+            let outbound_type = node.outbound_type.as_str();
+            if outbound_type == "vless" || outbound_type == "vmess" || outbound_type == "trojan" {
+                obj.insert(
+                    "multiplex".to_string(),
+                    serde_json::json!({
+                        "enabled": true,
+                        "protocol": "smux",
+                        "max_connections": 4,
+                        "min_streams": 4,
+                        "max_streams": 32,
+                        "padding": true
+                    }),
+                );
+            }
+        }
 
         // If TLS is enabled, ensure a default ALPN is specified if missing (default to "http/1.1")
         if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
@@ -611,5 +630,44 @@ mod tests {
         assert_eq!(rs2["type"].as_str().unwrap(), "local");
         assert_eq!(rs2["format"].as_str().unwrap(), "source");
         assert_eq!(rs2["path"].as_str().unwrap(), "C:/rules.json");
+    }
+
+    #[test]
+    fn test_generate_singbox_config_multiplex() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "vless".to_string(),
+            tag: "Zoom-SG".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        let mut tun = TunSettings::default();
+        tun.multiplex = true;
+
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let outbounds_arr = config["outbounds"].as_array().unwrap();
+
+        let vless_outbound = outbounds_arr
+            .iter()
+            .find(|o| o["tag"].as_str() == Some("Zoom-SG"))
+            .expect("Should find VLESS outbound");
+
+        let multiplex = &vless_outbound["multiplex"];
+        assert_eq!(multiplex["enabled"].as_bool().unwrap(), true);
+        assert_eq!(multiplex["protocol"].as_str().unwrap(), "smux");
+        assert_eq!(multiplex["max_connections"].as_u64().unwrap(), 4);
     }
 }

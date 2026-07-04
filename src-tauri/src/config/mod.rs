@@ -127,7 +127,9 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                 inbound["address"] = serde_json::json!(["172.19.0.1/30"]);
                 inbound["auto_route"] = serde_json::json!(true);
                 inbound["strict_route"] = serde_json::json!(true);
-                inbound["stack"] = serde_json::json!("gvisor");
+                if inbound.get("stack").is_none() {
+                    inbound["stack"] = serde_json::json!("system");
+                }
                 inbound["sniff"] = serde_json::json!(true);
                 inbound["sniff_override_destination"] = serde_json::json!(true);
                 changed = true;
@@ -311,7 +313,7 @@ mod tests {
         assert_eq!(tun["address"], serde_json::json!(["172.19.0.1/30"]));
         assert_eq!(tun["auto_route"], serde_json::json!(true));
         assert_eq!(tun["strict_route"], serde_json::json!(true));
-        assert_eq!(tun["stack"], serde_json::json!("gvisor"));
+        assert_eq!(tun["stack"], serde_json::json!("system"));
         assert_eq!(tun["sniff_override_destination"], serde_json::json!(true));
     }
 
