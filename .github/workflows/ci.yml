@@ -3,10 +3,24 @@ name: Continuous Integration
 on:
   push:
     branches:
-      - '**'
+      - main
+      - develop
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
+      - develop
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/ci.yml'
 
 jobs:
   lint-and-format:
@@ -51,6 +65,11 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
 
       - name: Rust Formatting Check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check

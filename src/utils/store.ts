@@ -187,7 +187,7 @@ const DEFAULT_SETTINGS: Settings = {
   tunAutoRedirect: false,
   tunStrictRoute: true,
   tunStack: 'gvisor',
-  tunMtu: 1400,
+  tunMtu: 1500,
   tunEndpointIndependentNat: false,
 
   sniffEnabled: true,
@@ -203,7 +203,7 @@ const DEFAULT_SETTINGS: Settings = {
 
   primaryDns: 'https://1.1.1.1/dns-query',
   fallbackDns: 'https://8.8.8.8/dns-query',
-  directDns: '8.8.8.8',
+  directDns: '',
   dnsStrategy: 'prefer_ipv4',
   dnsMode: 'fakeip',
   fakeipRange: '198.18.0.0/15',

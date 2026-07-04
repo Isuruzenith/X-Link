@@ -29,12 +29,6 @@ export async function migrateStores(): Promise<void> {
       await migrateV1toV2(routingStore);
     }
 
-    // Migrate default MTU from legacy 1500 to stable 1400
-    const currentMtu = await store.get<number>('tunMtu');
-    if (currentMtu === 1500 || currentMtu === null || currentMtu === undefined) {
-      await store.set('tunMtu', 1400);
-    }
-
     await store.set('_schemaVersion', CONFIG_SCHEMA_VERSION);
     await store.save();
   } catch (e) {
