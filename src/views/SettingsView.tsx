@@ -285,8 +285,8 @@ export function SettingsView() {
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">DNS Query Strategy</label>
                     <Sel value={settings.dnsStrategy} onChange={(v) => updateSettings({ dnsStrategy: v as Settings['dnsStrategy'] })} options={[
-                      { value: 'ipv4_only', label: 'IPv4 Only (Default)' },
-                      { value: 'prefer_ipv4', label: 'Prefer IPv4' },
+                      { value: 'prefer_ipv4', label: 'Prefer IPv4 (Default)' },
+                      { value: 'ipv4_only', label: 'IPv4 Only' },
                       { value: 'prefer_ipv6', label: 'Prefer IPv6' },
                       { value: 'ipv6_only', label: 'IPv6 Only' },
                     ]} />
