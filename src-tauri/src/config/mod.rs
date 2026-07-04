@@ -16,6 +16,7 @@ pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -
         "192.168.0.0/16".to_string(),
         "127.0.0.0/8".to_string(),
         "169.254.0.0/16".to_string(),
+        "::1/128".to_string(),
         "fc00::/7".to_string(),
         "fe80::/10".to_string(),
     ];

@@ -53,13 +53,17 @@ export default function App() {
       await migrateStores();
 
       // Parallel initialization of stores and system parameters
-      await Promise.all([
-        initSettings(),
-        checkElevated(),
-        initProfiles(),
-        initRouting(),
-        initStats(),
-      ]);
+      try {
+        await Promise.all([
+          initSettings(),
+          checkElevated(),
+          initProfiles(),
+          initRouting(),
+          initStats(),
+        ]);
+      } catch (e) {
+        console.error('[App] Failed to initialize stores:', e);
+      }
 
       // Show the window once stores are initialized and UI is ready
       invoke('show_window').catch(() => {});
