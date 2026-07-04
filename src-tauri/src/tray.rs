@@ -67,6 +67,7 @@ fn get_active_profile_name(app: &AppHandle) -> String {
 /// Returns list of (tag, type) pairs from the active config
 fn get_node_tags_from_active_config(app: &AppHandle) -> Vec<(String, String)> {
     if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("configs");
         path.push("active.json");
         if path.exists() {
             if let Ok(content) = std::fs::read_to_string(&path) {
