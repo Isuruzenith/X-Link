@@ -64,7 +64,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   conflictingPorts: [],
   isElevated: false,
   singboxVersion: 'Unknown',
-  appVersion: '0.1.0',
+  appVersion: '0.5.0',
   theme: 'dark',
 
   initSettings: async () => {
