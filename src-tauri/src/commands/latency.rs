@@ -11,6 +11,7 @@ async fn query_clash_api_delay(
 ) -> Option<u32> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
+        .no_proxy()
         .build()
         .ok()?;
 
