@@ -1,10 +1,30 @@
-import { useEffect } from 'react';
 import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useProfileStore, getCountryCode } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
-import type { Profile, ProxyNode } from '../utils/store';
+import type { Profile, ProxyNode, NodeUsageStats } from '../utils/store';
+import { useStatsStore } from '../stores/statsStore';
+
+const formatBytes = (bytes: number): string => {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
+const formatRelativeTime = (timestamp?: number): string => {
+  if (!timestamp) return '';
+  const diff = Date.now() - timestamp;
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return 'just now';
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
 
 function ProfileHeaderCard({
   selectedProfile,
@@ -20,15 +40,17 @@ function ProfileHeaderCard({
   nodes: ProxyNode[];
   selectedNodeTag: string | null;
   isConnected: boolean;
-  nodeGeoCache: Record<string, string>;
+  nodeGeoCache: Record<string, any>;
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
 }) {
   const activeNode = selectedNodeTag ? nodes.find((n: ProxyNode) => n.tag === selectedNodeTag) : null;
-  const activeServerCode = activeNode
-    ? (nodeGeoCache[activeNode.server] && nodeGeoCache[activeNode.server] !== 'loading' && nodeGeoCache[activeNode.server] !== 'unknown'
-        ? nodeGeoCache[activeNode.server]
-        : getCountryCode(activeNode.tag))
-    : null;
+  const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
+  const activeServerCode = geo && geo !== 'loading'
+    ? geo.countryCode
+    : (activeNode ? getCountryCode(activeNode.tag) : null);
+  const activeRegion = geo && geo !== 'loading' && (geo.cityName || geo.regionName)
+    ? `${geo.cityName || ''}${geo.cityName && geo.regionName ? ', ' : ''}${geo.regionName || ''}`
+    : '';
   const isActiveProfile = selectedProfile.id === activeProfileId;
   const activePing = activeNode && latencyResults[activeNode.tag] ? latencyResults[activeNode.tag] : null;
 
@@ -81,7 +103,9 @@ function ProfileHeaderCard({
             <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-high)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {activeNode.tag}
             </div>
-            <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>{activeNode.type}</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
+              {activeNode.type}{activeRegion ? ` • ${activeRegion}` : ''}
+            </span>
           </div>
 
           {/* Ping / Latency instead of LIVE badge */}
@@ -120,9 +144,8 @@ function ServerCard({
   activeProfileId,
   openEditor,
   latencyResults,
-  nodeGeoCache,
-  fetchNodeGeo,
-  activatingNodeTag
+  activatingNodeTag,
+  stats,
 }: {
   node: ProxyNode;
   selectedNodeTag: string | null;
@@ -132,17 +155,9 @@ function ServerCard({
   activeProfileId: string | null;
   openEditor: (node: ProxyNode) => void;
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
-  nodeGeoCache: Record<string, string>;
-  fetchNodeGeo: (server: string, tag: string) => void;
   activatingNodeTag: string | null;
+  stats?: NodeUsageStats;
 }) {
-  useEffect(() => {
-    const cachedCode = nodeGeoCache[node.server];
-    if (!cachedCode && node.server) {
-      fetchNodeGeo(node.server, node.tag);
-    }
-  }, [node.server, node.tag, nodeGeoCache, fetchNodeGeo]);
-
   return (
     <div
       className={`node-card ${selectedNodeTag === node.tag ? 'active' : ''}`}
@@ -163,6 +178,16 @@ function ServerCard({
                   <span style={{ fontSize: '9px', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>connecting</span>
                 </div>
               )
+            )}
+            {stats && (stats.totalUploadBytes > 0 || stats.totalDownloadBytes > 0) && (
+              <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
+                Total: {formatBytes(stats.totalUploadBytes + stats.totalDownloadBytes)}
+              </span>
+            )}
+            {stats?.lastUsedAt && (
+              <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
+                • Used {formatRelativeTime(stats.lastUsedAt)}
+              </span>
             )}
           </div>
         </div>
@@ -230,12 +255,12 @@ export function ConfigView() {
     testAllNodes,
     selectProfile,
     nodeGeoCache,
-    fetchNodeGeo,
     activatingNodeTag,
   } = useProfileStore();
 
   const { isConnected } = useConnectionStore();
   const { openEditor } = useNodeEditorStore();
+  const stats = useStatsStore((s) => s.stats);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) || null;
 
@@ -462,9 +487,8 @@ export function ConfigView() {
                         activeProfileId={activeProfileId}
                         openEditor={openEditor}
                         latencyResults={latencyResults}
-                        nodeGeoCache={nodeGeoCache}
-                        fetchNodeGeo={fetchNodeGeo}
                         activatingNodeTag={activatingNodeTag}
+                        stats={stats[node.tag]}
                       />
                     ))}
                   </div>

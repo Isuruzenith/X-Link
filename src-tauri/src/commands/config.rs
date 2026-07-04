@@ -123,6 +123,7 @@ pub async fn import_config(
     let dns_address = crate::config::resolve_dns_address(dns.as_deref());
     let tun_settings = load_tun_settings(&app);
     let mixed_port = state.get_settings().mixed_port;
+    let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
 
     let generated_config = generate_singbox_config(
         mixed_port,
@@ -132,6 +133,8 @@ pub async fn import_config(
         &listen_address,
         &tun_settings,
         None,
+        &user_rules,
+        &rule_sets,
     )?;
 
     // 4. Early guard: validate generated JSON has required structure before
@@ -420,6 +423,31 @@ pub fn delete_profile_config(app: tauri::AppHandle, profile_id: String) -> Resul
     Ok(())
 }
 
+pub fn set_active_profile_id_in_file(app: &tauri::AppHandle, profile_id: &str) -> Result<(), String> {
+    let mut path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    path.push("profiles.json");
+
+    let mut json = if path.exists() {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read profiles.json: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse profiles.json: {}", e))?
+    } else {
+        serde_json::json!({})
+    };
+
+    json["activeProfileId"] = serde_json::Value::String(profile_id.to_string());
+
+    let content = serde_json::to_string_pretty(&json)
+        .map_err(|e| format!("Failed to serialize profiles.json: {}", e))?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("Failed to write profiles.json: {}", e))?;
+    Ok(())
+}
+
 /// Switches the active config to a different profile by copying its config to the active slot.
 /// If the proxy is currently running, it will be hot-reloaded with the new config.
 #[tauri::command]
@@ -428,6 +456,9 @@ pub async fn switch_profile(
     profile_id: String,
     selected_node_tag: Option<String>,
 ) -> Result<(), String> {
+    // Update the activeProfileId in profiles.json immediately so that any subsequent config generation reads the correct profile nodes
+    set_active_profile_id_in_file(&app, &profile_id)?;
+
     let profile_path = get_profile_config_path(&app, &profile_id)?;
     if !profile_path.exists() {
         return Err(format!(

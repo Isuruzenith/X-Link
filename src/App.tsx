@@ -19,16 +19,21 @@ import { useConnectionStore } from './stores/connectionStore';
 import { useProfileStore } from './stores/profileStore';
 import { useRoutingStore } from './stores/routingStore';
 import { useLogStore } from './stores/logStore';
+import { useStatsStore } from './stores/statsStore';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const hasAutoConnected = useRef(false);
+  const prevUploadRef = useRef(0);
+  const prevDownloadRef = useRef(0);
+  const connectionCountedRef = useRef(false);
 
   // Zustand Store hooks
   const { initSettings, checkElevated, fetchVersions, setConflictingPorts } = useSettingsStore();
   const { initProfiles, refreshNodes } = useProfileStore();
   const { initRouting } = useRoutingStore();
   const { pushLog, pushSystemLog } = useLogStore();
+  const { initStats, recordTraffic, recordNewConnection } = useStatsStore();
   const {
     setIsConnected,
     setConnectionStatus,
@@ -57,6 +62,7 @@ export default function App() {
         fetchVersions(),
         initProfiles(),
         initRouting(),
+        initStats(),
       ]);
 
       const updatedSettings = useSettingsStore.getState().settings;
@@ -209,15 +215,43 @@ export default function App() {
             activeConnections: number;
           }>('get_traffic_stats');
           updateTrafficStats(stats);
+
+          // Calculate deltas and update stats store
+          const currentUpload = stats.uploadBytes;
+          const currentDownload = stats.downloadBytes;
+          
+          const deltaUpload = prevUploadRef.current > 0 && currentUpload >= prevUploadRef.current
+            ? currentUpload - prevUploadRef.current
+            : 0;
+          const deltaDownload = prevDownloadRef.current > 0 && currentDownload >= prevDownloadRef.current
+            ? currentDownload - prevDownloadRef.current
+            : 0;
+
+          prevUploadRef.current = currentUpload;
+          prevDownloadRef.current = currentDownload;
+
+          const activeNodeTag = useProfileStore.getState().selectedNodeTag;
+          if (activeNodeTag) {
+            if (deltaUpload > 0 || deltaDownload > 0) {
+              recordTraffic(activeNodeTag, deltaUpload, deltaDownload).catch(() => {});
+            }
+            if (!connectionCountedRef.current) {
+              recordNewConnection(activeNodeTag).catch(() => {});
+              connectionCountedRef.current = true;
+            }
+          }
         } else {
           resetTrafficStats();
+          prevUploadRef.current = 0;
+          prevDownloadRef.current = 0;
+          connectionCountedRef.current = false;
         }
       } catch {
         // ignore
       }
     }, 1000);
     return () => clearInterval(poll);
-  }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats]);
+  }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
 
   return (
     <div className="app-root">

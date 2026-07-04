@@ -1,7 +1,8 @@
 import React from 'react';
 import {
   Settings as SettingsIcon, Network, Eye, Dna, Code2,
-  Info, AlertTriangle, CheckCircle2, ExternalLink, Sun, Moon, Monitor
+  Info, AlertTriangle, CheckCircle2, ExternalLink, Sun, Moon, Monitor,
+  RefreshCw
 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
@@ -131,34 +132,40 @@ export function SettingsView() {
 
                 <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div className="settings-section-heading">Inbound Ports</div>
-                  <div className="grid-2">
-                    {[
-                      { label: 'HTTP Proxy Port', key: 'httpPort' as keyof Settings, val: httpPort, set: (v: number) => setPorts({ httpPort: v }) },
-                      { label: 'SOCKS5 Port', key: 'socksPort' as keyof Settings, val: socksPort, set: (v: number) => setPorts({ socksPort: v }) },
-                    ].map(({ label, key, val, set }) => (
-                      <div key={key} className="form-group">
-                        <div className="flex-row-between">
-                          <label className="form-label">{label}</label>
-                          <span style={{ fontSize: '10px', fontWeight: 600, color: conflictingPorts.includes(val) ? 'var(--status-err)' : 'var(--status-ok)' }}>
-                            {conflictingPorts.includes(val) ? '● Conflict' : '● OK'}
-                          </span>
+                  <SwitchRow title="Use Separate HTTP & SOCKS5 Ports" desc="Bind separate HTTP and SOCKS5 protocol listeners instead of a single mixed port"
+                    checked={settings.useSeparatePorts} onChange={(v) => updateSettings({ useSeparatePorts: v })} />
+                  <div style={{ opacity: settings.useSeparatePorts ? 1 : 0.4, pointerEvents: settings.useSeparatePorts ? 'auto' : 'none' }}>
+                    <div className="grid-2">
+                      {[
+                        { label: 'HTTP Proxy Port', key: 'httpPort' as keyof Settings, val: httpPort, set: (v: number) => setPorts({ httpPort: v }) },
+                        { label: 'SOCKS5 Port', key: 'socksPort' as keyof Settings, val: socksPort, set: (v: number) => setPorts({ socksPort: v }) },
+                      ].map(({ label, key, val, set }) => (
+                        <div key={key} className="form-group">
+                          <div className="flex-row-between">
+                            <label className="form-label">{label}</label>
+                            <span style={{ fontSize: '10px', fontWeight: 600, color: conflictingPorts.includes(val) ? 'var(--status-err)' : 'var(--status-ok)' }}>
+                              {conflictingPorts.includes(val) ? '● Conflict' : '● OK'}
+                            </span>
+                          </div>
+                          <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(val) ? 'var(--status-err)' : undefined }}
+                            value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); updateSettings({ [key]: v } as Partial<Settings>); }} />
                         </div>
-                        <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(val) ? 'var(--status-err)' : undefined }}
-                          value={val} onChange={(e) => { const v = parseInt(e.target.value) || 0; set(v); updateSettings({ [key]: v } as Partial<Settings>); }} />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <div className="flex-row-between">
-                      <label className="form-label">Mixed Inbound Port (Recommended)</label>
-                      <span style={{ fontSize: '10px', fontWeight: 600, color: conflictingPorts.includes(mixedPort) ? 'var(--status-err)' : 'var(--status-ok)' }}>
-                        {conflictingPorts.includes(mixedPort) ? '● Conflict' : '● OK'}
-                      </span>
+                      ))}
                     </div>
-                    <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(mixedPort) ? 'var(--status-err)' : undefined }}
-                      value={mixedPort} onChange={(e) => { const v = parseInt(e.target.value) || 0; setPorts({ mixedPort: v }); updateSettings({ mixedPort: v }); }} />
                   </div>
-                  <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>Port changes take effect on next connection restart.</p>
+                  <div style={{ opacity: !settings.useSeparatePorts ? 1 : 0.4, pointerEvents: !settings.useSeparatePorts ? 'auto' : 'none', marginTop: '4px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <div className="flex-row-between">
+                        <label className="form-label">Mixed Inbound Port (Recommended)</label>
+                        <span style={{ fontSize: '10px', fontWeight: 600, color: conflictingPorts.includes(mixedPort) ? 'var(--status-err)' : 'var(--status-ok)' }}>
+                          {conflictingPorts.includes(mixedPort) ? '● Conflict' : '● OK'}
+                        </span>
+                      </div>
+                      <input type="number" className="text-input" style={{ borderColor: conflictingPorts.includes(mixedPort) ? 'var(--status-err)' : undefined }}
+                        value={mixedPort} onChange={(e) => { const v = parseInt(e.target.value) || 0; setPorts({ mixedPort: v }); updateSettings({ mixedPort: v }); }} />
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '8px' }}>Port changes take effect on next connection restart.</p>
                 </div>
               </div>
 
@@ -200,8 +207,8 @@ export function SettingsView() {
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">TUN MTU</label>
-                    <input type="number" className="text-input" value={settings.tunMtu} onChange={(e) => updateSettings({ tunMtu: parseInt(e.target.value) || 9000 })} />
-                    <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>9000 recommended. Use 1500 for strict environments.</span>
+                    <input type="number" className="text-input" value={settings.tunMtu} onChange={(e) => updateSettings({ tunMtu: parseInt(e.target.value) || 1400 })} />
+                    <span style={{ fontSize: '11px', color: 'var(--text-low)', marginTop: '4px', display: 'block' }}>1400 recommended to prevent packet fragmentation. Use 1500 for standard ethernet.</span>
                   </div>
                 </div>
                 {([
@@ -248,7 +255,7 @@ export function SettingsView() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div className="settings-section-heading">DNS Servers</div>
-                <div className="grid-2">
+                <div className="grid-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">Primary DNS (via proxy)</label>
                     <Inp value={settings.primaryDns} onChange={(v) => updateSettings({ primaryDns: v })} placeholder="https://1.1.1.1/dns-query" mono />
@@ -257,10 +264,35 @@ export function SettingsView() {
                     <label className="form-label">Fallback DNS (via proxy)</label>
                     <Inp value={settings.fallbackDns} onChange={(v) => updateSettings({ fallbackDns: v })} placeholder="https://8.8.8.8/dns-query" mono />
                   </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Direct DNS (Local/Bypass)</label>
+                    <Inp value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="223.5.5.5" mono />
+                  </div>
                 </div>
                 <p style={{ fontSize: '11px', color: 'var(--text-low)' }}>
-                  Used for resolving domains while the proxy tunnel is active. The fallback server is only used in Normal mode.
+                  Used for resolving domains. The direct DNS server is used to resolve direct/bypassed connections.
                 </p>
+              </div>
+
+              <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="settings-section-heading">DNS Options & Strategy</div>
+                <div className="grid-2">
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">DNS Query Strategy</label>
+                    <Sel value={settings.dnsStrategy} onChange={(v) => updateSettings({ dnsStrategy: v as Settings['dnsStrategy'] })} options={[
+                      { value: 'ipv4_only', label: 'IPv4 Only (Default)' },
+                      { value: 'prefer_ipv4', label: 'Prefer IPv4' },
+                      { value: 'prefer_ipv6', label: 'Prefer IPv6' },
+                      { value: 'ipv6_only', label: 'IPv6 Only' },
+                    ]} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <SwitchRow title="Enable DNS Caching" desc="Store resolved domain IPs locally to speed up browsing"
+                      checked={settings.dnsCaching} onChange={(v) => updateSettings({ dnsCaching: v })} />
+                    <SwitchRow title="DNS Leak Protection" desc="Block DNS requests outside the secure tunnel"
+                      checked={settings.dnsLeakProtection} onChange={(v) => updateSettings({ dnsLeakProtection: v })} />
+                  </div>
+                </div>
               </div>
 
               <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -317,7 +349,27 @@ export function SettingsView() {
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">API Secret Token</label>
-                      <Inp value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" mono />
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <Inp value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" mono />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          style={{ padding: '0 10px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          title="Generate new random API Secret Token"
+                          onClick={() => {
+                            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                            let secret = '';
+                            for (let i = 0; i < 16; i++) {
+                              secret += chars.charAt(Math.floor(Math.random() * chars.length));
+                            }
+                            updateSettings({ apiSecret: secret });
+                          }}
+                        >
+                          <RefreshCw size={14} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <SwitchRow title="Allow CORS (Cross-Origin)" desc="Allow web-based controllers (Yacd) to connect from browser"

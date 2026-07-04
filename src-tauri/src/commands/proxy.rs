@@ -36,6 +36,14 @@ pub fn load_tun_settings(app: &tauri::AppHandle) -> TunSettings {
         fallback_dns: s.fallback_dns,
         bypass_lan: s.bypass_lan,
         final_outbound: s.final_outbound,
+        use_separate_ports: s.use_separate_ports,
+        http_port: s.http_port,
+        socks_port: s.socks_port,
+        dns_caching: s.dns_caching,
+        dns_strategy: s.dns_strategy.clone(),
+        direct_dns: s.direct_dns.clone(),
+        fakeip_filter: s.fakeip_filter.clone(),
+        dns_leak_protection: s.dns_leak_protection,
     }
 }
 
@@ -365,7 +373,7 @@ pub async fn get_traffic_stats(
     })
 }
 
-pub fn prepare_and_patch_config(
+pub async fn prepare_and_patch_config(
     app: &tauri::AppHandle,
     state: &crate::state::ProxyState,
     selected_outbound_tag: Option<&str>,
@@ -383,7 +391,6 @@ pub fn prepare_and_patch_config(
     let wifi_sharing = settings.wifi_sharing;
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
-    let api_cors = settings.api_cors;
     let proxy_mode = match mode_override {
         Some(m) => m.to_string(),
         None => settings.proxy_mode.clone(),
@@ -418,11 +425,6 @@ pub fn prepare_and_patch_config(
     ],
     "final": "direct",
     "auto_detect_interface": true
-  }},
-  "experimental": {{
-    "clash_api": {{
-      "external_controller": "127.0.0.1:9090"
-    }}
   }}
 }}"#,
             mixed_port
@@ -431,33 +433,26 @@ pub fn prepare_and_patch_config(
             .map_err(|e| format!("Failed to write default config: {}", e))?;
     }
 
-    // Read the active profile outbounds from active.json
-    let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read active config: {}", e))?;
-    let config_val: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse active config JSON: {}", e))?;
+    // Get the active profile ID and load its outbounds instead of reading the stale/fallback active.json
+    let active_profile_id = match crate::commands::config::get_active_profile_id(app) {
+        Ok(Some(id)) => id,
+        _ => return Err("No active profile selected. Please select or import a profile before connecting.".to_string()),
+    };
 
-    let outbounds_val = config_val
-        .get("outbounds")
-        .and_then(|o| o.as_array())
-        .ok_or_else(|| "No outbounds found in active config".to_string())?;
+    let profile_nodes = crate::commands::config::get_profile_outbounds(app.clone(), active_profile_id)?;
+    
+    // Guard: If there are no nodes in the active profile, return an error
+    if profile_nodes.is_empty() {
+        return Err("No server profiles found. Please import a profile before connecting.".to_string());
+    }
 
-    let all_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
-        serde_json::from_value(serde_json::Value::Array(outbounds_val.clone()))
-            .map_err(|e| format!("Failed to deserialize outbounds: {}", e))?;
-
-    // Filter to only include the actual node outbounds (excluding the selector, direct, and block outbounds)
-    let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> = all_outbounds
-        .into_iter()
-        .filter(|o| {
-            o.outbound_type != "selector"
-                && o.outbound_type != "direct"
-                && o.outbound_type != "block"
-        })
-        .collect();
+    let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
+        serde_json::from_value(serde_json::Value::Array(profile_nodes))
+            .map_err(|e| format!("Failed to deserialize profile nodes: {}", e))?;
 
     let tun_settings = load_tun_settings(app);
     let mixed_port = settings.mixed_port;
+    let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(app);
 
     // Generate a clean sing-box config from scratch
     let generated_config = crate::config::generator::generate_singbox_config(
@@ -468,31 +463,44 @@ pub fn prepare_and_patch_config(
         listen_address,
         &tun_settings,
         selected_outbound_tag,
+        &user_rules,
+        &rule_sets,
     )?;
 
     let mut final_config_val: serde_json::Value = serde_json::from_str(&generated_config)
         .map_err(|e| format!("Generated config is invalid JSON: {}", e))?;
 
-    // Inject Clash API experimental settings
+    // Always inject Clash API experimental settings (required for dashboard, speed metrics, and connection monitoring)
     let mut clash_api = serde_json::json!({
         "external_controller": format!("127.0.0.1:{}", api_port)
     });
     if !api_secret.is_empty() {
         clash_api["secret"] = serde_json::Value::String(api_secret.clone());
     }
-    if api_cors {
-        clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
-    }
+    // Allow CORS so the Tauri frontend (tauri://localhost) can communicate with the API
+    clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
+    
     final_config_val["experimental"] = serde_json::json!({
         "clash_api": clash_api
     });
 
-    // Write the final config to active.json
+    // Safe Overwrite (Transactional Write): Validate first
+    let temp_config_path = config_path.with_extension("json.tmp");
     std::fs::write(
-        &config_path,
+        &temp_config_path,
         serde_json::to_string_pretty(&final_config_val).unwrap(),
     )
-    .map_err(|e| format!("Failed to write active config: {}", e))?;
+    .map_err(|e| format!("Failed to write temporary config: {}", e))?;
+
+    // Perform validation check
+    if let Err(err) = crate::config::validator::validate_singbox_config(app, &temp_config_path).await {
+        let _ = std::fs::remove_file(&temp_config_path);
+        return Err(format!("Configuration check failed: {}", err));
+    }
+
+    // Overwrite the original active.json only if validation passes
+    std::fs::rename(&temp_config_path, &config_path)
+        .map_err(|e| format!("Failed to finalize active config write: {}", e))?;
 
     Ok((config_path, proxy_mode, api_port, api_secret))
 }
@@ -533,7 +541,9 @@ async fn switch_selector_node_via_api(
     }
     req.send()
         .await
-        .map_err(|e| format!("Selector switch failed: {}", e))?;
+        .map_err(|e| format!("Selector switch HTTP request failed: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Selector switch rejected by sing-box API: {}", e))?;
     Ok(())
 }
 
@@ -556,15 +566,29 @@ pub async fn switch_node_hot(
     let api_enabled = settings.api_enabled;
 
     if state.get_status() == crate::state::ConnectionStatus::Connected && api_enabled {
-        let _ = prepare_and_patch_config(&app, &state, Some(&tag), None);
+        let (config_path, _, _, _) = match prepare_and_patch_config(&app, &state, Some(&tag), None).await {
+            Ok(res) => res,
+            Err(e) => {
+                state.push_log(format!("[System] Config patch failed: {}", e));
+                return try_reload_proxy_config(&app, &state, Some(tag)).await;
+            }
+        };
+
+        // Try hot-reloading the configuration first so the running sing-box gets the updated active.json
+        if let Err(e) = hot_reload_via_api(&config_path, api_port, &api_secret).await {
+            state.push_log(format!("[System] API config reload failed ({}), falling back to full reload.", e));
+            return try_reload_proxy_config(&app, &state, Some(tag)).await;
+        }
+
+        // Try switching the selector group
         match switch_selector_node_via_api(&tag, api_port, &api_secret).await {
             Ok(_) => {
-                state.push_log(format!("[System] Hot-switched to node: {}", tag));
+                state.push_log(format!("[System] Hot-switched selector to node: {}", tag));
                 return Ok(());
             }
             Err(e) => {
                 state.push_log(format!(
-                    "[System] Hot switch failed ({}), falling back to reload.",
+                    "[System] Selector switch API failed ({}), falling back to full reload.",
                     e
                 ));
             }
@@ -584,13 +608,13 @@ pub fn try_reload_proxy_config<'a>(
     let tag = selected_outbound_tag;
 
     Box::pin(async move {
-        let _ = prepare_and_patch_config(&app_handle, &state_handle, tag.as_deref(), None)?;
+        let _ = prepare_and_patch_config(&app_handle, &state_handle, tag.as_deref(), None).await?;
 
         // Stop the proxy
         let _ = toggle_proxy(app_handle.clone(), state_handle.clone(), false, None).await;
 
         // Give it a brief moment to shut down gracefully
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
 
         // Start the proxy
         let res = toggle_proxy(app_handle, state_handle, true, tag).await;
@@ -672,6 +696,39 @@ pub async fn toggle_proxy(
         // Sync native system tray
         crate::tray::update_tray(&app);
 
+        // Revert active.json to a safe direct-only fallback config
+        if let Ok(config_path) = crate::commands::config::get_active_config_path(&app) {
+            let mixed_port = state.get_settings().mixed_port;
+            let default_config = format!(
+                r#"{{
+  "log": {{
+    "level": "info",
+    "timestamp": true
+  }},
+  "inbounds": [
+    {{
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": {}
+    }}
+  ],
+  "outbounds": [
+    {{ "type": "direct", "tag": "direct" }}
+  ],
+  "route": {{
+    "rules": [
+      {{ "ip_is_private": true, "outbound": "direct" }}
+    ],
+    "final": "direct",
+    "auto_detect_interface": true
+  }}
+}}"#,
+                mixed_port
+            );
+            let _ = std::fs::write(&config_path, default_config);
+        }
+
         return Ok("stopped".into());
     }
 
@@ -710,7 +767,7 @@ pub async fn toggle_proxy(
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output();
         // Brief delay to let sockets fully release
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -741,7 +798,7 @@ pub async fn toggle_proxy(
     }
 
     let (config_path, resolved_proxy_mode, api_port, api_secret) =
-        match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None) {
+        match prepare_and_patch_config(&app, &state, selected_outbound_tag.as_deref(), None).await {
             Ok(res) => res,
             Err(e) => {
                 state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
@@ -875,7 +932,7 @@ pub async fn toggle_proxy(
                 &state,
                 selected_outbound_tag.as_deref(),
                 Some("system"),
-            )?;
+            ).await?;
 
             let session_id = uuid::Uuid::new_v4().to_string();
             {

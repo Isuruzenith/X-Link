@@ -39,9 +39,6 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
     isConnected,
     connectionStatus,
     uptime,
-    httpPort,
-    socksPort,
-    mixedPort,
     uploadBytes,
     downloadBytes,
     uploadSpeed,
@@ -131,22 +128,33 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                   <span style={{ color: 'var(--text-med)', fontWeight: 600 }}>{selectedNodeTag}</span>
                 </div>
                 {(() => {
-                  const activeServerCode = activeNode
-                    ? (nodeGeoCache[activeNode.server] && nodeGeoCache[activeNode.server] !== 'loading' && nodeGeoCache[activeNode.server] !== 'unknown'
-                        ? nodeGeoCache[activeNode.server]
-                        : getCountryCode(activeNode.tag))
-                    : null;
+                  const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
+                  const activeServerCode = geo && geo !== 'loading'
+                    ? geo.countryCode
+                    : (activeNode ? getCountryCode(activeNode.tag) : null);
+                  const activeRegion = geo && geo !== 'loading' && (geo.cityName || geo.regionName)
+                    ? `${geo.cityName || ''}${geo.cityName && geo.regionName ? ', ' : ''}${geo.regionName || ''}`
+                    : '';
+                  const activeCountryName = geo && geo !== 'loading' ? geo.countryName : '';
+
                   if (!activeServerCode) return null;
                   return (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '16px', marginTop: '2px' }}>
-                      <img
-                        src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
-                        alt={activeServerCode}
-                        style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '16px' }}>
+                        <img
+                          src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
+                          alt={activeServerCode}
+                          style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      {(activeCountryName || activeRegion) && (
+                        <span style={{ fontSize: '10px', color: 'var(--text-low)', textAlign: 'center', maxWidth: '180px', wordBreak: 'break-all' }}>
+                          {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
+                        </span>
+                      )}
                     </div>
                   );
                 })()}
@@ -221,9 +229,14 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
             <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)' }}>Active Inbound Ports</h3>
             <div style={{ display: 'flex', gap: '24px', fontSize: '13px' }}>
               {[
-                { label: 'HTTP',   port: httpPort },
-                { label: 'SOCKS5', port: socksPort },
-                { label: 'Mixed',  port: mixedPort },
+                ...(settings.useSeparatePorts
+                  ? [
+                      { label: 'HTTP', port: settings.httpPort },
+                      { label: 'SOCKS5', port: settings.socksPort },
+                    ]
+                  : [
+                      { label: 'Mixed', port: settings.mixedPort },
+                    ]),
                 ...(settings.apiEnabled ? [{ label: 'API', port: settings.apiPort }] : []),
               ].map(({ label, port }) => (
                 <span key={label}>
