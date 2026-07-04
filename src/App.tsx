@@ -122,8 +122,22 @@ export default function App() {
       const line = e.payload.trim();
       if (!line) return;
       let type: 'info' | 'warn' | 'error' | 'system' = 'info';
-      if (line.toLowerCase().includes('warn')) type = 'warn';
-      else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) type = 'error';
+      if (line.toLowerCase().includes('warn')) {
+        type = 'warn';
+      } else if (line.toLowerCase().includes('err') || line.toLowerCase().includes('fatal')) {
+        // Downgrade harmless normal/idle WebSocket & telemetry connection closures to 'info' to avoid user panic
+        const isHarmlessClose = 
+          line.toLowerCase().includes('ws closed: 1000') ||
+          line.toLowerCase().includes('wsarecv: an existing connection was forcibly closed') ||
+          line.toLowerCase().includes('wsarecv: a connection attempt failed') ||
+          line.toLowerCase().includes('connection download closed: raw-read');
+          
+        if (isHarmlessClose) {
+          type = 'info';
+        } else {
+          type = 'error';
+        }
+      }
       pushLog(type, line);
     });
 
