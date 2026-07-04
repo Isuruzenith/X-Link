@@ -191,8 +191,10 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                     let insert_at = rule_list
                         .iter()
                         .position(|rule| {
-                            let is_dns = rule.get("action").and_then(|v| v.as_str()) == Some("hijack-dns");
-                            let is_sniff = rule.get("action").and_then(|v| v.as_str()) == Some("sniff");
+                            let is_dns =
+                                rule.get("action").and_then(|v| v.as_str()) == Some("hijack-dns");
+                            let is_sniff =
+                                rule.get("action").and_then(|v| v.as_str()) == Some("sniff");
                             !is_dns && !is_sniff
                         })
                         .unwrap_or(rule_list.len());
