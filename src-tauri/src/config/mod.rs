@@ -82,7 +82,7 @@ pub fn build_route_rules(
     geosite_db_exists: bool,
     geoip_db_exists: bool,
 ) -> Vec<Value> {
-    let mut rules = vec![serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })];
+    let mut rules = vec![serde_json::json!({ "port": 53, "action": "hijack-dns" })];
 
     if sniff_enabled {
         rules.push(serde_json::json!({
@@ -191,7 +191,7 @@ pub fn apply_tun_compatibility_profile(config_val: &mut Value) -> bool {
                     let insert_at = rule_list
                         .iter()
                         .position(|rule| {
-                            let is_dns = rule.get("protocol").and_then(|v| v.as_str()) == Some("dns");
+                            let is_dns = rule.get("action").and_then(|v| v.as_str()) == Some("hijack-dns");
                             let is_sniff = rule.get("action").and_then(|v| v.as_str()) == Some("sniff");
                             !is_dns && !is_sniff
                         })
@@ -338,7 +338,7 @@ mod tests {
                 "transport": { "type": "ws" }
             }],
             "route": {
-                "rules": [{ "protocol": "dns", "action": "hijack-dns" }],
+                "rules": [{ "port": 53, "action": "hijack-dns" }],
                 "final": "proxy"
             }
         });
@@ -367,7 +367,7 @@ mod tests {
             }],
             "route": {
                 "rules": [
-                    { "protocol": "dns", "action": "hijack-dns" },
+                    { "port": 53, "action": "hijack-dns" },
                     { "ip_is_private": true, "outbound": "direct" }
                 ],
                 "final": "proxy"
@@ -377,7 +377,7 @@ mod tests {
         apply_tun_compatibility_profile(&mut config);
         let rules = config["route"]["rules"].as_array().unwrap();
         assert_eq!(rules[0]["action"].as_str().unwrap(), "sniff");
-        assert_eq!(rules[1]["protocol"].as_str().unwrap(), "dns");
+        assert_eq!(rules[1]["port"].as_u64().unwrap(), 53);
         assert_eq!(rules[2]["network"].as_str().unwrap(), "udp");
         assert_eq!(rules[2]["action"].as_str().unwrap(), "reject");
         assert_eq!(rules[2]["method"].as_str().unwrap(), "drop");
