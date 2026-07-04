@@ -192,14 +192,35 @@ pub fn generate_singbox_config(
             }
         }
 
+        // Inject TCP Keep-Alive settings in the "dial" section of dialing outbounds
+        let outbound_type = node.outbound_type.as_str();
+        if outbound_type != "selector" && outbound_type != "block" && outbound_type != "dns" {
+            let mut dial_obj = obj
+                .get("dial")
+                .and_then(|d| d.as_object())
+                .cloned()
+                .unwrap_or_default();
+            dial_obj.insert("tcp_keep_alive".to_string(), serde_json::json!("30s"));
+            dial_obj.insert(
+                "tcp_keep_alive_interval".to_string(),
+                serde_json::json!("15s"),
+            );
+            obj.insert("dial".to_string(), Value::Object(dial_obj));
+        }
+
         final_outbounds.push(Value::Object(obj));
     }
 
     // Unconditionally push the standard direct outbound (required for dns detour)
-    let mut direct = HashMap::new();
-    direct.insert("type".to_string(), Value::String("direct".to_string()));
-    direct.insert("tag".to_string(), Value::String("direct".to_string()));
-    final_outbounds.push(Value::Object(direct.into_iter().collect()));
+    let direct = serde_json::json!({
+        "type": "direct",
+        "tag": "direct",
+        "dial": {
+            "tcp_keep_alive": "30s",
+            "tcp_keep_alive_interval": "15s"
+        }
+    });
+    final_outbounds.push(direct);
 
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
@@ -212,20 +233,26 @@ pub fn generate_singbox_config(
             "type": "http",
             "tag": "http-in",
             "listen": listen_address,
-            "listen_port": tun_settings.http_port
+            "listen_port": tun_settings.http_port,
+            "tcp_keep_alive": "30s",
+            "tcp_keep_alive_interval": "15s"
         }));
         inbounds.push(serde_json::json!({
             "type": "socks",
             "tag": "socks-in",
             "listen": listen_address,
-            "listen_port": tun_settings.socks_port
+            "listen_port": tun_settings.socks_port,
+            "tcp_keep_alive": "30s",
+            "tcp_keep_alive_interval": "15s"
         }));
     } else {
         inbounds.push(serde_json::json!({
             "type": "mixed",
             "tag": "mixed-in",
             "listen": listen_address,
-            "listen_port": mixed_port
+            "listen_port": mixed_port,
+            "tcp_keep_alive": "30s",
+            "tcp_keep_alive_interval": "15s"
         }));
     }
 
@@ -243,7 +270,9 @@ pub fn generate_singbox_config(
             "stack": tun_settings.stack,
             "route_exclude_address": route_exclude_addresses,
             "sniff": tun_settings.sniff_enabled,
-            "sniff_override_destination": tun_settings.sniff_override_destination
+            "sniff_override_destination": tun_settings.sniff_override_destination,
+            "tcp_keep_alive": "30s",
+            "tcp_keep_alive_interval": "15s"
         });
         if tun_settings.mtu != 0 {
             let safe_mtu = if tun_settings.mtu == 1500 {
@@ -680,5 +709,9 @@ mod tests {
         assert_eq!(multiplex["enabled"].as_bool().unwrap(), true);
         assert_eq!(multiplex["protocol"].as_str().unwrap(), "smux");
         assert_eq!(multiplex["max_connections"].as_u64().unwrap(), 4);
+
+        let dial = &vless_outbound["dial"];
+        assert_eq!(dial["tcp_keep_alive"].as_str().unwrap(), "30s");
+        assert_eq!(dial["tcp_keep_alive_interval"].as_str().unwrap(), "15s");
     }
 }
