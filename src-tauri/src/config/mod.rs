@@ -78,6 +78,8 @@ pub fn build_route_rules(
     bypass_lan: bool,
     user_rules: &[crate::config::rules::RoutingRule],
     rule_sets: &[crate::config::rules::RuleSet],
+    geosite_db_exists: bool,
+    geoip_db_exists: bool,
 ) -> Vec<Value> {
     let mut rules = vec![serde_json::json!({ "protocol": "dns", "action": "hijack-dns" })];
 
@@ -94,7 +96,9 @@ pub fn build_route_rules(
     // User-defined rules evaluated top-to-bottom
     for rule in user_rules {
         if rule.enabled.unwrap_or(true) {
-            if let Some(json_rule) = crate::config::rules::build_singbox_rule(rule) {
+            if let Some(json_rule) =
+                crate::config::rules::build_singbox_rule(rule, geosite_db_exists, geoip_db_exists)
+            {
                 rules.push(json_rule);
             }
         }

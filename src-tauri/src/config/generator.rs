@@ -83,7 +83,14 @@ pub fn generate_singbox_config(
     default_outbound_tag: Option<&str>,
     user_rules: &[crate::config::rules::RoutingRule],
     rule_sets: &[crate::config::rules::RuleSet],
+    app_data_dir: &std::path::Path,
 ) -> Result<String, String> {
+    let geosite_db_exists = app_data_dir.join("geosite.db").exists()
+        || std::path::Path::new("geosite.db").exists()
+        || std::path::Path::new("src-tauri/geosite.db").exists();
+    let geoip_db_exists = app_data_dir.join("geoip.db").exists()
+        || std::path::Path::new("geoip.db").exists()
+        || std::path::Path::new("src-tauri/geoip.db").exists();
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
         if let Some(server_val) = outbound.fields.get("server") {
@@ -226,14 +233,46 @@ pub fn generate_singbox_config(
     }
 
     // Build route rules incorporating user routing rules from routing.json
-    let route_rules =
-        crate::config::build_route_rules(tun_settings.bypass_lan, user_rules, rule_sets);
+    let route_rules = crate::config::build_route_rules(
+        tun_settings.bypass_lan,
+        user_rules,
+        rule_sets,
+        geosite_db_exists,
+        geoip_db_exists,
+    );
 
-    let route_section = serde_json::json!({
+    let mut route_section = serde_json::json!({
         "rules": route_rules,
         "final": tun_settings.final_outbound,
         "auto_detect_interface": true
     });
+
+    if !rule_sets.is_empty() {
+        let mut singbox_rule_sets = Vec::new();
+        for rs in rule_sets {
+            let mut set_val = serde_json::json!({
+                "tag": rs.tag,
+                "type": rs.set_type,
+                "format": rs.format,
+            });
+            if rs.set_type == "remote" {
+                if let Some(ref url) = rs.url {
+                    set_val["url"] = serde_json::json!(url);
+                }
+                if !rs.update_interval.trim().is_empty() {
+                    set_val["update_interval"] = serde_json::json!(rs.update_interval);
+                }
+                // Detour remote rule-set downloads through the proxy outbound to support zero-package carriers
+                set_val["download_detour"] = serde_json::json!("proxy");
+            } else if rs.set_type == "local" {
+                if let Some(ref path) = rs.file_path {
+                    set_val["path"] = serde_json::json!(path);
+                }
+            }
+            singbox_rule_sets.push(set_val);
+        }
+        route_section["rule_set"] = serde_json::json!(singbox_rule_sets);
+    }
 
     let mut dns_rules = vec![serde_json::json!({ "outbound": "direct", "server": "local-dns" })];
 
@@ -289,7 +328,16 @@ pub fn generate_singbox_config(
 
                 for f in filters {
                     if f.starts_with("geosite:") {
-                        geosite.push(f.strip_prefix("geosite:").unwrap().trim().to_string());
+                        let category = f.strip_prefix("geosite:").unwrap().trim().to_string();
+                        if category == "private" && !geosite_db_exists {
+                            for suffix in
+                                &[".lan", ".local", ".internal", ".home.arpa", "localhost"]
+                            {
+                                domain_suffix.push(suffix.to_string());
+                            }
+                        } else {
+                            geosite.push(category);
+                        }
                     } else if f.starts_with("domain:") {
                         domain.push(f.strip_prefix("domain:").unwrap().trim().to_string());
                     } else if f.starts_with("keyword:") {
@@ -399,6 +447,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
         let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
@@ -419,6 +468,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
         let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
@@ -478,6 +528,7 @@ mod tests {
             None,
             &[],
             &[],
+            std::path::Path::new(""),
         )
         .unwrap();
 
@@ -494,5 +545,71 @@ mod tests {
         // Check that "h2" has been stripped
         assert!(alpn.iter().all(|v| v.as_str() != Some("h2")));
         assert!(alpn.iter().any(|v| v.as_str() == Some("http/1.1")));
+    }
+
+    #[test]
+    fn test_generate_singbox_config_with_rule_sets() {
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "direct".to_string(),
+            tag: "direct".to_string(),
+            fields: std::collections::HashMap::new(),
+        }];
+
+        let tun = TunSettings::default();
+        let rule_sets = vec![
+            crate::config::rules::RuleSet {
+                id: "rs1".into(),
+                tag: "geosite-youtube".into(),
+                set_type: "remote".into(),
+                format: "binary".into(),
+                url: Some("https://example.com/youtube.srs".into()),
+                file_path: None,
+                update_interval: "1d".into(),
+            },
+            crate::config::rules::RuleSet {
+                id: "rs2".into(),
+                tag: "local-blocklist".into(),
+                set_type: "local".into(),
+                format: "source".into(),
+                url: None,
+                file_path: Some("C:/rules.json".into()),
+                update_interval: "".into(),
+            },
+        ];
+
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &rule_sets,
+            std::path::Path::new(""),
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let rule_sets_arr = config["route"]["rule_set"].as_array().unwrap();
+        assert_eq!(rule_sets_arr.len(), 2);
+
+        let rs1 = &rule_sets_arr[0];
+        assert_eq!(rs1["tag"].as_str().unwrap(), "geosite-youtube");
+        assert_eq!(rs1["type"].as_str().unwrap(), "remote");
+        assert_eq!(rs1["format"].as_str().unwrap(), "binary");
+        assert_eq!(
+            rs1["url"].as_str().unwrap(),
+            "https://example.com/youtube.srs"
+        );
+        assert_eq!(rs1["update_interval"].as_str().unwrap(), "1d");
+        assert_eq!(rs1["download_detour"].as_str().unwrap(), "proxy");
+
+        let rs2 = &rule_sets_arr[1];
+        assert_eq!(rs2["tag"].as_str().unwrap(), "local-blocklist");
+        assert_eq!(rs2["type"].as_str().unwrap(), "local");
+        assert_eq!(rs2["format"].as_str().unwrap(), "source");
+        assert_eq!(rs2["path"].as_str().unwrap(), "C:/rules.json");
     }
 }

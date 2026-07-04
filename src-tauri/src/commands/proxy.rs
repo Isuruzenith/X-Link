@@ -78,16 +78,25 @@ fn spawn_singbox_sidecar(
     config_path: &Path,
     session_id: &str,
 ) -> Result<oneshot::Receiver<Option<i32>>, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let _ = std::fs::create_dir_all(&app_data_dir);
+
     let (mut rx, child) = app
         .shell()
         .sidecar("sing-box")
         .map_err(|e| format!("Failed to initialize sidecar: {}", e))
         .and_then(|s| {
-            s.args(["run", "-c", config_path.to_str().unwrap()])
-                .env("ENABLE_DEPRECATED_GEOSITE", "true")
-                .env("ENABLE_DEPRECATED_GEOIP", "true")
-                .spawn()
-                .map_err(|e| format!("spawn_failed: {}", e))
+            s.args([
+                "run",
+                "-c",
+                config_path.to_str().unwrap(),
+                "-D",
+                app_data_dir.to_str().unwrap(),
+            ])
+            .env("ENABLE_DEPRECATED_GEOSITE", "true")
+            .env("ENABLE_DEPRECATED_GEOIP", "true")
+            .spawn()
+            .map_err(|e| format!("spawn_failed: {}", e))
         })?;
 
     {
@@ -460,6 +469,7 @@ pub async fn prepare_and_patch_config(
     let tun_settings = load_tun_settings(app);
     let mixed_port = settings.mixed_port;
     let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(app);
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     // Generate a clean sing-box config from scratch
     let generated_config = crate::config::generator::generate_singbox_config(
@@ -472,6 +482,7 @@ pub async fn prepare_and_patch_config(
         selected_outbound_tag,
         &user_rules,
         &rule_sets,
+        &app_data_dir,
     )?;
 
     let mut final_config_val: serde_json::Value = serde_json::from_str(&generated_config)
