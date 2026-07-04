@@ -96,6 +96,9 @@ fn spawn_singbox_sidecar(
             ])
             .env("ENABLE_DEPRECATED_GEOSITE", "true")
             .env("ENABLE_DEPRECATED_GEOIP", "true")
+            .env("ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS", "true")
+            .env("ENABLE_DEPRECATED_LEGACY_DNS_SERVERS", "true")
+            .env("ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM", "true")
             .spawn()
             .map_err(|e| format!("spawn_failed: {}", e))
         })?;

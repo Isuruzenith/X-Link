@@ -22,6 +22,9 @@ pub async fn validate_singbox_config(app: &AppHandle, config_path: &Path) -> Res
         ])
         .env("ENABLE_DEPRECATED_GEOSITE", "true")
         .env("ENABLE_DEPRECATED_GEOIP", "true")
+        .env("ENABLE_DEPRECATED_LEGACY_DNS_FAKEIP_OPTIONS", "true")
+        .env("ENABLE_DEPRECATED_LEGACY_DNS_SERVERS", "true")
+        .env("ENABLE_DEPRECATED_OUTBOUND_DNS_RULE_ITEM", "true")
         .output()
         .await
         .map_err(|e| format!("Failed to execute sing-box check: {}", e))?;

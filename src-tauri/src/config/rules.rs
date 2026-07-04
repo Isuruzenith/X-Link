@@ -51,8 +51,8 @@ pub fn load_routing_rules_from_file(app: &tauri::AppHandle) -> (Vec<RoutingRule>
 
 pub fn build_singbox_rule(
     rule: &RoutingRule,
-    geosite_db_exists: bool,
-    geoip_db_exists: bool,
+    _geosite_db_exists: bool,
+    _geoip_db_exists: bool,
 ) -> Option<Value> {
     let outbound = map_outbound_action(&rule.outbound);
     let invert = rule.invert;
@@ -70,23 +70,16 @@ pub fn build_singbox_rule(
         }
         "ip_cidr" => serde_json::json!({ "ip_cidr":        [&rule.value], "outbound": outbound }),
         "geoip" => {
-            if !geoip_db_exists {
-                return None;
-            }
-            serde_json::json!({ "geoip":          [&rule.value], "outbound": outbound })
+            serde_json::json!({ "rule_set": [format!("geoip-{}", rule.value)], "outbound": outbound })
         }
         "geosite" => {
-            if !geosite_db_exists {
-                if rule.value == "private" {
-                    serde_json::json!({
-                        "domain_suffix": [".lan", ".local", ".internal", ".home.arpa", "localhost"],
-                        "outbound": outbound
-                    })
-                } else {
-                    return None;
-                }
+            if rule.value == "private" {
+                serde_json::json!({
+                    "domain_suffix": [".lan", ".local", ".internal", ".home.arpa", "localhost"],
+                    "outbound": outbound
+                })
             } else {
-                serde_json::json!({ "geosite":        [&rule.value], "outbound": outbound })
+                serde_json::json!({ "rule_set": [format!("geosite-{}", rule.value)], "outbound": outbound })
             }
         }
         "port" => {
@@ -168,14 +161,14 @@ mod tests {
     fn test_geoip_rule() {
         let rule = make_rule("geoip", "cn", "direct");
         let json = build_singbox_rule(&rule, true, true).unwrap();
-        assert_eq!(json["geoip"][0].as_str().unwrap(), "cn");
+        assert_eq!(json["rule_set"][0].as_str().unwrap(), "geoip-cn");
     }
 
     #[test]
     fn test_geosite_rule() {
         let rule = make_rule("geosite", "google", "proxy");
         let json = build_singbox_rule(&rule, true, true).unwrap();
-        assert_eq!(json["geosite"][0].as_str().unwrap(), "google");
+        assert_eq!(json["rule_set"][0].as_str().unwrap(), "geosite-google");
     }
 
     #[test]
@@ -187,13 +180,18 @@ mod tests {
         assert_eq!(json["outbound"].as_str().unwrap(), "direct");
 
         let rule_other = make_rule("geosite", "google", "proxy");
-        assert!(build_singbox_rule(&rule_other, false, true).is_none());
+        let json_other = build_singbox_rule(&rule_other, false, true).unwrap();
+        assert_eq!(
+            json_other["rule_set"][0].as_str().unwrap(),
+            "geosite-google"
+        );
     }
 
     #[test]
     fn test_geoip_ignored_when_missing() {
         let rule = make_rule("geoip", "cn", "direct");
-        assert!(build_singbox_rule(&rule, true, false).is_none());
+        let json = build_singbox_rule(&rule, true, false).unwrap();
+        assert_eq!(json["rule_set"][0].as_str().unwrap(), "geoip-cn");
     }
 
     #[test]
