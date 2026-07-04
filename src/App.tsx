@@ -121,8 +121,9 @@ export default function App() {
     const unlistenLog = listen<string>('sing-box-log', (e) => {
       let line = e.payload.trim();
       if (!line) return;
-      // Strip ANSI escape color codes to keep logs clean and prevent UI highlighting corruption
-      line = line.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+      // eslint-disable-next-line no-control-regex
+      const ansiRegex = new RegExp('\\x1B(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])', 'g');
+      line = line.replace(ansiRegex, '');
       let type: 'info' | 'warn' | 'error' | 'system' = 'info';
       if (line.toLowerCase().includes('warn')) {
         type = 'warn';
@@ -187,7 +188,7 @@ export default function App() {
       unlistenStatus.then((f) => f());
       unlistenSettings.then((f) => f());
     };
-  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
+  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, initStats, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
 
   // ── PORT CONFLICT DETECTOR ─────────────────────────────────────────────────
   useEffect(() => {

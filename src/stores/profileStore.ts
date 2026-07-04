@@ -8,6 +8,13 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore } from './settingsStore';
 
+export interface GeoCacheEntry {
+  countryCode: string;
+  countryName: string;
+  cityName: string;
+  regionName: string;
+}
+
 interface ImportResult {
   id: string;
   name: string;
@@ -22,7 +29,7 @@ interface ProfileState {
   selectedProfileId: string | null;
   nodes: ProxyNode[];
   selectedNodeTag: string | null;
-  nodeGeoCache: Record<string, any>;
+  nodeGeoCache: Record<string, GeoCacheEntry | 'loading'>;
   activatingNodeTag: string | null;
 
   // Import form state

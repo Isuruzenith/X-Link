@@ -1,6 +1,6 @@
 import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
-import { useProfileStore, getCountryCode } from '../stores/profileStore';
+import { useProfileStore, getCountryCode, type GeoCacheEntry } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
 import type { Profile, ProxyNode, NodeUsageStats } from '../utils/store';
@@ -40,7 +40,7 @@ function ProfileHeaderCard({
   nodes: ProxyNode[];
   selectedNodeTag: string | null;
   isConnected: boolean;
-  nodeGeoCache: Record<string, any>;
+  nodeGeoCache: Record<string, GeoCacheEntry | 'loading'>;
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
 }) {
   const activeNode = selectedNodeTag ? nodes.find((n: ProxyNode) => n.tag === selectedNodeTag) : null;
