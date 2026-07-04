@@ -467,4 +467,49 @@ mod tests {
         assert_eq!(rules[2]["action"].as_str().unwrap(), "reject");
         assert_eq!(rules[2]["method"].as_str().unwrap(), "drop");
     }
+
+    #[test]
+    fn test_build_route_rules_respects_user_rules_and_does_not_auto_route_rule_sets() {
+        let user_rules = vec![crate::config::rules::RoutingRule {
+            id: "r1".to_string(),
+            rule_type: "domain".to_string(),
+            value: "custom-bypass.com".to_string(),
+            outbound: "direct".to_string(),
+            invert: false,
+            notes: None,
+            enabled: Some(true),
+        }];
+
+        let rule_sets = vec![crate::config::rules::RuleSet {
+            id: "rs1".to_string(),
+            tag: "geosite-youtube".to_string(),
+            set_type: "remote".to_string(),
+            format: "binary".to_string(),
+            url: Some("https://example.com".to_string()),
+            file_path: None,
+            update_interval: "1d".to_string(),
+        }];
+
+        let rules = build_route_rules(true, true, &user_rules, &rule_sets, true, true);
+
+        // rules should contain hijack-dns (port 53), sniff, bypass_lan (ip_is_private & domain_suffix),
+        // and our user rule (custom-bypass.com).
+        // It must NOT contain any auto-generated rule-set routing rules for "geosite-youtube"!
+
+        let custom_bypass_rule = rules.iter().find(|r| {
+            r.get("domain")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v.as_str() == Some("custom-bypass.com")))
+                .unwrap_or(false)
+        });
+        assert!(custom_bypass_rule.is_some());
+
+        let auto_ruleset_rule = rules.iter().find(|r| {
+            r.get("rule_set")
+                .and_then(|rs| rs.as_array())
+                .map(|arr| arr.iter().any(|v| v.as_str() == Some("geosite-youtube")))
+                .unwrap_or(false)
+        });
+        assert!(auto_ruleset_rule.is_none());
+    }
 }
