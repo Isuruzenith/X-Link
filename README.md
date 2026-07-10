@@ -9,20 +9,6 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **X-Link** is a premium, high-performance desktop proxy client built with **Tauri v2**, **React**, **TypeScript**, and **Rust**. Powered by a dynamically managed **sing-box** core sidecar, X-Link provides system-wide proxy tunnels (TUN mode), advanced DNS routing, and an elegant glassmorphic dashboard.
-
-[Key Features](#-key-features) • [Architecture](#%EF%B8%8F-architecture) • [Setup](#-development-setup) • [CI/CD Pipeline](#-cicd-release-pipeline) • [AI Handover](#-ai-handover)
-
-</div>
-
----
-
-## 🎨 Premium Visual Interface
-
-X-Link features a state-of-the-art interface tailored for usability and aesthetics:
-* **Glassmorphic Dashboard**: Sleek semi-transparent panels with dynamic grid layouts.
-* **Interactive Traffic Visualizer**: A custom canvas-driven real-time speedometer and traffic graph.
-* **Tray-to-Minimize Behavior**: Dynamically changes status icons (Connected 🟢, Connecting 🟡, Disconnected 🔴) with contextual quick-menus in the system tray.
-
 ---
 
 ## 🚀 Key Features
