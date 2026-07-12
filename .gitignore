@@ -18,6 +18,7 @@ src-tauri/gen/
 .env
 .env.*
 !.env.example
+.obsidian
 
 # OS metadata files
 Thumbs.db
