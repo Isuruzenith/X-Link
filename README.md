@@ -1,135 +1,253 @@
-# 🚀 X-Link Desktop Proxy Client
-
 <div align="center">
 
+<img src="src/assets/X-Link-logo.png" alt="X-Link Logo" width="120" />
+
+# X-Link
+
+**Next-Generation Desktop Proxy Client**
+
+A premium, cross-platform proxy client built with **Tauri v2**, **React 19**, and **Rust**.
+Powered by a self-managing **sing-box** core with system-wide TUN tunnels, intelligent connection recovery, and a glassmorphic interface.
+
 [![Build and Release](https://github.com/Isuruzenith/X-Link/actions/workflows/release.yml/badge.svg)](https://github.com/Isuruzenith/X-Link/actions/workflows)
-[![Release Please](https://img.shields.io/badge/Release--Please-automated-brightgreen.svg)](https://github.com/google-github-actions/release-please-action)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Isuruzenith/X-Link)
-[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blueviolet.svg)](#)
+[![GitHub Release](https://img.shields.io/github/v/release/Isuruzenith/X-Link?color=blue&label=latest)](https://github.com/Isuruzenith/X-Link/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blueviolet.svg)](#-installation)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-**X-Link** is a premium, high-performance desktop proxy client built with **Tauri v2**, **React**, **TypeScript**, and **Rust**. Powered by a dynamically managed **sing-box** core sidecar, X-Link provides system-wide proxy tunnels (TUN mode), advanced DNS routing, and an elegant glassmorphic dashboard.
+---
 
-[Key Features](#-key-features) • [Architecture](#%EF%B8%8F-architecture) • [Setup](#-development-setup) • [CI/CD Pipeline](#-cicd-release-pipeline) • [AI Handover](#-ai-handover)
+[Features](#-features) · [Architecture](#-architecture) · [Getting Started](#-getting-started) · [Contributing](#-contributing) · [License](#-license)
 
 </div>
 
----
+<br />
 
-## 🎨 Premium Visual Interface
+## ✨ Features
 
-X-Link features a state-of-the-art interface tailored for usability and aesthetics:
-* **Glassmorphic Dashboard**: Sleek semi-transparent panels with dynamic grid layouts.
-* **Interactive Traffic Visualizer**: A custom canvas-driven real-time speedometer and traffic graph.
-* **Tray-to-Minimize Behavior**: Dynamically changes status icons (Connected 🟢, Connecting 🟡, Disconnected 🔴) with contextual quick-menus in the system tray.
+<table>
+<tr>
+<td width="50%">
 
----
+### 🔌 Multi-Protocol Engine
+Connect through **VLESS** (TCP Reality & WebSocket), **VMess**, **Trojan**, **Shadowsocks**, **SOCKS5**, and **HTTP** — all from a single unified interface.
 
-## 🚀 Key Features
+### 🛡️ System-Wide TUN Mode
+Creates a virtual network interface (`wintun` on Windows, native `utun`/`tun` on macOS/Linux) for true system-wide traffic capture with automated privilege elevation.
 
-* **🔌 Multi-Protocol Integration**: Support for VLESS (with TCP Reality & WS), VMess, Trojan, Shadowsocks, SOCKS, and HTTP.
-* **🛡️ Virtual TUN Interface**: Establishes system-wide proxy tunnels using `wintun.dll` (Windows) and native `utun`/`tun` adapters (macOS/Linux) with automated elevation helpers.
-* **⚡ VLESS ALPN Self-Healing**: Automatically strips `"h2"` from WebSocket outbounds during configuration generation to prevent standard reverse proxies (like Nginx) from dropping handshakes with `EOF`.
-* **🔄 5-Stage Connection Self-Healing Loop**:
-  1. Default settings (uTLS Chrome fingerprint).
-  2. Fallback to uTLS Firefox fingerprint.
-  3. Fallback to native Go TLS (disable uTLS).
-  4. Fallback to public DNS over HTTPS bootstrap.
-  5. Fallback to TUN Compatibility profile, rolling back automatically to System Proxy mode on total failure.
-* **⚙️ Advanced Routing & DNS**: Direct detours for local LAN, DNS hijacking, and secure DNS-over-HTTPS (DoH) resolution inside the tunnel with FakeIP capability.
+### ⚡ ALPN Self-Healing
+Automatically strips `h2` from WebSocket outbounds at config generation time, preventing silent `EOF` failures when connecting through standard reverse proxies.
 
----
+</td>
+<td width="50%">
 
-## ⚙️ Architecture
+### 🔄 5-Stage Connection Recovery
+Never get stuck on "Connecting..." — X-Link automatically cycles through 5 progressively permissive TLS/DNS strategies before gracefully falling back to System Proxy mode.
 
-X-Link coordinates frontend inputs, Rust platform bindings, and the `sing-box` sidecar execution engine:
+### 🌐 FakeIP DNS
+Zero-latency domain resolution using synthetic IPs from a reserved range (`198.18.0.0/15`), with automatic bypass for local network domains.
+
+### 🎨 Glassmorphic Dashboard
+Real-time traffic visualization with canvas-driven speedometers, live connection logs, and adaptive system tray icons (🟢 🟡 🔴) with contextual quick-menus.
+
+</td>
+</tr>
+</table>
+
+<br />
+
+<details>
+<summary><strong>🔄 Connection Recovery — How It Works</strong></summary>
+<br />
+
+When a connection attempt fails, X-Link doesn't just retry — it systematically adjusts its strategy:
+
+| Stage | Strategy | What Changes |
+|:-----:|----------|--------------|
+| 1 | **Chrome uTLS** | Default config — Chrome TLS fingerprint |
+| 2 | **Firefox uTLS** | Switches TLS fingerprint to Firefox |
+| 3 | **Native TLS** | Disables uTLS fingerprinting entirely |
+| 4 | **DNS Bootstrap** | Routes proxy DNS through `1.1.1.1` / `8.8.8.8` direct |
+| 5 | **TUN Compatibility** | Relaxes strict routing and interface settings |
+| ⤵️ | **System Proxy Rollback** | If all TUN attempts fail, regenerates config for system proxy mode |
+
+</details>
+
+<br />
+
+## 🏗 Architecture
 
 ```mermaid
 graph TD
-    UI[Svelte/React Frontend] <-->|IPC Invocation| Rust[Rust Tauri Core]
-    Rust <-->|Auto-download Sidecars| Setup[setup-sidecars.cjs]
-    Rust -->|Spawns / Manages| SingBox[sing-box Sidecar Engine]
-    SingBox <-->|Virtual Interface| TUN[TUN / wintun.dll Driver]
-    SingBox <-->|DNS Queries| DNS[DNS Engine DoH]
-    SingBox <-->|TLS Handshakes| Server[VLESS / Trojan VPN Server]
+    UI["React Frontend<br/><small>TypeScript · Vite · Glassmorphic CSS</small>"]
+    Rust["Tauri v2 Core<br/><small>Rust · IPC Commands · OS Bindings</small>"]
+    Setup["setup-sidecars.cjs<br/><small>Auto-download at build time</small>"]
+    SingBox["sing-box Engine<br/><small>Sidecar Process · v1.11.0+</small>"]
+    TUN["TUN / wintun Driver<br/><small>Virtual Network Interface</small>"]
+    DNS["DNS Engine<br/><small>DoH · FakeIP · Hijack</small>"]
+    Server["Proxy Server<br/><small>VLESS · VMess · Trojan</small>"]
+
+    UI <-->|"IPC Invocation"| Rust
+    Rust <-->|"Download + Verify"| Setup
+    Rust -->|"Spawn · Monitor · Heal"| SingBox
+    SingBox <-->|"System Traffic"| TUN
+    SingBox <-->|"Secure Resolution"| DNS
+    SingBox <-->|"TLS Handshake"| Server
+
+    style UI fill:#1a1a2e,stroke:#e94560,color:#fff
+    style Rust fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style SingBox fill:#16213e,stroke:#533483,color:#fff
+    style TUN fill:#0f3460,stroke:#e94560,color:#fff
+    style DNS fill:#0f3460,stroke:#533483,color:#fff
+    style Server fill:#16213e,stroke:#e94560,color:#fff
+    style Setup fill:#1a1a2e,stroke:#533483,color:#fff
 ```
 
----
+### Tech Stack
 
-## 🛠️ Technology Stack
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | React 19 · TypeScript · Vite 8 · Custom Glassmorphic CSS Design System |
+| **Backend** | Rust · Tauri v2 · System Proxy Registry · Platform OS Bindings |
+| **Core Engine** | sing-box (dynamically downloaded sidecar) |
+| **TUN Driver** | wintun.dll (Windows) · utun (macOS) · tun (Linux) |
 
-* **Frontend**: React 19, TypeScript, Vite, CSS (Custom Design System with Glassmorphic Elements)
-* **Backend**: Rust, Tauri v2 (IPC commands, System Proxy registry, OS bindings)
-* **Core Engine**: `sing-box` (v1.11.0 as a dynamically downloaded sidecar process)
-* **TUN Driver**: `wintun.dll` (dynamically downloaded/copied for Windows virtual interfaces)
+<br />
 
----
-
-## 📁 Directory Structure
+## 📁 Project Structure
 
 ```text
 X-Link/
-├── .github/workflows/   # CI/CD workflows (release-please & tauri-build)
-├── scripts/             # CommonJS pre-build setup utilities
-│   └── setup-sidecars.cjs # Cross-platform sidecar auto-downloader
-├── src/                 # React Frontend application
-│   ├── components/      # UI elements & settings panels
-│   └── App.tsx          # Main entry component & state orchestration
-├── src-tauri/           # Rust Backend
-│   ├── src/             # Core Rust modules
-│   │   ├── commands/    # Tauri commands (system, config, proxy, latency pings)
-│   │   └── config/      # Config generator & raw URI parsers (adapters)
-│   └── tauri.conf.json  # Tauri app capability and bundle configurations
+├── .github/
+│   ├── ISSUE_TEMPLATE/       # Bug report & feature request templates
+│   ├── pull_request_template.md
+│   └── workflows/            # CI/CD (release-please & tauri-build)
+│
+├── scripts/
+│   └── setup-sidecars.cjs    # Cross-platform sidecar auto-downloader
+│
+├── src/                      # React Frontend
+│   ├── assets/               # Logo & static assets
+│   ├── components/           # Reusable UI components
+│   │   ├── TrafficChart.tsx   # Canvas-driven real-time traffic graph
+│   │   ├── NavRail.tsx        # Navigation sidebar
+│   │   └── domain/           # Domain-specific components
+│   ├── views/                # Page-level views
+│   │   ├── DashboardView     # Main dashboard with speedometer
+│   │   ├── ConfigView        # Protocol configuration
+│   │   ├── ConnectionsView   # Active connection monitor
+│   │   ├── RoutingView       # Custom routing rules
+│   │   ├── LogsView          # Real-time log viewer
+│   │   └── SettingsView      # App & TUN settings
+│   └── stores/               # Zustand state management
+│
+├── src-tauri/                # Rust Backend
+│   ├── src/
+│   │   ├── commands/         # Tauri IPC commands
+│   │   │   ├── proxy.rs      # Connection lifecycle & self-healing
+│   │   │   └── latency.rs    # Latency pinging with DoH bypass
+│   │   ├── config/
+│   │   │   ├── generator.rs  # sing-box JSON config builder
+│   │   │   ├── adapters/     # URI parsers (vless://, vmess://, etc.)
+│   │   │   └── mod.rs        # Route exclusions & network detection
+│   │   └── state.rs          # Global app state & defaults
+│   └── tauri.conf.json       # Tauri capabilities & bundle config
+│
+├── AI_HANDOVER.md            # Architectural rules for developers & AI agents
+├── CONTRIBUTING.md           # Contribution guidelines
+├── CODE_OF_CONDUCT.md        # Contributor Covenant v2.1
+├── SECURITY.md               # Vulnerability reporting policy
+└── LICENSE                   # MIT License
 ```
 
----
+<br />
 
-## 💻 Development Setup
+## 🚀 Getting Started
 
 ### Prerequisites
-* **Node.js** (v20+ recommended)
-* **Rust & Cargo** (Stable toolchain)
-* **Windows C++ Build Tools** (For Windows builds)
+
+| Tool | Version | Install |
+|------|---------|---------|
+| **Node.js** | v22+ | [nodejs.org](https://nodejs.org/) |
+| **Rust** | Stable (latest) | [rustup.rs](https://rustup.rs/) |
+| **C++ Build Tools** | — | Windows only — [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) |
 
 ### Quick Start
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/Isuruzenith/X-Link.git
-   cd X-Link
-   ```
 
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+```bash
+# 1. Clone
+git clone https://github.com/Isuruzenith/X-Link.git
+cd X-Link
 
-3. **Run the Development Server**:
-   ```bash
-   npm run tauri dev
-   ```
-   *Note: On launch, the pre-build script will automatically download the correct version of `sing-box` (and `wintun.dll` if on Windows) and place it in the `src-tauri/binaries/` directory. These binaries are ignored by Git.*
+# 2. Install dependencies
+npm install
 
----
+# 3. Launch development mode
+npm run tauri dev
+```
 
-## 🤖 CI/CD Release Pipeline
+> **📦 Automatic Sidecar Setup** — On first launch, the pre-build script downloads the correct `sing-box` binary (and `wintun.dll` on Windows) into `src-tauri/binaries/`. These files are git-ignored and never committed.
 
-We use a fully automated release pipeline powered by Google's **Release Please** and a cross-platform Tauri build matrix:
+<br />
 
-1. **Commit Guidelines**: Write commits following the [Conventional Commits](https://www.conventionalcommits.org/) specification (e.g. `feat: ...`, `fix: ...`).
-2. **Release PR**: Upon push to `main`, Release Please creates/updates a Release PR. It automatically bumps version numbers in `package.json` and `src-tauri/tauri.conf.json` and compiles a changelog.
-3. **Automated Publish**: When the Release PR is merged:
-   - Release Please publishes the release tag (e.g. `v0.1.0`).
-   - The same pipeline spawns cross-platform runners (`windows-latest`, `macos-latest`, `ubuntu-22.04`) in parallel.
-   - It builds installer files (`.msi` / `.exe` for Windows, `.dmg` / `.app` for macOS, `.deb` / `.AppImage` for Linux) and uploads them directly to the published Release.
+## 🤝 Contributing
 
----
+We welcome contributions of all kinds! Here's how to get involved:
 
-## 📖 AI Handover
+| Resource | Description |
+|----------|-------------|
+| 📖 [Contributing Guide](CONTRIBUTING.md) | Development setup, code standards, and PR process |
+| 📜 [Code of Conduct](CODE_OF_CONDUCT.md) | Expected community behavior (Contributor Covenant v2.1) |
+| 🔒 [Security Policy](SECURITY.md) | How to report vulnerabilities privately |
+| 🤖 [AI Handover](AI_HANDOVER.md) | Architectural invariants for AI agents and new developers |
 
-For AI coding agents working on this repository, please review [AI_HANDOVER.md](AI_HANDOVER.md) in the root folder before making changes. It documents critical VLESS WebSocket ALPN restrictions, routing loop exclusions, FakeIP DNS optimizations, and connection fallback steps.
+### Commit Convention
 
----
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) with automated versioning via [Release Please](https://github.com/google-github-actions/release-please-action):
+
+```
+feat: add Shadowsocks protocol support     → minor version bump
+fix: prevent ALPN h2 in WebSocket outbounds → patch version bump
+feat!: redesign config schema               → major version bump
+```
+
+<br />
+
+## 🤖 CI/CD Pipeline
+
+Fully automated cross-platform releases powered by **Release Please** and **GitHub Actions**:
+
+```mermaid
+graph LR
+    Push["Push to main"] --> RP["Release Please<br/>creates Release PR"]
+    RP --> Merge["Merge PR"]
+    Merge --> Tag["Publish Tag<br/><small>e.g. v0.7.1</small>"]
+    Tag --> Win["Windows<br/><small>.msi · .exe</small>"]
+    Tag --> Mac["macOS<br/><small>.dmg · .app</small>"]
+    Tag --> Linux["Linux<br/><small>.deb · .AppImage</small>"]
+
+    style Push fill:#1a1a2e,stroke:#e94560,color:#fff
+    style RP fill:#16213e,stroke:#533483,color:#fff
+    style Merge fill:#1a1a2e,stroke:#0f3460,color:#fff
+    style Tag fill:#0f3460,stroke:#e94560,color:#fff
+    style Win fill:#16213e,stroke:#0f3460,color:#fff
+    style Mac fill:#16213e,stroke:#0f3460,color:#fff
+    style Linux fill:#16213e,stroke:#0f3460,color:#fff
+```
+
+<br />
 
 ## 📄 License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the **MIT License** — Copyright © 2026 [Isuruzenith](https://github.com/Isuruzenith).
+
+See [LICENSE](LICENSE) for the full text.
+
+---
+
+<div align="center">
+
+**Built with ❤️ using [Tauri](https://tauri.app/) · [React](https://react.dev/) · [Rust](https://www.rust-lang.org/) · [sing-box](https://sing-box.sagernet.org/)**
+
+</div>
