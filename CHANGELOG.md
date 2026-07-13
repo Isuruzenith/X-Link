@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.2](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.1...x-link-v0.7.2) (2026-07-04)
+
+
+### Bug Fixes
+
+* implement configuration generator and infrastructure for persistent application state and migration management ([ae75429](https://github.com/Isuruzenith/X-Link/commit/ae75429f1a5baa4d031178784e50d460d5bc8613))
+* implement configuration management utilities for routing rules, TUN compatibility, and system DNS resolution ([5d1ef7d](https://github.com/Isuruzenith/X-Link/commit/5d1ef7d51e40edb14f9bb7ee9111eecf0350aff5))
+* implement core data storage, configuration schema migration, and backend state management utilities. ([c83e0a9](https://github.com/Isuruzenith/X-Link/commit/c83e0a928de49586c1f294be0da280977dce76dc))
+* implement persistent settings management and system configuration state sync ([31c520e](https://github.com/Isuruzenith/X-Link/commit/31c520eaa31ee2af277767c1e75021dbdadee4b6))
+* implement system tray menu and management utilities in tray.rs ([379b063](https://github.com/Isuruzenith/X-Link/commit/379b063983909f5bd79ea10a7aefd9824ab45903))
+
 ## [0.7.1](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.0...x-link-v0.7.1) (2026-07-04)
 
 
