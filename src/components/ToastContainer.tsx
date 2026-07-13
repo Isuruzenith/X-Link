@@ -9,17 +9,17 @@ const TOAST_ICONS: Record<ToastType, typeof CheckCircle> = {
 };
 
 const TOAST_GLOWS: Record<ToastType, string> = {
-  success: 'rgba(46, 213, 115, 0.25)',
-  error: 'rgba(239, 68, 68, 0.25)',
-  warning: 'rgba(245, 158, 11, 0.25)',
-  info: 'rgba(124, 141, 255, 0.25)',
+  success: 'var(--status-ok-glow)',
+  error: 'var(--status-err-glow)',
+  warning: 'var(--status-warn-dim)',
+  info: 'var(--status-info-dim)',
 };
 
 const TOAST_COLORS: Record<ToastType, { border: string; icon: string }> = {
-  success: { border: 'rgba(46, 213, 115, 0.15)', icon: 'var(--status-ok)' },
-  error:   { border: 'rgba(239, 68, 68, 0.15)', icon: 'var(--status-err)' },
-  warning: { border: 'rgba(245, 158, 11, 0.15)', icon: 'var(--status-warn)' },
-  info:    { border: 'var(--border-accent-dim)', icon: 'var(--accent-primary)' },
+  success: { border: 'var(--status-ok-dim)', icon: 'var(--status-ok)' },
+  error:   { border: 'var(--status-err-dim)', icon: 'var(--status-err)' },
+  warning: { border: 'var(--status-warn-dim)', icon: 'var(--status-warn)' },
+  info:    { border: 'var(--status-info-dim)', icon: 'var(--status-info)' },
 };
 
 export function ToastContainer() {

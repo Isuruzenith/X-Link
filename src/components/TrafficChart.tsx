@@ -103,7 +103,8 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       data: number[],
       strokeColor: string,
       fillGradient: CanvasGradient,
-      glowColor: string
+      glowColor: string,
+      isDashed = false
     ) => {
       if (data.length < 2) return;
 
@@ -139,6 +140,11 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+      if (isDashed) {
+        ctx.setLineDash([4, 3]);
+      } else {
+        ctx.setLineDash([]);
+      }
 
       ctx.beginPath();
       ctx.moveTo(firstPt.x, firstPt.y);
@@ -164,22 +170,34 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       displayHistory.map((h) => h.up)
     );
 
-    // Create Gradients
-    // Download (Teal glow)
-    const downGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    downGrad.addColorStop(0, 'rgba(74, 158, 255, 0.25)');
-    downGrad.addColorStop(1, 'rgba(74, 158, 255, 0.00)');
+    // Retrieve theme colors dynamically
+    const style = getComputedStyle(document.documentElement);
+    const chartDownStroke = style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
+    const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
+    const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.1)';
+    const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
 
-    // Upload (Purple/Violet glow)
+    const chartUpStroke = style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
+    const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
+    const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.05)';
+    const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
+
+    // Create Gradients
+    // Download
+    const downGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
+    downGrad.addColorStop(0, chartDownFill0);
+    downGrad.addColorStop(1, chartDownFill1);
+
+    // Upload
     const upGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    upGrad.addColorStop(0, 'rgba(124, 141, 255, 0.25)');
-    upGrad.addColorStop(1, 'rgba(124, 141, 255, 0.00)');
+    upGrad.addColorStop(0, chartUpFill0);
+    upGrad.addColorStop(1, chartUpFill1);
 
     // Draw Download Curve first (background)
-    drawCurve(paddedDown, '#4A9EFF', downGrad, 'rgba(74, 158, 255, 0.5)');
+    drawCurve(paddedDown, chartDownStroke, downGrad, chartDownGlow, false);
 
     // Draw Upload Curve second (foreground)
-    drawCurve(paddedUp, '#7C8DFF', upGrad, 'rgba(124, 141, 255, 0.5)');
+    drawCurve(paddedUp, chartUpStroke, upGrad, chartUpGlow, true);
 
     // Draw X-axis line (subtle)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';

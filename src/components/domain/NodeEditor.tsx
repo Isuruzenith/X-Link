@@ -93,8 +93,8 @@ export function NodeEditor() {
                   cursor: 'pointer',
                   fontSize: '12px',
                   fontWeight: 500,
-                  color: store.section === s ? 'var(--accent-primary)' : 'var(--text-med)',
-                  borderBottom: store.section === s ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  color: store.section === s ? 'var(--text-high)' : 'var(--text-med)',
+                  borderBottom: store.section === s ? '2px solid var(--text-high)' : '2px solid transparent',
                   textTransform: 'capitalize',
                   transition: 'all 0.2s',
                 }}

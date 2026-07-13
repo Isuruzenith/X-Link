@@ -4,25 +4,41 @@ import { useRoutingStore } from '../stores/routingStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { RoutingRuleType, OutboundAction } from '../utils/store';
 
-const OUTBOUND_COLORS: Record<OutboundAction, string> = {
-  proxy: 'var(--accent-primary)',
-  direct: 'var(--status-ok)',
-  block: 'var(--status-err)',
-  dns: 'var(--accent-secondary)',
-};
+const BadgeOutbound = ({ action }: { action: OutboundAction }) => {
+  let style: React.CSSProperties;
+  if (action === 'proxy') {
+    style = {
+      background: 'var(--text-high)',
+      color: 'var(--surface-base)',
+      border: '1px solid var(--text-high)',
+    };
+  } else if (action === 'direct') {
+    style = {
+      background: 'transparent',
+      color: 'var(--text-med)',
+      border: '1px solid var(--border-strong)',
+    };
+  } else if (action === 'block') {
+    style = {
+      background: 'transparent',
+      color: 'var(--text-low)',
+      border: '1px dashed var(--border-strong)',
+    };
+  } else {
+    // dns
+    style = {
+      background: 'var(--surface-sunken)',
+      color: 'var(--text-med)',
+      border: '1px solid var(--border-default)',
+    };
+  }
 
-const BadgeOutbound = ({ action }: { action: OutboundAction }) => (
-  <span
-    className="outbound-badge"
-    style={{
-      background: `${OUTBOUND_COLORS[action]}18`,
-      color: OUTBOUND_COLORS[action],
-      border: `1px solid ${OUTBOUND_COLORS[action]}40`,
-    }}
-  >
-    {action}
-  </span>
-);
+  return (
+    <span className="outbound-badge" style={style}>
+      {action}
+    </span>
+  );
+};
 
 const Inp = ({ value, onChange, placeholder, mono = false }: {
   value: string;

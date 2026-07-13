@@ -170,11 +170,12 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                     key={node.tag}
                     onClick={() => selectNode(node)}
                     style={{
-                      fontSize: '9px', padding: '2px 8px', borderRadius: '10px', border: 'none', cursor: 'pointer',
-                      background: selectedNodeTag === node.tag ? 'var(--accent-primary)' : 'var(--surface-sunken)',
-                      color: selectedNodeTag === node.tag ? '#fff' : 'var(--text-low)',
+                      fontSize: '9px', padding: '2px 8px', borderRadius: '10px', cursor: 'pointer',
+                      background: selectedNodeTag === node.tag ? 'var(--text-high)' : 'var(--surface-sunken)',
+                      color: selectedNodeTag === node.tag ? 'var(--surface-base)' : 'var(--text-low)',
                       transition: 'all 0.15s',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px',
+                      border: selectedNodeTag === node.tag ? '1px solid var(--text-high)' : 'none',
                     }}
                     title={node.tag}
                   >
@@ -204,10 +205,10 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         {/* Metrics */}
         <div className="grid-4">
           {[
-            { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes),    color: 'var(--accent-cyan)' },
-            { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes),       color: 'var(--accent-purple)' },
-            { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime),            color: 'var(--status-warn)' },
-            { icon: Server,        label: 'Connections',  value: `${activeConnections} active`,  color: 'var(--status-ok)' },
+            { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes),    color: 'var(--text-high)' },
+            { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes),       color: 'var(--text-med)' },
+            { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime),            color: 'var(--text-med)' },
+            { icon: Server,        label: 'Connections',  value: `${activeConnections} active`,  color: 'var(--text-high)' },
           ].map(({ icon: Icon, label, value, color }) => (
             <div
               key={label}
@@ -241,11 +242,11 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
               ].map(({ label, port }) => (
                 <span key={label}>
                   <span style={{ color: 'var(--text-low)' }}>{label}: </span>
-                  <strong style={{ color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>{port}</strong>
+                  <strong style={{ color: 'var(--text-high)', fontFamily: 'var(--font-mono)' }}>{port}</strong>
                 </span>
               ))}
               {settings.wifiSharing && (
-                <span style={{ color: 'var(--status-ok)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                <span style={{ color: 'var(--text-high)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
                   <Wifi size={12} /> LAN Sharing On
                 </span>
               )}

@@ -36,30 +36,20 @@ export function LogsView() {
         const tagText = part.slice(1, -1);
         const lowerTag = tagText.toLowerCase();
         
-        let color = '#4a9eff';
-        let bg = 'rgba(74, 158, 255, 0.08)';
-        let border = 'rgba(74, 158, 255, 0.15)';
+        let color = 'var(--text-med)';
+        let bg = 'var(--surface-hover)';
+        let border = 'var(--border-default)';
+        let borderStyle = 'solid';
         
-        if (lowerTag.includes('dns')) {
-          color = '#38bdf8'; // Sky blue
-          bg = 'rgba(56, 189, 248, 0.08)';
-          border = 'rgba(56, 189, 248, 0.15)';
-        } else if (lowerTag.includes('tun') || lowerTag.includes('route')) {
-          color = '#a855f7'; // Purple
-          bg = 'rgba(168, 85, 247, 0.08)';
-          border = 'rgba(168, 85, 247, 0.15)';
-        } else if (lowerTag.includes('system') || lowerTag.includes('core')) {
-          color = '#10b981'; // Green
-          bg = 'rgba(16, 185, 129, 0.08)';
-          border = 'rgba(16, 185, 129, 0.15)';
-        } else if (lowerTag.includes('warn')) {
-          color = '#f59e0b'; // Yellow
-          bg = 'rgba(245, 158, 11, 0.08)';
-          border = 'rgba(245, 158, 11, 0.15)';
+        if (lowerTag.includes('warn')) {
+          color = 'var(--text-high)';
+          bg = 'transparent';
+          border = 'var(--border-strong)';
+          borderStyle = 'dashed';
         } else if (lowerTag.includes('err') || lowerTag.includes('fail')) {
-          color = '#ef4444'; // Red
-          bg = 'rgba(239, 68, 68, 0.08)';
-          border = 'rgba(239, 68, 68, 0.15)';
+          color = 'var(--surface-base)';
+          bg = 'var(--text-high)';
+          border = 'var(--text-high)';
         }
         
         return (
@@ -68,7 +58,7 @@ export function LogsView() {
             style={{
               color,
               background: bg,
-              border: `1px solid ${border}`,
+              border: `1px ${borderStyle} ${border}`,
               padding: '1px 5px',
               borderRadius: '4px',
               fontSize: '10px',
@@ -145,9 +135,7 @@ export function LogsView() {
                 className={`seg-item ${levelFilter === l.key ? 'active' : ''}`}
                 onClick={() => setLevelFilter(l.key)}
                 style={
-                  l.key === 'error' && levelFilter === l.key ? { color: '#ef4444' } :
-                  l.key === 'warn' && levelFilter === l.key ? { color: '#f59e0b' } :
-                  l.key === 'system' && levelFilter === l.key ? { color: '#10b981' } : undefined
+                  levelFilter === l.key ? { fontWeight: 600, color: 'var(--text-high)' } : undefined
                 }
               >
                 {l.label}
@@ -226,14 +214,14 @@ export function LogsView() {
                     style={{
                       width: '38px',
                       flexShrink: 0,
-                      fontWeight: 500,
                       fontSize: '9.5px',
                       letterSpacing: '0.4px',
                       marginRight: '8px',
                       userSelect: 'none',
-                      color: log.type === 'error' ? '#ef4444' :
-                             log.type === 'warn'  ? '#f59e0b' :
-                             log.type === 'system' ? '#10b981' : '#3b82f6'
+                      color: log.type === 'error' ? 'var(--text-high)' :
+                             log.type === 'warn'  ? 'var(--text-med)' :
+                             log.type === 'system' ? 'var(--text-med)' : 'var(--text-low)',
+                      fontWeight: log.type === 'error' ? 700 : 500
                     }}
                   >
                     {getLevelLabel(log.type)}

@@ -303,8 +303,9 @@ export function ConnectionsView() {
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                               <span style={{
                                 fontSize: '9px', fontWeight: 600, padding: '1px 4px', borderRadius: '3px',
-                                background: conn.metadata.network === 'udp' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                                color: conn.metadata.network === 'udp' ? '#a855f7' : '#3b82f6',
+                                background: conn.metadata.network === 'udp' ? 'var(--border-strong)' : 'var(--surface-sunken)',
+                                border: '1px solid var(--border-default)',
+                                color: conn.metadata.network === 'udp' ? 'var(--text-high)' : 'var(--text-med)',
                                 textTransform: 'uppercase'
                               }}>
                                 {conn.metadata.network}
@@ -322,9 +323,9 @@ export function ConnectionsView() {
                             <div style={{ display: 'flex', alignItems: 'center' }}>
                               <span style={{
                                 fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '4px', border: '1px solid',
-                                background: isDirect ? 'var(--status-ok-dim)' : 'var(--accent-primary-dim)',
-                                color: isDirect ? 'var(--status-ok)' : 'var(--accent-primary)',
-                                borderColor: isDirect ? 'rgba(34,197,94,0.15)' : 'rgba(74,158,255,0.15)'
+                                background: isDirect ? 'transparent' : 'var(--text-high)',
+                                color: isDirect ? 'var(--text-med)' : 'var(--surface-base)',
+                                borderColor: isDirect ? 'var(--border-strong)' : 'var(--text-high)'
                               }}>
                                 {chainDisplay}
                               </span>
@@ -340,8 +341,8 @@ export function ConnectionsView() {
                         {/* Real-time calculated speeds */}
                         <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontWeight: 300 }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11.5px', fontWeight: 300 }}>
-                            <span style={{ color: 'var(--status-ok)' }}>↓ {formatSpeed(conn.downSpeed || 0)}</span>
-                            <span style={{ color: 'var(--accent-secondary)' }}>↑ {formatSpeed(conn.upSpeed || 0)}</span>
+                            <span style={{ color: 'var(--text-high)' }}>↓ {formatSpeed(conn.downSpeed || 0)}</span>
+                            <span style={{ color: 'var(--text-med)' }}>↑ {formatSpeed(conn.upSpeed || 0)}</span>
                           </div>
                         </td>
 
