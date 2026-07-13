@@ -127,11 +127,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTheme: (theme) => {
     set({ theme });
     storeHelper.saveSettings({ theme });
+    try { localStorage.setItem('theme', theme); } catch { /* ignore */ }
 
     const resolved = theme === 'system'
       ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
       : theme;
 
     document.documentElement.setAttribute('data-theme', resolved);
+    if (resolved === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
   },
 }));

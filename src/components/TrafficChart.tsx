@@ -46,8 +46,24 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
 
+    // Retrieve theme colors dynamically
+    const style = getComputedStyle(document.documentElement);
+    const textLow = style.getPropertyValue('--text-low').trim() || '#52525b';
+    const borderDefault = style.getPropertyValue('--border-default').trim() || 'rgba(255, 255, 255, 0.08)';
+    const borderStrong = style.getPropertyValue('--border-strong').trim() || 'rgba(255, 255, 255, 0.15)';
+
+    const chartDownStroke = style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
+    const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
+    const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.15)';
+    const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
+
+    const chartUpStroke = style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
+    const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
+    const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.08)';
+    const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
+
     // Draw background grid lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeStyle = borderDefault;
     ctx.lineWidth = 1;
     const gridCount = 4;
     for (let i = 0; i <= gridCount; i++) {
@@ -60,8 +76,8 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
 
     // If there is no history, draw empty state
     if (history.length === 0) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.font = '13px "Outfit", "Inter", sans-serif';
+      ctx.fillStyle = textLow;
+      ctx.font = '12px "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('No real-time traffic data', width / 2, height / 2);
@@ -79,8 +95,8 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     maxSpeed = maxSpeed * 1.15;
 
     // Draw Y axis labels
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '10px "Inter", sans-serif';
+    ctx.fillStyle = textLow;
+    ctx.font = '9px "Inter", sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let i = 0; i <= gridCount; i++) {
@@ -137,11 +153,11 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.shadowColor = glowColor;
       ctx.shadowBlur = 8;
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       if (isDashed) {
-        ctx.setLineDash([4, 3]);
+        ctx.setLineDash([3, 3]);
       } else {
         ctx.setLineDash([]);
       }
@@ -170,18 +186,6 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       displayHistory.map((h) => h.up)
     );
 
-    // Retrieve theme colors dynamically
-    const style = getComputedStyle(document.documentElement);
-    const chartDownStroke = style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
-    const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
-    const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.1)';
-    const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
-
-    const chartUpStroke = style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
-    const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
-    const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.05)';
-    const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
-
     // Create Gradients
     // Download
     const downGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
@@ -200,14 +204,14 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     drawCurve(paddedUp, chartUpStroke, upGrad, chartUpGlow, true);
 
     // Draw X-axis line (subtle)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = borderStrong;
     ctx.beginPath();
     ctx.moveTo(padding.left, padding.top + chartHeight);
     ctx.lineTo(width - padding.right, padding.top + chartHeight);
     ctx.stroke();
 
     // Draw timeline markers (e.g. -30s, -15s, Now)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillStyle = textLow;
     ctx.font = '9px "Inter", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';

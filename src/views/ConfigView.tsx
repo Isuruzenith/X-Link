@@ -5,7 +5,10 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
 import type { Profile, ProxyNode, NodeUsageStats } from '../utils/store';
 import { useStatsStore } from '../stores/statsStore';
-
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { FormInput } from '@/components/form';
 const formatBytes = (bytes: number): string => {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -55,83 +58,70 @@ function ProfileHeaderCard({
   const activePing = activeNode && latencyResults[activeNode.tag] ? latencyResults[activeNode.tag] : null;
 
   return (
-    <div style={{ padding: '16px 20px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)', marginBottom: '16px', flexShrink: 0 }}>
+    <Card className="p-4 bg-muted/40 border-border mb-4 shrink-0 shadow-none">
       {/* Top row: Profile name + badges */}
-      <div style={{ marginBottom: activeNode ? '12px' : '0' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-high)', marginBottom: '6px' }}>
+      <div className={activeNode ? 'mb-3' : 'mb-0'}>
+        <h2 className="text-base font-bold text-foreground mb-1.5">
           {selectedProfile.name}
         </h2>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-secondary)', borderColor: 'rgba(124,141,255,0.2)', background: 'rgba(124,141,255,0.06)' }}>
-            <Zap size={9} style={{ marginRight: '3px' }} /> {selectedProfile.nodeCount} Nodes
-          </span>
+        <div className="flex gap-1.5 flex-wrap">
+          <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-muted-foreground">
+            <Zap className="size-2.5" />
+            <span>{selectedProfile.nodeCount} Nodes</span>
+          </Badge>
           {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
-            <span className="node-type-badge" style={{ fontSize: '10px', padding: '2px 7px', height: '18px', color: 'var(--accent-primary)', borderColor: 'var(--border-accent-dim)', background: 'var(--accent-primary-dim)' }}>
-              <Link2 size={9} style={{ marginRight: '3px' }} /> Sub
-            </span>
+            <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-foreground">
+              <Link2 className="size-2.5" />
+              <span>Subscription</span>
+            </Badge>
           )}
         </div>
       </div>
 
       {/* Active server details strip */}
       {activeNode && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '10px 12px',
-          background: isActiveProfile && isConnected ? 'rgba(34,197,94,0.06)' : 'var(--surface-overlay)',
-          border: `1px solid ${isActiveProfile && isConnected ? 'rgba(34,197,94,0.15)' : 'var(--border-subtle)'}`,
-          borderRadius: 'var(--r-md)',
-        }}>
+        <div className={`flex items-center gap-2.5 p-2 rounded-md border ${isActiveProfile && isConnected ? 'bg-muted/60 border-border/60' : 'bg-background border-border/40'}`}>
           {/* Country flag */}
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '16px', flexShrink: 0 }}>
+          <span className="flex items-center justify-center size-6 shrink-0">
             {activeServerCode ? (
               <img
-                src={`https://flagcdn.com/w40/${activeServerCode}.png`}
+                src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
                 alt={activeServerCode}
-                style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+                style={{ width: '22px', height: '14px', objectFit: 'cover', borderRadius: '1.5px', boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
               />
             ) : (
-              <Globe size={14} style={{ color: 'var(--text-low)' }} />
+              <Globe className="size-3.5 text-muted-foreground" />
             )}
           </span>
 
           {/* Server tag */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-high)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-bold text-foreground truncate">
               {activeNode.tag}
             </div>
-            <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
+            <span className="text-[9.5px] text-muted-foreground">
               {activeNode.type}{activeRegion ? ` • ${activeRegion}` : ''}
             </span>
           </div>
 
-          {/* Ping / Latency instead of LIVE badge */}
+          {/* Ping / Latency */}
           {activePing && (
-            <span style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              fontFamily: "'JetBrains Mono', monospace",
-              fontVariantNumeric: 'tabular-nums',
-              padding: '3px 8px',
-              borderRadius: 'var(--r-pill)',
-              flexShrink: 0,
-              ...(activePing.latencyMs !== null
+            <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-full shrink-0 ${
+              activePing.latencyMs !== null
                 ? activePing.latencyMs < 200
-                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
+                  ? 'text-foreground bg-muted border border-border/50'
                   : activePing.latencyMs < 500
-                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
-                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
-                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
-            }}>
+                    ? 'text-muted-foreground bg-muted'
+                    : 'text-muted-foreground bg-muted/60'
+                : 'text-muted-foreground bg-muted/40'
+            }`}>
               {activePing.latencyMs !== null ? `${activePing.latencyMs}ms` : 'timeout'}
             </span>
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -158,67 +148,73 @@ function ServerCard({
   activatingNodeTag: string | null;
   stats?: NodeUsageStats;
 }) {
+  const isNodeSelected = selectedNodeTag === node.tag;
+  const isNodeActive = isConnected && selectedProfile.id === activeProfileId && isNodeSelected;
+
   return (
-    <div
-      className={`node-card ${selectedNodeTag === node.tag ? 'active' : ''}`}
+    <Card
+      className={`p-3 bg-card border transition-all duration-150 cursor-pointer shadow-sm hover:bg-muted/40 flex flex-row justify-between items-center min-w-0 ${
+        isNodeSelected ? 'border-foreground bg-accent/10 ring-1 ring-foreground/20' : 'border-border'
+      }`}
       onClick={() => selectNode(node)}
-      style={{ display: 'flex', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minWidth: 0 }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden', flex: 1, minWidth: 0 }}>
-          <span className="node-name" title={node.tag} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.tag}</span>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="node-type-badge" style={{ alignSelf: 'flex-start' }}>{node.type}</span>
-            {isConnected && selectedProfile.id === activeProfileId && selectedNodeTag === node.tag ? (
-              <span className="active-badge" style={{ fontSize: '9px', padding: '1px 6px' }}>ACTIVE</span>
+      <div className="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0">
+        <div className="flex flex-col gap-1 overflow-hidden flex-1 min-w-0">
+          <span className={`text-xs font-bold truncate ${isNodeSelected ? 'text-foreground' : 'text-foreground/90'}`} title={node.tag}>
+            {node.tag}
+          </span>
+          <div className="flex gap-1.5 items-center flex-wrap">
+            <Badge variant="outline" className="h-4 px-1.5 text-[9px] font-medium border-border/80 text-muted-foreground">
+              {node.type}
+            </Badge>
+            {isNodeActive ? (
+              <Badge className="h-4 px-1.5 text-[8.5px] font-bold rounded-sm bg-foreground text-background">
+                ACTIVE
+              </Badge>
             ) : (
               activatingNodeTag === node.tag && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <div className="blink-dot" />
-                  <span style={{ fontSize: '9px', color: 'var(--text-low)', textTransform: 'uppercase', fontWeight: 600 }}>connecting</span>
+                <div className="flex items-center gap-1.5">
+                  <div className="size-1.5 rounded-full bg-muted-foreground animate-pulse" />
+                  <span className="text-[8.5px] text-muted-foreground uppercase font-bold">connecting</span>
                 </div>
               )
             )}
             {stats && (stats.totalUploadBytes > 0 || stats.totalDownloadBytes > 0) && (
-              <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
-                Total: {formatBytes(stats.totalUploadBytes + stats.totalDownloadBytes)}
+              <span className="text-[9.5px] text-muted-foreground">
+                {formatBytes(stats.totalUploadBytes + stats.totalDownloadBytes)}
               </span>
             )}
             {stats?.lastUsedAt && (
-              <span style={{ fontSize: '10px', color: 'var(--text-low)' }}>
+              <span className="text-[9.5px] text-muted-foreground">
                 • Used {formatRelativeTime(stats.lastUsedAt)}
               </span>
             )}
           </div>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '12px' }}>
+      <div className="flex items-center gap-2 shrink-0 ml-3">
         {selectedProfile.id === activeProfileId && (
-          <button
-            className="btn-icon-only"
-            style={{ width: '28px', height: '28px', border: 'none', background: 'var(--surface-sunken)', color: 'var(--text-low)', borderRadius: '6px' }}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground hover:text-foreground rounded"
             onClick={(e) => { e.stopPropagation(); openEditor(node); }}
             title="Edit node configuration"
           >
-            <Edit3 size={13} />
-          </button>
+            <Edit3 className="size-3.5" />
+          </Button>
         )}
         {latencyResults[node.tag] && (
           <span
-            style={{
-              fontSize: '10px',
-              fontWeight: 600,
-              padding: '2px 6px',
-              borderRadius: '4px',
-              fontVariantNumeric: 'tabular-nums',
-              ...(latencyResults[node.tag].latencyMs !== null
+            className={`text-[9.5px] font-bold font-mono px-1.5 py-0.5 rounded-sm ${
+              latencyResults[node.tag].latencyMs !== null
                 ? latencyResults[node.tag].latencyMs! < 200
-                  ? { color: 'var(--status-ok)', background: 'var(--status-ok-dim)' }
+                  ? 'text-foreground bg-muted border border-border/50'
                   : latencyResults[node.tag].latencyMs! < 500
-                    ? { color: 'var(--status-warn)', background: 'var(--status-warn-dim)' }
-                    : { color: 'var(--status-err)', background: 'var(--status-err-dim)' }
-                : { color: 'var(--text-low)', background: 'var(--surface-sunken)' }),
-            }}
+                    ? 'text-muted-foreground bg-muted'
+                    : 'text-muted-foreground bg-muted/60'
+                : 'text-muted-foreground bg-muted/40'
+            }`}
             title={latencyResults[node.tag].error || undefined}
           >
             {latencyResults[node.tag].latencyMs !== null
@@ -227,7 +223,7 @@ function ServerCard({
           </span>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -284,169 +280,157 @@ export function ConfigView() {
     }
   };
 
-  const getProfileTypeColor = (type: Profile['type']) => {
+  const getProfileTypeColorClasses = (type: Profile['type']) => {
     switch (type) {
-      case 'subscription': return { color: 'var(--accent-primary)', bg: 'var(--accent-primary-dim)', border: 'var(--border-accent-dim)' };
-      case 'file': return { color: 'var(--accent-secondary)', bg: 'var(--accent-secondary-dim)', border: 'rgba(124,141,255,0.15)' };
-      case 'manual': return { color: 'var(--status-warn)', bg: 'var(--status-warn-dim)', border: 'rgba(245,158,11,0.15)' };
+      case 'subscription': return 'bg-muted/80 text-foreground border-border/50';
+      case 'file': return 'bg-muted/40 text-muted-foreground border-border/30';
+      case 'manual': return 'bg-muted/60 text-muted-foreground border-border/40';
     }
   };
 
   return (
     <ViewShell title="Profiles" subtitle="Manage proxy configurations and server nodes">
-      <div className="grid-2" style={{ height: 'calc(100vh - 100px)' }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full overflow-hidden flex-1">
         {/* Left panel: Profile list + Import */}
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
+        <Card className="p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden h-full">
           {/* Import Form */}
-          <div style={{ flexShrink: 0, padding: '16px', marginBottom: '16px', background: 'var(--surface-sunken)', borderRadius: 'var(--r-md)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <FileUp size={14} /> Add Profile
+          <div className="shrink-0 p-4 mb-4 bg-muted/40 border border-border/60 rounded-lg">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                <FileUp className="size-4 text-muted-foreground" /> Add Profile
               </h3>
-              <button
-                type="button"
-                className="btn secondary"
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 px-2.5 text-[10px]"
                 onClick={pickFileAndImport}
                 disabled={isImporting}
-                style={{ padding: '0 8px', height: '24px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
                 title="Choose config file to import"
               >
-                <FileUp size={12} /> Choose File
-              </button>
+                <FileUp className="size-3" /> Choose File
+              </Button>
             </div>
-            <form onSubmit={handleImportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <input
-                className="text-input"
-                style={{ width: '100%', fontSize: '12px', height: '32px' }}
+            <form onSubmit={handleImportSubmit} className="flex flex-col gap-2">
+              <FormInput
+                className="h-8"
                 value={importName}
-                onChange={(e) => setImportName(e.target.value)}
+                onChange={setImportName}
                 placeholder="Profile Name (Optional)"
               />
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  className="text-input"
-                  style={{ flex: 1, fontSize: '12px' }}
+              <div className="flex gap-2">
+                <FormInput
+                  className="h-8 flex-1"
                   value={importContent}
-                  onChange={(e) => setImportContent(e.target.value)}
+                  onChange={setImportContent}
                   placeholder="Paste vless://, ss://, subscription URL…"
                 />
-                <button
+                <Button
                   type="button"
-                  className="btn secondary"
+                  variant="outline"
+                  size="icon"
+                  className="size-8 shrink-0"
                   onClick={pasteClipboard}
                   title="Paste from Clipboard"
-                  style={{ padding: '0 12px', height: '32px' }}
                 >
-                  <Clipboard size={14} />
-                </button>
-                <button
+                  <Clipboard className="size-3.5" />
+                </Button>
+                <Button
                   type="submit"
-                  className="btn primary"
+                  variant="default"
+                  size="icon"
+                  className="size-8 shrink-0"
                   disabled={isImporting || !importContent.trim()}
-                  style={{ padding: '0 12px', height: '32px' }}
                   title="Import"
                 >
-                  {isImporting ? <RefreshCw size={14} className="spin" /> : <CornerDownLeft size={16} />}
-                </button>
+                  {isImporting ? <RefreshCw className="size-3.5 animate-spin" /> : <CornerDownLeft className="size-4" />}
+                </Button>
               </div>
               {importError && (
-                <div style={{ background: 'var(--status-err-dim)', color: 'var(--status-err)', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <ShieldAlert size={12} /> {importError}
+                <div className="bg-destructive/10 text-destructive text-[11px] px-3 py-1.5 rounded border border-destructive/20 flex items-center gap-2">
+                  <ShieldAlert className="size-3.5" /> {importError}
                 </div>
               )}
               {importSuccess && (
-                <div style={{ background: 'var(--status-ok-dim)', color: 'var(--status-ok)', fontSize: '11px', padding: '6px 10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Check size={12} /> Profile imported successfully!
+                <div className="bg-muted/80 text-foreground text-[11px] px-3 py-1.5 rounded border border-border/50 flex items-center gap-2">
+                  <Check className="size-3.5" /> Profile imported successfully!
                 </div>
               )}
             </form>
           </div>
 
           {/* Profile List */}
-          <div className="flex-row-between" style={{ marginBottom: '12px', flexShrink: 0 }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 600 }}>
+          <div className="flex justify-between items-center mb-3 shrink-0 px-0.5">
+            <h3 className="text-xs font-bold text-foreground">
               Profiles
-              {profiles.length > 0 && <span style={{ color: 'var(--text-low)', fontWeight: 400, marginLeft: '6px', fontSize: '12px' }}>({profiles.length})</span>}
+              {profiles.length > 0 && <span className="text-muted-foreground font-normal ml-1.5 text-xs">({profiles.length})</span>}
             </h3>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+          <div className="flex-1 overflow-y-auto pr-1">
             {profiles.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div className="flex flex-col gap-1.5">
                 {profiles.map((profile) => {
                   const isActive = profile.id === activeProfileId;
                   const isSelected = profile.id === selectedProfileId;
-                  const typeStyle = getProfileTypeColor(profile.type);
+                  const typeClasses = getProfileTypeColorClasses(profile.type);
                   return (
                     <div
                       key={profile.id}
-                      className={`profile-item ${isSelected ? 'active' : ''}`}
+                      className={`flex flex-row justify-between items-center p-3 rounded-lg border transition-all duration-150 ${
+                        isSelected ? 'border-foreground bg-accent/15' : 'border-border/60 hover:bg-muted/30 cursor-pointer'
+                      }`}
                       onClick={() => !isSelected && selectProfile(profile.id)}
-                      style={{ cursor: isSelected ? 'default' : 'pointer', position: 'relative' }}
                     >
-                      <div className="profile-item-left">
-                        <div className="profile-icon">
-                          {profile.type === 'subscription' ? <Link2 size={18} /> : <Globe size={18} />}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="size-8 rounded-md bg-muted flex items-center justify-center border border-border/40 text-foreground shrink-0">
+                          {profile.type === 'subscription' ? <Link2 className="size-4" /> : <Globe className="size-4" />}
                         </div>
-                        <div className="profile-details">
-                          <span className="profile-name" title={profile.name}>
-                            {profile.name.length > 15 ? `${profile.name.slice(0, 15)}...` : profile.name}
+                        <div className="flex flex-col min-w-0">
+                          <span className={`text-xs font-bold truncate ${isSelected ? 'text-foreground' : 'text-foreground/90'}`} title={profile.name}>
+                            {profile.name}
                           </span>
-                          <div className="profile-meta">
-                            <span style={{
-                              fontSize: '9px',
-                              fontWeight: 600,
-                              padding: '1px 5px',
-                              borderRadius: '3px',
-                              color: typeStyle.color,
-                              background: typeStyle.bg,
-                              border: `1px solid ${typeStyle.border}`,
-                              letterSpacing: '0.5px',
-                            }}>
+                          <div className="flex gap-1.5 items-center text-[10px] text-muted-foreground mt-0.5">
+                            <Badge variant="outline" className={`h-4 px-1.5 text-[8.5px] font-bold ${typeClasses}`}>
                               {getProfileTypeLabel(profile.type)}
-                            </span>
+                            </Badge>
                             <span>{profile.nodeCount} nodes</span>
                             <span>•</span>
                             <span>{new Date(profile.lastUpdated).toLocaleDateString()}</span>
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div className="flex items-center gap-2.5 shrink-0 ml-3">
                         {isActive && (
-                          <div title={isConnected ? "Active & Connected" : "Active"} style={{
-                            width: '8px', height: '8px', borderRadius: '50%',
-                            background: 'var(--status-ok)',
-                            boxShadow: isConnected ? '0 0 8px rgba(46, 213, 115, 0.6)' : 'none',
-                          }} />
+                          <div title={isConnected ? "Active & Connected" : "Active"} className="size-2 rounded-full bg-foreground shadow-[0_0_8px_rgba(255,255,255,0.6)]" />
                         )}
                         {!isSelected && !isActive && (
-                          <ArrowRight size={14} style={{ color: 'var(--text-low)', opacity: 0.5 }} />
+                          <ArrowRight className="size-3.5 text-muted-foreground/60" />
                         )}
-                        <button
-                          className="btn-icon-only"
-                          style={{ width: '26px', height: '26px', border: 'none', background: 'transparent', color: 'var(--text-low)', flexShrink: 0, borderRadius: '4px' }}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
                           onClick={(e) => handleDeleteProfile(e, profile)}
                           title="Delete profile"
                         >
-                          <Trash2 size={12} />
-                        </button>
+                          <Trash2 className="size-3.5" />
+                        </Button>
                       </div>
                     </div>
                   );
                 })}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-low)', height: '100%', minHeight: '120px' }}>
-                <Globe size={32} style={{ strokeWidth: 1.5, marginBottom: '12px', opacity: 0.4 }} />
-                <p style={{ fontSize: '13px', fontWeight: 500 }}>No Profiles Yet</p>
-                <p style={{ fontSize: '11px', marginTop: '4px', textAlign: 'center', maxWidth: '220px' }}>Add a profile above using a subscription link, config file, or pasting node URIs.</p>
+              <div className="flex flex-col items-center justify-center text-muted-foreground h-full min-h-[120px] gap-2">
+                <Globe className="size-8 opacity-40 stroke-[1.5]" />
+                <p className="text-xs font-bold text-foreground">No Profiles Yet</p>
+                <p className="text-[10px] text-center max-w-[220px]">Add a profile above using a subscription link, config file, or pasting node URIs.</p>
               </div>
             )}
           </div>
-        </div>
+        </Card>
 
         {/* Right panel: Node list for active profile */}
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Card className="p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden h-full">
           {selectedProfile ? (
             <>
               <ProfileHeaderCard
@@ -459,23 +443,24 @@ export function ConfigView() {
                 latencyResults={latencyResults}
               />
 
-              <div className="flex-row-between" style={{ marginBottom: '12px', flexShrink: 0, paddingLeft: '4px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Servers</h3>
-                <button
-                  className="btn secondary"
+              <div className="flex justify-between items-center mb-3 shrink-0 px-0.5">
+                <h3 className="text-xs font-bold text-foreground">Servers</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 px-3 text-[10px]"
                   onClick={testAllNodes}
                   disabled={isTestingLatency || nodes.length === 0}
-                  style={{ padding: '0 10px', height: '28px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px' }}
                   title="Test TCP latency for all nodes"
                 >
-                  {isTestingLatency ? <RefreshCw size={12} className="spin" /> : <Activity size={12} />}
-                  {isTestingLatency ? 'Testing…' : 'Test All'}
-                </button>
+                  {isTestingLatency ? <RefreshCw className="size-3 animate-spin" /> : <Activity className="size-3" />}
+                  <span>{isTestingLatency ? 'Testing…' : 'Test All'}</span>
+                </Button>
               </div>
 
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>
+              <div className="flex-1 overflow-y-auto pr-1">
                 {nodes.length > 0 ? (
-                  <div className="node-grid">
+                  <div className="grid grid-cols-1 gap-2">
                     {nodes.map((node, i) => (
                       <ServerCard
                         key={i}
@@ -493,24 +478,26 @@ export function ConfigView() {
                     ))}
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100px', color: 'var(--text-low)' }}>
-                    <p style={{ fontSize: '13px' }}>No customizable servers found.</p>
+                  <div className="flex items-center justify-center h-24 text-muted-foreground">
+                    <p className="text-xs">No customizable servers found.</p>
                   </div>
                 )}
               </div>
             </>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'var(--text-low)' }}>
-              <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', boxShadow: '0 0 30px rgba(74,158,255,0.05)' }}>
-                <Globe size={36} style={{ strokeWidth: 1.5, color: 'var(--accent-primary)', opacity: 0.8 }} />
+            <div className="flex flex-col items-center justify-center flex-1 text-muted-foreground gap-3">
+              <div className="size-16 rounded-full bg-muted flex items-center justify-center border border-border/40 shadow-sm">
+                <Globe className="size-7 text-foreground" />
               </div>
-              <p style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-high)' }}>No Profile Selected</p>
-              <p style={{ fontSize: '13px', marginTop: '8px', maxWidth: '280px', textAlign: 'center', lineHeight: '1.5' }}>
-                Add a profile on the left to see its available servers here.
-              </p>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-sm font-bold text-foreground">No Profile Selected</p>
+                <p className="text-[11px] max-w-[240px] text-center leading-relaxed">
+                  Add a profile on the left to see its available servers here.
+                </p>
+              </div>
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </ViewShell>
   );

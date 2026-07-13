@@ -8,6 +8,11 @@ import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useProfileStore, getCountryCode } from '../stores/profileStore';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B';
@@ -80,53 +85,60 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
       title="Dashboard"
       subtitle="Real-time status monitor and proxy controls"
       actions={
-        <div className="flex-row">
+        <div className="flex items-center gap-2">
           {isElevated ? (
-            <div className="tun-shield-badge"><Shield size={14} /><span>TUN: Active</span></div>
+            <Badge variant="outline" className="flex items-center gap-1.5 px-2.5 py-1 text-xs border-border bg-muted/40 text-foreground">
+              <Shield className="size-3.5 text-muted-foreground" />
+              <span>TUN: Active</span>
+            </Badge>
           ) : (
-            <button className="tun-shield-btn" onClick={requestElevation}>
-              <ShieldAlert size={14} /><span>TUN: Elevation Required</span>
-            </button>
+            <Button variant="destructive" size="sm" className="h-7 gap-1 px-2.5 text-xs font-semibold" onClick={requestElevation}>
+              <ShieldAlert className="size-3.5" />
+              <span>TUN: Elevation Required</span>
+            </Button>
           )}
         </div>
       }
     >
-      <div className="view-container">
+      <div className="flex flex-col gap-4 h-full overflow-hidden flex-1 min-h-0">
         {/* Top row: Connect + Chart */}
-        <div className="grid-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
           {/* Connect Panel */}
-          <div className="glass-panel connect-panel">
-            <div className="power-button-container">
-              <div className={`power-button-outer ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} />
-              <button
-                className={`power-button ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`}
-                onClick={toggleConnect}
-              >
-                <Power size={28} />
-              </button>
-            </div>
-            <h3 className="connect-status-label">
-              {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
-            </h3>
-            <p className="connect-status-sub">
-              {connectionStatus === 'connected'
-                ? `${activeProfile?.name || 'Default'}`
-                : connectionStatus === 'connecting'
-                  ? 'Establishing secure tunnels...'
-                  : 'Toggle power to start proxy'}
-            </p>
-            {isConnected && (
-              <div className="connect-mode-badge">
-                <Network size={12} />
-                <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
+          <Card className="flex flex-col justify-between p-4 bg-card border-border shadow-sm h-full overflow-hidden min-h-[280px]">
+            <div className="flex flex-col items-center justify-center flex-1 min-h-0 py-2">
+              <div className="power-button-container shrink-0">
+                <div className={`power-button-outer ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} />
+                <button
+                  type="button"
+                  aria-label={connectionStatus === 'connected' ? 'Disconnect' : 'Connect'}
+                  aria-pressed={connectionStatus === 'connected'}
+                  className={`power-button ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`}
+                  onClick={toggleConnect}
+                >
+                  <Power size={26} />
+                </button>
               </div>
-            )}
+              <h3 className="connect-status-label mt-3 font-bold text-sm tracking-wide">
+                {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+              </h3>
+              <p className="connect-status-sub text-xs text-muted-foreground mt-0.5 text-center max-w-[200px] truncate">
+                {connectionStatus === 'connected'
+                  ? `${activeProfile?.name || 'Default'}`
+                  : connectionStatus === 'connecting'
+                    ? 'Establishing secure tunnels...'
+                    : 'Toggle power to start proxy'}
+              </p>
+              {isConnected && (
+                <Badge variant="secondary" className="connect-mode-badge mt-2 flex items-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5">
+                  <Network className="size-2.5" />
+                  <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
+                </Badge>
+              )}
+            </div>
+
+            {/* Active Node */}
             {isConnected && selectedNodeTag && (
-              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-low)' }}>
-                  <Zap size={10} style={{ color: 'var(--accent-primary)' }} />
-                  <span style={{ color: 'var(--text-med)', fontWeight: 600 }}>{selectedNodeTag}</span>
-                </div>
+              <div className="w-full bg-muted/30 border border-border/40 rounded-lg p-2.5 flex items-center gap-2.5 shrink-0">
                 {(() => {
                   const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
                   const activeServerCode = geo && geo !== 'loading'
@@ -137,98 +149,116 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                     : '';
                   const activeCountryName = geo && geo !== 'loading' ? geo.countryName : '';
 
-                  if (!activeServerCode) return null;
                   return (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '16px' }}>
-                        <img
-                          src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
-                          alt={activeServerCode}
-                          style={{ width: '24px', height: '16px', objectFit: 'cover', borderRadius: '2px', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                      {(activeCountryName || activeRegion) && (
-                        <span style={{ fontSize: '10px', color: 'var(--text-low)', textAlign: 'center', maxWidth: '180px', wordBreak: 'break-all' }}>
-                          {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
-                        </span>
+                    <>
+                      {activeServerCode ? (
+                        <div className="flex items-center justify-center shrink-0 w-5 h-3.5 overflow-hidden rounded-[1px] border border-border/30">
+                          <img
+                            src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
+                            alt={activeServerCode}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <Zap className="size-3.5 text-muted-foreground shrink-0" />
                       )}
-                    </div>
+                      <div className="flex flex-col min-w-0 flex-1 text-left">
+                        <span className="text-xs font-semibold text-foreground truncate flex items-center gap-1">
+                          <Zap className="size-2.5 text-foreground shrink-0" />
+                          {selectedNodeTag}
+                        </span>
+                        {(activeCountryName || activeRegion) && (
+                          <span className="text-2xs text-muted-foreground truncate">
+                            {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
+                          </span>
+                        )}
+                      </div>
+                    </>
                   );
                 })()}
               </div>
             )}
+
+            {/* Quick Switch */}
             {isConnected && nodes.length > 1 && (
-              <div style={{
-                marginTop: '12px', display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'center',
-                maxHeight: '52px', overflowY: 'auto', overflowX: 'hidden',
-              }}>
-                {nodes.slice(0, 8).map((node) => (
-                  <button
-                    key={node.tag}
-                    onClick={() => selectNode(node)}
-                    style={{
-                      fontSize: '9px', padding: '2px 8px', borderRadius: '10px', cursor: 'pointer',
-                      background: selectedNodeTag === node.tag ? 'var(--text-high)' : 'var(--surface-sunken)',
-                      color: selectedNodeTag === node.tag ? 'var(--surface-base)' : 'var(--text-low)',
-                      transition: 'all 0.15s',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100px',
-                      border: selectedNodeTag === node.tag ? '1px solid var(--text-high)' : 'none',
-                    }}
-                    title={node.tag}
-                  >
-                    {node.tag}
-                  </button>
-                ))}
-                {nodes.length > 8 && (
-                  <span style={{ fontSize: '9px', color: 'var(--text-low)', padding: '2px 4px' }}>+{nodes.length - 8} more</span>
-                )}
+              <div className="w-full flex flex-col shrink-0 border-t border-border/20 pt-3">
+                <span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">Quick Switch</span>
+                <ScrollArea className="max-h-16 w-full">
+                  <div className="flex flex-wrap gap-1.5 justify-center pr-2">
+                    {nodes.slice(0, 8).map((node) => (
+                      <Button
+                        key={node.tag}
+                        onClick={() => selectNode(node)}
+                        variant={selectedNodeTag === node.tag ? 'default' : 'secondary'}
+                        size="xs"
+                        className="h-6 px-2.5 text-2xs font-semibold rounded-full shrink-0"
+                        title={node.tag}
+                      >
+                        {node.tag}
+                      </Button>
+                    ))}
+                    {nodes.length > 8 && (
+                      <span className="text-2xs text-muted-foreground px-1.5 py-0.5 font-semibold shrink-0 self-center">+{nodes.length - 8}</span>
+                    )}
+                  </div>
+                </ScrollArea>
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Chart */}
-          <div className="glass-panel chart-panel" style={{ gridColumn: 'span 2' }}>
-            <div className="chart-header">
-              <h3 className="chart-title">Bandwidth</h3>
-              <div className="chart-legends">
-                <div className="legend-item"><div className="legend-dot download" /><span>↓ {formatSpeed(downloadSpeed)}</span></div>
-                <div className="legend-item"><div className="legend-dot upload" /><span>↑ {formatSpeed(uploadSpeed)}</span></div>
+          <Card className="col-span-1 md:col-span-2 bg-card border-border shadow-sm flex flex-col overflow-hidden h-full min-h-[280px] p-4">
+            <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
+              <CardTitle className="text-sm font-semibold tracking-tight">Bandwidth</CardTitle>
+              <div className="flex items-center gap-4 text-xs shrink-0">
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <div className="size-1.5 rounded-full bg-foreground" />
+                  <span className="font-mono text-xs tabular-nums">↓ {formatSpeed(downloadSpeed)}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-muted-foreground">
+                  <div className="size-1.5 rounded-full bg-muted-foreground border border-border" />
+                  <span className="font-mono text-xs tabular-nums">↑ {formatSpeed(uploadSpeed)}</span>
+                </div>
               </div>
-            </div>
-            <div className="chart-body"><TrafficChart history={speedHistory} /></div>
-          </div>
+            </CardHeader>
+            <CardContent className="p-0 flex-1 relative min-h-[180px] overflow-hidden">
+              <TrafficChart history={speedHistory} />
+            </CardContent>
+          </Card>
         </div>
 
         {/* Metrics */}
-        <div className="grid-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
           {[
-            { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes),    color: 'var(--text-high)' },
-            { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes),       color: 'var(--text-med)' },
-            { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime),            color: 'var(--text-med)' },
-            { icon: Server,        label: 'Connections',  value: `${activeConnections} active`,  color: 'var(--text-high)' },
-          ].map(({ icon: Icon, label, value, color }) => (
-            <div
+            { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes) },
+            { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes) },
+            { icon: Clock,         label: 'Uptime',       value: formatUptime(uptime) },
+            { icon: Server,        label: 'Connections',  value: `${activeConnections} active`, clickable: true },
+          ].map(({ icon: Icon, label, value, clickable }) => (
+            <Card
               key={label}
-              className={`glass-panel metric-card ${label === 'Connections' ? 'clickable' : ''}`}
-              onClick={label === 'Connections' ? () => onNavigateToTab?.('connections') : undefined}
+              className={`py-2.5 px-4 bg-card border border-border shadow-sm flex items-center gap-3 transition-colors shrink-0 ${clickable ? 'cursor-pointer hover:bg-accent/40 active:bg-accent/70' : ''}`}
+              onClick={clickable ? () => onNavigateToTab?.('connections') : undefined}
             >
-              <div className="metric-icon-box" style={{ color }}><Icon size={20} /></div>
-              <div className="metric-info">
-                <span className="metric-label">{label}</span>
-                <span className="metric-value">{value}</span>
+              <div className="size-8 rounded-md bg-muted flex items-center justify-center text-foreground border border-border/40 shrink-0">
+                <Icon className="size-3.5" />
               </div>
-            </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
+                <span className="text-sm font-semibold text-foreground truncate tabular-nums">{value}</span>
+              </div>
+            </Card>
           ))}
         </div>
 
         {/* Ports bar */}
-        <div className="glass-panel" style={{ padding: '14px 24px' }}>
-          <div className="flex-row-between">
-            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-med)' }}>Active Inbound Ports</h3>
-            <div style={{ display: 'flex', gap: '24px', fontSize: '13px' }}>
+        <Card className="py-2.5 px-4 bg-card border-border shadow-sm shrink-0">
+          <div className="flex flex-row flex-wrap justify-between items-center gap-y-2 w-full">
+            <h3 className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Active Inbound Ports</h3>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground font-medium">
               {[
                 ...(settings.useSeparatePorts
                   ? [
@@ -239,20 +269,24 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                       { label: 'Mixed', port: settings.mixedPort },
                     ]),
                 ...(settings.apiEnabled ? [{ label: 'API', port: settings.apiPort }] : []),
-              ].map(({ label, port }) => (
-                <span key={label}>
-                  <span style={{ color: 'var(--text-low)' }}>{label}: </span>
-                  <strong style={{ color: 'var(--text-high)', fontFamily: 'var(--font-mono)' }}>{port}</strong>
+              ].map(({ label, port }, i) => (
+                <span key={label} className="flex items-center gap-2">
+                  {i > 0 && <Separator orientation="vertical" className="h-3 hidden sm:block" />}
+                  <span className="flex items-center gap-1">
+                    <span className="text-muted-foreground font-normal">{label}:</span>
+                    <span className="font-mono bg-muted px-1.5 py-0.5 rounded border border-border/30 text-xs tabular-nums">{port}</span>
+                  </span>
                 </span>
               ))}
               {settings.wifiSharing && (
-                <span style={{ color: 'var(--text-high)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                  <Wifi size={12} /> LAN Sharing On
-                </span>
+                <Badge variant="outline" className="h-5 gap-1 text-2xs text-foreground font-semibold px-2 border-border bg-muted/30">
+                  <Wifi className="size-2.5" />
+                  <span>LAN Sharing On</span>
+                </Badge>
               )}
             </div>
           </div>
-        </div>
+        </Card>
       </div>
     </ViewShell>
   );
