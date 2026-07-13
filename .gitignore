@@ -46,3 +46,6 @@ src-tauri/binaries/test_proxy*.json
 
 # Sidecar binaries (downloaded at build-time, never committed)
 src-tauri/binaries/
+
+# Landing page assets (explicitly committed for GitHub Pages)
+!docs/

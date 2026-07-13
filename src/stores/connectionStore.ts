@@ -4,6 +4,7 @@ import { useSettingsStore } from './settingsStore';
 import { useProfileStore } from './profileStore';
 import { useLogStore } from './logStore';
 import { useToastStore } from './toastStore';
+import { toUserFriendlyError } from '../utils/errors';
 
 interface ConnectionState {
   isConnected: boolean;
@@ -143,7 +144,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       } catch (e) {
         set({ connectionStatus: 'disconnected' });
         logStore.pushSystemLog(`Startup error: ${e}`);
-        useToastStore.getState().addToast('error', `Proxy service failed to start: ${e}`, 'Connection Failed');
+        useToastStore.getState().addToast('error', toUserFriendlyError(String(e)), 'Connection Failed');
       }
     }
   },
@@ -161,7 +162,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       await invoke('request_elevation');
     } catch (e) {
       logStore.pushSystemLog(`Elevation aborted: ${e}`);
-      useToastStore.getState().addToast('error', `Elevation failed: ${e}`, 'Elevation Error');
+      useToastStore.getState().addToast('error', toUserFriendlyError(String(e)), 'Elevation Error');
     }
   }
 }));

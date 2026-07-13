@@ -1,5 +1,6 @@
 mod commands;
 pub mod config;
+pub mod constants;
 pub mod os;
 mod state;
 pub mod tray;
