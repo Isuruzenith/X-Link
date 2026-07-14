@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.2...x-link-v0.8.0) (2026-07-14)
+
+
+### Features
+
+* implement core application layout with navigation rail, UI components, and routing views ([d1b9722](https://github.com/Isuruzenith/X-Link/commit/d1b97226b5d90ccaa7a340825898f6f3f56c394a))
+* implement core application shell and primary dashboard views for X-Link ([dbd0764](https://github.com/Isuruzenith/X-Link/commit/dbd07647fdcb2b00a1ecb361b828c69fbd6f3cc0))
+* implement core application views and unified shell component structure ([dc5d26e](https://github.com/Isuruzenith/X-Link/commit/dc5d26eae0b46eaa05d3b91c755623de0e5946a1))
+* implement project scaffolding, core Rust commands, and landing page assets ([e3c8ca9](https://github.com/Isuruzenith/X-Link/commit/e3c8ca98462fbf72eb242647ab43e826bedb44f8))
+* implement settings UI with modular config, traffic monitoring components, and toast notifications ([8c5b3b4](https://github.com/Isuruzenith/X-Link/commit/8c5b3b418046b222051027dc5538866272526233))
+* implement traffic visualization, notification system, and foundational application views ([2990f47](https://github.com/Isuruzenith/X-Link/commit/2990f473669f7e50f8fefc4c2575d057c4670baf))
+* initialize project architecture with ViewShell, UI component library, and core configuration views ([19221b9](https://github.com/Isuruzenith/X-Link/commit/19221b9ec45ba13d70d8441a3c9b970d5df8d686))
+* initialize project structure with core layout, design tokens, and base UI components ([4ef502b](https://github.com/Isuruzenith/X-Link/commit/4ef502b34ab3c492e04a2cf33d33e1704273c933))
+
 ## [0.7.2](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.1...x-link-v0.7.2) (2026-07-04)
 
 
