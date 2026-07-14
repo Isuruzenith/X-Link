@@ -1,5 +1,6 @@
 import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useProfileStore, getCountryCode, type GeoCacheEntry } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
@@ -265,9 +266,13 @@ export function ConfigView() {
     importConfig();
   };
 
-  const handleDeleteProfile = (e: React.MouseEvent, profile: Profile) => {
+  const handleDeleteProfile = async (e: React.MouseEvent, profile: Profile) => {
     e.stopPropagation();
-    if (confirm(`Delete profile "${profile.name}"? This cannot be undone.`)) {
+    const confirmed = await ask(`Delete profile "${profile.name}"? This cannot be undone.`, {
+      title: 'Delete Profile',
+      kind: 'warning',
+    });
+    if (confirmed) {
       deleteProfile(profile.id);
     }
   };

@@ -24,7 +24,13 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const id = safeRandomUUID();
     const toast: Toast = { id, type, title, message, duration };
 
-    set({ toasts: [...get().toasts, toast] });
+    const currentToasts = get().toasts;
+    const maxToasts = 5;
+    let nextToasts = [...currentToasts, toast];
+    if (nextToasts.length > maxToasts) {
+      nextToasts = nextToasts.slice(nextToasts.length - maxToasts);
+    }
+    set({ toasts: nextToasts });
 
     if (duration > 0) {
       setTimeout(() => {

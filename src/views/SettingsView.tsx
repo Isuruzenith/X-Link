@@ -7,6 +7,7 @@ import {
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
+import { useToastStore } from '../stores/toastStore';
 import type { Settings, DnsMode } from '../utils/store';
 import xLinkLogo from '../assets/X-Link-logo.png';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,7 +81,18 @@ export function SettingsView() {
                       <CardTitle className="text-xs font-bold text-foreground">Proxy Mode</CardTitle>
                     </CardHeader>
                     <FormSwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy)."
-                      checked={settings.proxyMode === 'tun'} onChange={(v) => updateSettings({ proxyMode: v ? 'tun' : 'system' })} />
+                      checked={settings.proxyMode === 'tun'}
+                      onChange={(v) => {
+                        if (v) {
+                          useToastStore.getState().addToast(
+                            'warning',
+                            'TUN Mode requires Administrator privileges and the Wintun driver to be installed/loaded.',
+                            'TUN Elevation Alert'
+                          );
+                        }
+                        updateSettings({ proxyMode: v ? 'tun' : 'system' });
+                      }}
+                    />
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
@@ -127,39 +139,44 @@ export function SettingsView() {
                       {[
                         { label: 'HTTP Proxy Port', key: 'httpPort' as keyof Settings, val: httpPort, set: (v: number) => setPorts({ httpPort: v }) },
                         { label: 'SOCKS5 Port', key: 'socksPort' as keyof Settings, val: socksPort, set: (v: number) => setPorts({ socksPort: v }) },
-                      ].map(({ label, key, val, set }) => (
-                        <div key={key} className="flex flex-col gap-1">
-                          <div className="flex justify-between items-center px-0.5">
-                            <label className="text-[9.5px] font-bold text-muted-foreground uppercase">{label}</label>
-                            <span className={`text-[9px] font-bold ${conflictingPorts.includes(val) ? 'text-destructive' : 'text-foreground/60'}`}>
-                              {conflictingPorts.includes(val) ? '● Conflict' : '● OK'}
-                            </span>
+                      ].map(({ label, key, val, set }) => {
+                        const hasConflict = conflictingPorts.includes(val);
+                        const isInvalid = val < 1 || val > 65535;
+                        const hasError = hasConflict || isInvalid;
+                        return (
+                          <div key={key} className="flex flex-col gap-1">
+                            <div className="flex justify-between items-center px-0.5">
+                              <label className="text-[9.5px] font-bold text-muted-foreground uppercase">{label}</label>
+                              <span className={`text-[9px] font-bold ${hasError ? 'text-destructive' : 'text-foreground/60'}`}>
+                                {isInvalid ? '● Invalid' : hasConflict ? '● Conflict' : '● OK'}
+                              </span>
+                            </div>
+                            <FormInput
+                              type="number"
+                              mono
+                              className="h-8"
+                              style={{ borderColor: hasError ? 'var(--destructive)' : undefined }}
+                              value={val}
+                              onChange={(v) => { const numVal = parseInt(v) || 0; set(numVal); updateSettings({ [key]: numVal } as Partial<Settings>); }}
+                            />
                           </div>
-                          <FormInput
-                            type="number"
-                            mono
-                            className="h-8"
-                            style={{ borderColor: conflictingPorts.includes(val) ? 'var(--destructive)' : undefined }}
-                            value={val}
-                            onChange={(v) => { const numVal = parseInt(v) || 0; set(numVal); updateSettings({ [key]: numVal } as Partial<Settings>); }}
-                          />
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                   <div style={{ opacity: !settings.useSeparatePorts ? 1 : 0.4, pointerEvents: !settings.useSeparatePorts ? 'auto' : 'none' }} className="mt-1">
                     <div className="flex flex-col gap-1">
                       <div className="flex justify-between items-center px-0.5">
                         <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Mixed Inbound Port (Recommended)</label>
-                        <span className={`text-[9px] font-bold ${conflictingPorts.includes(mixedPort) ? 'text-destructive' : 'text-foreground/60'}`}>
-                          {conflictingPorts.includes(mixedPort) ? '● Conflict' : '● OK'}
+                        <span className={`text-[9px] font-bold ${conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535 ? 'text-destructive' : 'text-foreground/60'}`}>
+                          {mixedPort < 1 || mixedPort > 65535 ? '● Invalid' : conflictingPorts.includes(mixedPort) ? '● Conflict' : '● OK'}
                         </span>
                       </div>
                       <FormInput
                         type="number"
                         mono
                         className="h-8"
-                        style={{ borderColor: conflictingPorts.includes(mixedPort) ? 'var(--destructive)' : undefined }}
+                        style={{ borderColor: (conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535) ? 'var(--destructive)' : undefined }}
                         value={mixedPort}
                         onChange={(v) => { const numVal = parseInt(v) || 0; setPorts({ mixedPort: numVal }); updateSettings({ mixedPort: numVal }); }}
                       />
@@ -366,6 +383,7 @@ export function SettingsView() {
                       type="number"
                       mono
                       className="h-8"
+                      style={{ borderColor: (settings.apiPort < 1 || settings.apiPort > 65535) ? 'var(--destructive)' : undefined }}
                       value={settings.apiPort}
                       onChange={(v) => updateSettings({ apiPort: parseInt(v) || 9090 })}
                     />

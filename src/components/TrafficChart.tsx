@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface SpeedDataPoint {
   up: number; // in bytes/sec
@@ -11,32 +11,50 @@ interface TrafficChartProps {
 
 export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   // Helper to format speed to human readable format (e.g. 1.2 MB/s, 450 KB/s)
   const formatSpeed = (bytesPerSec: number): string => {
-    if (bytesPerSec === 0) return '0 B/s';
+    if (bytesPerSec <= 0) return '0 B/s';
     const k = 1024;
     const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
     const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
     return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Observe container size
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (!entries || entries.length === 0) return;
+      const { width, height } = entries[0].contentRect;
+      setDimensions({ width, height });
+    });
+
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || dimensions.width === 0 || dimensions.height === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     // Handle high DPI screens (retina)
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = dimensions.width * dpr;
+    canvas.height = dimensions.height * dpr;
     ctx.scale(dpr, dpr);
 
-    const width = rect.width;
-    const height = rect.height;
+    const width = dimensions.width;
+    const height = dimensions.height;
 
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
@@ -221,12 +239,14 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     ctx.textAlign = 'right';
     ctx.fillText('Live', width - padding.right, padding.top + chartHeight + 6);
 
-  }, [history]);
+  }, [history, dimensions]);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label="Real-time network traffic chart showing upload and download speeds"
         style={{
           width: '100%',
           height: '100%',

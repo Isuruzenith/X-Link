@@ -56,46 +56,73 @@ pub fn build_singbox_rule(
 ) -> Option<Value> {
     let outbound = map_outbound_action(&rule.outbound);
     let invert = rule.invert;
-
-    let mut obj = match rule.rule_type.as_str() {
-        "domain" => serde_json::json!({ "domain":         [&rule.value], "outbound": outbound }),
+ 
+    let mut value = rule.value.clone();
+    let mut rule_type = rule.rule_type.as_str();
+ 
+    // Self-heal: Parse Clash-like or prefix-based routing values (e.g. domain:google.com, geosite:google)
+    if value.starts_with("domain:") {
+        value = value.strip_prefix("domain:").unwrap().to_string();
+        rule_type = "domain";
+    } else if value.starts_with("full:") {
+        value = value.strip_prefix("full:").unwrap().to_string();
+        rule_type = "domain";
+    } else if value.starts_with("regexp:") {
+        value = value.strip_prefix("regexp:").unwrap().to_string();
+        rule_type = "domain_regex";
+    } else if value.starts_with("geosite:") {
+        value = value.strip_prefix("geosite:").unwrap().to_string();
+        rule_type = "geosite";
+    } else if value.starts_with("geoip:") {
+        value = value.strip_prefix("geoip:").unwrap().to_string();
+        rule_type = "geoip";
+    } else if value.starts_with("cidr:") {
+        value = value.strip_prefix("cidr:").unwrap().to_string();
+        rule_type = "ip_cidr";
+    } else if value.starts_with("ip:") {
+        value = value.strip_prefix("ip:").unwrap().to_string();
+        rule_type = "ip_cidr";
+    }
+ 
+    let mut obj = match rule_type {
+        "domain" => serde_json::json!({ "domain":         [value], "outbound": outbound }),
         "domain_suffix" => {
-            serde_json::json!({ "domain_suffix":  [&rule.value], "outbound": outbound })
+            serde_json::json!({ "domain_suffix":  [value], "outbound": outbound })
         }
         "domain_keyword" => {
-            serde_json::json!({ "domain_keyword": [&rule.value], "outbound": outbound })
+            serde_json::json!({ "domain_keyword": [value], "outbound": outbound })
         }
         "domain_regex" => {
-            serde_json::json!({ "domain_regex":   [&rule.value], "outbound": outbound })
+            serde_json::json!({ "domain_regex":   [value], "outbound": outbound })
         }
-        "ip_cidr" => serde_json::json!({ "ip_cidr":        [&rule.value], "outbound": outbound }),
+        "ip_cidr" => serde_json::json!({ "ip_cidr":        [value], "outbound": outbound }),
         "geoip" => {
-            serde_json::json!({ "rule_set": [format!("geoip-{}", rule.value)], "outbound": outbound })
+            serde_json::json!({ "rule_set": [format!("geoip-{}", value)], "outbound": outbound })
         }
         "geosite" => {
-            if rule.value == "private" {
+            if value == "private" {
                 serde_json::json!({
                     "domain_suffix": [".lan", ".local", ".internal", ".home.arpa", "localhost"],
                     "outbound": outbound
                 })
             } else {
-                serde_json::json!({ "rule_set": [format!("geosite-{}", rule.value)], "outbound": outbound })
+                serde_json::json!({ "rule_set": [format!("geosite-{}", value)], "outbound": outbound })
             }
         }
         "port" => {
-            if let Ok(p) = rule.value.parse::<u16>() {
+            if let Ok(p) = value.parse::<u16>() {
                 serde_json::json!({ "port": [p], "outbound": outbound })
             } else {
                 return None;
             }
         }
-        "port_range" => serde_json::json!({ "port_range":   [&rule.value], "outbound": outbound }),
-        "protocol" => serde_json::json!({ "protocol":     [&rule.value], "outbound": outbound }),
+        "port_range" => serde_json::json!({ "port_range":   [value], "outbound": outbound }),
+        "protocol" => serde_json::json!({ "protocol":     [value], "outbound": outbound }),
         "process_name" => {
-            serde_json::json!({ "process_name": [&rule.value], "outbound": outbound })
+            serde_json::json!({ "process_name": [value], "outbound": outbound })
         }
-        "rule_set" => serde_json::json!({ "rule_set":     [&rule.value], "outbound": outbound }),
-        "network" => serde_json::json!({ "network":       &rule.value,  "outbound": outbound }),
+        "rule_set" => serde_json::json!({ "rule_set":     [value], "outbound": outbound }),
+        "network" => serde_json::json!({ "network":       value,  "outbound": outbound }),
         _ => return None,
     };
 

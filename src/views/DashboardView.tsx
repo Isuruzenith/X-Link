@@ -143,7 +143,10 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
               <div className="w-full flex flex-col gap-3.5 shrink-0 mt-auto pt-3 border-t border-border/10">
                 {/* Active Node */}
                 {selectedNodeTag && (
-                  <div className="w-full bg-muted/20 border border-border/40 rounded-lg p-3 flex flex-col items-center justify-center text-center gap-2">
+                  <div
+                    className="w-full bg-muted/20 border border-border/40 rounded-lg p-3 flex flex-col items-center justify-center text-center gap-2"
+                    title={activeNode ? `${selectedNodeTag} (${activeNode.server}:${activeNode.port})` : selectedNodeTag}
+                  >
                     {(() => {
                       const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
                       const activeServerCode = geo && geo !== 'loading'
@@ -171,12 +174,12 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                             <Zap className="size-3.5 text-muted-foreground shrink-0" />
                           )}
                           <div className="flex flex-col items-center min-w-0 w-full">
-                            <span className="text-xs font-bold text-foreground truncate max-w-full flex items-center gap-1 justify-center">
+                            <span className="text-xs font-bold text-foreground truncate max-w-full flex items-center gap-1 justify-center" title={selectedNodeTag}>
                               <Zap className="size-2.5 text-foreground shrink-0 animate-pulse" />
                               {selectedNodeTag}
                             </span>
                             {(activeCountryName || activeRegion) && (
-                              <span className="text-2xs text-muted-foreground truncate max-w-full mt-0.5">
+                              <span className="text-2xs text-muted-foreground truncate max-w-full mt-0.5" title={`${activeCountryName}${activeCountryName && activeRegion ? ' - ' : ''}${activeRegion}`}>
                                 {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
                               </span>
                             )}
@@ -220,14 +223,14 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
           <Card className="col-span-1 md:col-span-2 bg-card border border-border shadow-sm flex flex-col overflow-hidden h-full min-h-[280px] p-3.5 min-w-0">
             <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
               <CardTitle className="text-sm font-semibold tracking-tight">Bandwidth</CardTitle>
-              <div className="flex items-center gap-4 text-xs shrink-0">
-                <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <div className="size-1.5 rounded-full bg-foreground" />
-                  <span className="font-mono text-xs tabular-nums">↓ {formatSpeed(downloadSpeed)}</span>
+              <div className="flex items-center gap-4 text-xs shrink-0 min-w-0">
+                <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                  <div className="size-1.5 rounded-full bg-foreground shrink-0" />
+                  <span className="font-mono text-xs tabular-nums truncate max-w-[90px] sm:max-w-[120px]" title={formatSpeed(downloadSpeed)}>↓ {formatSpeed(downloadSpeed)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 text-muted-foreground">
-                  <div className="size-1.5 rounded-full bg-muted-foreground border border-border" />
-                  <span className="font-mono text-xs tabular-nums">↑ {formatSpeed(uploadSpeed)}</span>
+                <div className="flex items-center gap-1.5 text-muted-foreground min-w-0">
+                  <div className="size-1.5 rounded-full bg-muted-foreground border border-border shrink-0" />
+                  <span className="font-mono text-xs tabular-nums truncate max-w-[90px] sm:max-w-[120px]" title={formatSpeed(uploadSpeed)}>↑ {formatSpeed(uploadSpeed)}</span>
                 </div>
               </div>
             </CardHeader>
@@ -238,7 +241,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
 
         {/* Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 shrink-0 w-full" style={{ gap: '10px' }}>
+        <div className="flex flex-wrap shrink-0 w-full" style={{ gap: '10px' }}>
           {[
             { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes) },
             { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes) },
@@ -247,7 +250,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
           ].map(({ icon: Icon, label, value, clickable }) => (
             <Card
               key={label}
-              className={`p-3.5 bg-card border border-border shadow-sm flex flex-row items-center gap-3 transition-colors shrink-0 ${clickable ? 'cursor-pointer hover:bg-accent/40 active:bg-accent/70' : ''}`}
+              className={`p-3.5 bg-card border border-border shadow-sm flex flex-row items-center gap-3 transition-colors flex-1 min-w-[140px] shrink-0 ${clickable ? 'cursor-pointer hover:bg-accent/40 active:bg-accent/70' : ''}`}
               onClick={clickable ? () => onNavigateToTab?.('connections') : undefined}
             >
               <div className="size-9 rounded-md bg-muted flex items-center justify-center text-foreground border border-border/40 shrink-0">
@@ -255,7 +258,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
               </div>
               <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-0.5">{label}</span>
-                <span className="text-base font-bold text-foreground truncate tabular-nums leading-none">{value}</span>
+                <span className="text-base font-bold text-foreground truncate tabular-nums leading-none" title={value}>{value}</span>
               </div>
             </Card>
           ))}

@@ -24,10 +24,10 @@ export function ToastContainer() {
   return (
     <>
       {/* Bottom progressive blur backdrop scrim */}
-      <div className="fixed bottom-0 inset-x-0 h-28 bg-gradient-to-t from-background/80 to-transparent pointer-events-none backdrop-blur-[2px] z-40" />
+      <div className="fixed bottom-0 inset-x-0 h-28 bg-gradient-to-t from-background/80 to-transparent pointer-events-none backdrop-blur-[2px] z-[190]" />
 
       {/* Centered Toast List */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[360px] max-w-[calc(100vw-32px)] pointer-events-none">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2 w-[360px] max-w-[calc(100vw-32px)] pointer-events-none">
         {toasts.map((toast) => {
           const Icon = TOAST_ICONS[toast.type];
           const classes = TOAST_CLASSES[toast.type];
@@ -53,6 +53,7 @@ export function ToastContainer() {
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Dismiss notification"
                 className="size-6 text-muted-foreground hover:text-foreground hover:bg-muted/40 rounded shrink-0 -mt-0.5 -mr-1"
                 onClick={() => removeToast(toast.id)}
               >

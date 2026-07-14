@@ -81,6 +81,18 @@
   --status-connected:   var(--foreground);
   --status-error:       var(--foreground);
   --status-idle:        var(--muted-foreground);
+  --status-ok:          oklch(0.627 0.194 149.214);
+  --status-ok-dim:      oklch(0.962 0.018 149.214);
+  --status-ok-glow:     oklch(0.627 0.194 149.214 / 15%);
+  --status-err:         oklch(0.577 0.228 27.25);
+  --status-err-dim:     oklch(0.957 0.022 27.25);
+  --status-err-glow:    oklch(0.577 0.228 27.25 / 15%);
+  --status-warn:        oklch(0.705 0.19 56.7);
+  --status-warn-dim:    oklch(0.97 0.018 56.7);
+  --status-warn-glow:   oklch(0.705 0.19 56.7 / 15%);
+  --status-info:        oklch(0.588 0.195 256.8);
+  --status-info-dim:    oklch(0.958 0.019 256.8);
+  --status-info-glow:   oklch(0.588 0.195 256.8 / 15%);
 
   /* CHART MONOCHROME VARIABLES */
   --chart-down-stroke:    var(--foreground);
@@ -1083,6 +1095,18 @@ body {
   --status-connected:   var(--foreground);
   --status-error:       var(--foreground);
   --status-idle:        var(--muted-foreground);
+  --status-ok:          oklch(0.723 0.18 149.214);
+  --status-ok-dim:      oklch(0.723 0.18 149.214 / 10%);
+  --status-ok-glow:     oklch(0.723 0.18 149.214 / 20%);
+  --status-err:         oklch(0.659 0.227 27.25);
+  --status-err-dim:     oklch(0.659 0.227 27.25 / 10%);
+  --status-err-glow:    oklch(0.659 0.227 27.25 / 20%);
+  --status-warn:        oklch(0.79 0.17 56.7);
+  --status-warn-dim:    oklch(0.79 0.17 56.7 / 10%);
+  --status-warn-glow:   oklch(0.79 0.17 56.7 / 20%);
+  --status-info:        oklch(0.72 0.17 256.8);
+  --status-info-dim:    oklch(0.72 0.17 256.8 / 10%);
+  --status-info-glow:   oklch(0.72 0.17 256.8 / 20%);
   --chart-down-stroke:    var(--foreground);
   --chart-down-glow:      oklch(1 0 0 / 35%);
   --chart-down-fill-0:    oklch(1 0 0 / 15%);

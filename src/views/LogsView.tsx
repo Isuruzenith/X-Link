@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useDeferredValue } from 'react';
 import { Terminal, Copy, Trash2, Search } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useLogStore } from '../stores/logStore';
@@ -6,24 +6,40 @@ import { useToastStore } from '../stores/toastStore';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { FormInput, SegmentedControl } from '@/components/form';
 
 export function LogsView() {
   const { logs, autoScroll, setAutoScroll, clearLogs, copyLogs } = useLogStore();
-  const endRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [filterText, setFilterText] = useState('');
+  const deferredFilterText = useDeferredValue(filterText);
   const [levelFilter, setLevelFilter] = useState<'all' | 'info' | 'warn' | 'error' | 'system'>('all');
 
+  const handleScroll = () => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Check if user is within 40px of bottom
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+    if (isAtBottom && !autoScroll) {
+      setAutoScroll(true);
+    } else if (!isAtBottom && autoScroll) {
+      setAutoScroll(false);
+    }
+  };
+
   useEffect(() => {
-    if (autoScroll && endRef.current) {
-      endRef.current.scrollIntoView({ behavior: 'smooth' });
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (autoScroll) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [logs, autoScroll]);
 
   const filtered = logs.filter((l) => {
     if (levelFilter !== 'all' && l.type !== levelFilter) return false;
-    if (filterText && !l.text.toLowerCase().includes(filterText.toLowerCase())) return false;
+    if (deferredFilterText && !l.text.toLowerCase().includes(deferredFilterText.toLowerCase())) return false;
     return true;
   });
 
@@ -83,7 +99,9 @@ export function LogsView() {
           </Button>
           <div className="flex items-center gap-2 border-l border-border/80 pl-3.5 ml-1 h-5">
             <Switch id="autoscroll-toggle" checked={autoScroll} onCheckedChange={setAutoScroll} />
-            <span className="text-xs font-bold text-muted-foreground">Autoscroll</span>
+            <label htmlFor="autoscroll-toggle" className="text-xs font-bold text-muted-foreground cursor-pointer select-none">
+              Autoscroll
+            </label>
           </div>
         </div>
       }
@@ -121,47 +139,48 @@ export function LogsView() {
 
         {/* Terminal block */}
         <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
-          <ScrollArea className="flex-1 w-full min-h-0">
-            <div className="p-4 font-mono text-[11.5px] leading-relaxed">
-              {filtered.length > 0 ? (
-                filtered.map((log, i) => (
-                  <div
-                    key={i}
-                    className="flex items-start py-0.5 px-1.5 rounded mb-0.5 hover:bg-muted/30 transition-colors font-normal text-foreground/90"
-                  >
-                    {/* Timestamp */}
-                    <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal">
-                      {log.timestamp}
-                    </span>
+          <div
+            ref={containerRef}
+            onScroll={handleScroll}
+            className="flex-1 w-full min-h-0 overflow-y-auto p-4 font-mono text-[11.5px] leading-relaxed"
+          >
+            {filtered.length > 0 ? (
+              filtered.map((log, i) => (
+                <div
+                  key={i}
+                  className="flex items-start py-0.5 px-1.5 rounded mb-0.5 hover:bg-muted/30 transition-colors font-normal text-foreground/90"
+                >
+                  {/* Timestamp */}
+                  <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal">
+                    {log.timestamp}
+                  </span>
 
-                    {/* Level tag */}
-                    <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
-                      log.type === 'error' ? 'text-foreground font-black' :
-                      log.type === 'warn'  ? 'text-muted-foreground' :
-                      log.type === 'system' ? 'text-muted-foreground/80' : 'text-muted-foreground/60'
-                    }`}>
-                      {getLevelLabel(log.type)}
-                    </span>
+                  {/* Level tag */}
+                  <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
+                    log.type === 'error' ? 'text-foreground font-black' :
+                    log.type === 'warn'  ? 'text-muted-foreground' :
+                    log.type === 'system' ? 'text-muted-foreground/80' : 'text-muted-foreground/60'
+                  }`}>
+                    {getLevelLabel(log.type)}
+                  </span>
 
-                    {/* Log content */}
-                    <span className={`flex-1 break-all font-normal text-[11px] ${
-                      log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
-                    }`}>
-                      {renderHighlightedText(log.text)}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none">
-                  <Terminal className="size-9 opacity-60 stroke-[1.2]" />
-                  <span className="text-xs font-bold text-foreground">
-                    {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
+                  {/* Log content */}
+                  <span className={`flex-1 break-all font-normal text-[11px] ${
+                    log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
+                  }`}>
+                    {renderHighlightedText(log.text)}
                   </span>
                 </div>
-              )}
-              <div ref={endRef} />
-            </div>
-          </ScrollArea>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none animate-in fade-in duration-200">
+                <Terminal className="size-9 opacity-60 stroke-[1.2]" />
+                <span className="text-xs font-bold text-foreground">
+                  {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
+                </span>
+              </div>
+            )}
+          </div>
         </Card>
       </div>
     </ViewShell>

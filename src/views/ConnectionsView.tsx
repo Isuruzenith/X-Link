@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useDeferredValue, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { Network, Search, X, ShieldAlert, ArrowUpDown } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
@@ -42,14 +43,14 @@ interface ConnectionEntry {
 }
 
 const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
+  if (bytes <= 0) return '0 B';
   const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 const formatSpeed = (bps: number): string => {
-  if (!bps || bps === 0) return '0 B/s';
+  if (bps <= 0) return '0 B/s';
   const k = 1024, sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
   const i = Math.floor(Math.log(bps) / Math.log(k));
   return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
@@ -69,13 +70,114 @@ const formatDuration = (startIso: string): string => {
   }
 };
 
+const ConnectionRow = memo(({
+  conn,
+  isSelected,
+  onSelect,
+  onKill
+}: {
+  conn: ConnectionEntry;
+  isSelected: boolean;
+  onSelect: () => void;
+  onKill: (id: string, label: string) => void;
+}) => {
+  const host = conn.metadata.host || conn.metadata.destinationIP;
+  const port = conn.metadata.destinationPort;
+  const isDirect = conn.chains.includes('direct');
+  const chainDisplay = conn.chains.join(' › ');
+
+  return (
+    <TableRow
+      className={`text-xs transition-colors border-b border-border/30 cursor-pointer ${
+        isSelected ? 'bg-muted/60 hover:bg-muted/70' : 'hover:bg-muted/20'
+      }`}
+      onClick={onSelect}
+    >
+      {/* Target Address */}
+      <TableCell className="py-2.5 px-4 max-w-[280px] font-normal">
+        <div className="flex flex-col gap-0.5">
+          <div className="font-bold text-foreground truncate" title={`${host}:${port}`}>
+            {host}
+            <span className="text-muted-foreground font-normal font-mono">:{port}</span>
+          </div>
+          <div className="flex gap-1.5 items-center mt-0.5 select-none">
+            <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-mono border-border bg-background/50 font-normal uppercase">
+              {conn.metadata.network}
+            </Badge>
+            <span className="text-[9.5px] text-muted-foreground">
+              type: {conn.metadata.type}
+            </span>
+          </div>
+        </div>
+      </TableCell>
+
+      {/* Matching Route Rule */}
+      <TableCell className="py-2.5 px-4 font-normal">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center select-none">
+            <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-sm border ${
+              isDirect
+                ? 'bg-transparent border-border text-muted-foreground'
+                : 'bg-foreground border-foreground text-background'
+            }`}>
+              {chainDisplay}
+            </span>
+          </div>
+          {conn.rule && (
+            <div className="text-[9.5px] text-muted-foreground font-mono mt-0.5" title={conn.rule}>
+              rule: {conn.rule}
+            </div>
+          )}
+        </div>
+      </TableCell>
+
+      {/* Real-time calculated speeds */}
+      <TableCell className="py-2.5 px-4 font-mono font-normal">
+        <div className="flex flex-col gap-0.5 text-[10.5px]">
+          <span className="text-foreground">↓ {formatSpeed(conn.downSpeed || 0)}</span>
+          <span className="text-muted-foreground">↑ {formatSpeed(conn.upSpeed || 0)}</span>
+        </div>
+      </TableCell>
+
+      {/* Total bytes stats */}
+      <TableCell className="py-2.5 px-4 font-mono font-normal">
+        <div className="flex flex-col gap-0.5 text-[10.5px] text-muted-foreground">
+          <span>↓ {formatBytes(conn.download)}</span>
+          <span>↑ {formatBytes(conn.upload)}</span>
+        </div>
+      </TableCell>
+
+      {/* Connection lifetime */}
+      <TableCell className="py-2.5 px-4 text-foreground text-[11px] font-medium">
+        {formatDuration(conn.start)}
+      </TableCell>
+
+      {/* Termination */}
+      <TableCell className="py-2.5 px-4 text-center select-none" onClick={(e) => e.stopPropagation()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+          onClick={() => onKill(conn.id, `${host}:${port}`)}
+          title="Force close connection"
+        >
+          <X className="size-3.5" />
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+});
+ConnectionRow.displayName = 'ConnectionRow';
+
 export function ConnectionsView() {
   const { isConnected } = useConnectionStore();
   const [connections, setConnections] = useState<ConnectionEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [filterType, setFilterType] = useState<'all' | 'proxy' | 'direct'>('all');
   const [sortBy, setSortBy] = useState<'host' | 'speed' | 'bytes' | 'time'>('bytes');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const prevBytesRef = useRef<Record<string, { upload: number; download: number; time: number }>>({});
 
@@ -132,17 +234,25 @@ export function ConnectionsView() {
       await invoke('close_connection', { id });
       useToastStore.getState().addToast('info', `Closed connection to ${label}`);
       setConnections((prev) => prev.filter((c) => c.id !== id));
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
     } catch {
       useToastStore.getState().addToast('error', 'Failed to close connection');
     }
   };
 
   const handleKillAll = async () => {
-    if (confirm('Close all active network connections?')) {
+    const confirmed = await ask('Close all active network connections?', {
+      title: 'X-Link',
+      kind: 'warning',
+    });
+    if (confirmed) {
       try {
         await invoke('close_all_connections');
         useToastStore.getState().addToast('info', 'All connections closed');
         setConnections([]);
+        setSelectedId(null);
       } catch {
         useToastStore.getState().addToast('error', 'Failed to close connections');
       }
@@ -158,8 +268,8 @@ export function ConnectionsView() {
     const ip = c.metadata.destinationIP || '';
     
     // Search query match
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (deferredSearchQuery.trim()) {
+      const q = deferredSearchQuery.toLowerCase();
       const matchSearch =
         host.toLowerCase().includes(q) ||
         rule.toLowerCase().includes(q) ||
@@ -292,88 +402,15 @@ export function ConnectionsView() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sorted.map((conn) => {
-                    const host = conn.metadata.host || conn.metadata.destinationIP;
-                    const port = conn.metadata.destinationPort;
-                    const isDirect = conn.chains.includes('direct');
-                    const chainDisplay = conn.chains.join(' › ');
-                    
-                    return (
-                      <TableRow key={conn.id} className="hover:bg-muted/20 text-xs transition-colors border-b border-border/30">
-                        {/* Target Address */}
-                        <TableCell className="py-2.5 px-4 max-w-[280px] font-normal">
-                          <div className="flex flex-col gap-0.5">
-                            <div className="font-bold text-foreground truncate" title={`${host}:${port}`}>
-                              {host}
-                              <span className="text-muted-foreground font-normal">:{port}</span>
-                            </div>
-                            <div className="flex gap-1.5 items-center mt-0.5 select-none">
-                              <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-mono border-border bg-background/50 font-normal uppercase">
-                                {conn.metadata.network}
-                              </Badge>
-                              <span className="text-[9.5px] text-muted-foreground">
-                                type: {conn.metadata.type}
-                              </span>
-                            </div>
-                          </div>
-                        </TableCell>
-
-                        {/* Matching Route Rule */}
-                        <TableCell className="py-2.5 px-4 font-normal">
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center select-none">
-                              <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-sm border ${
-                                isDirect
-                                  ? 'bg-transparent border-border text-muted-foreground'
-                                  : 'bg-foreground border-foreground text-background'
-                              }`}>
-                                {chainDisplay}
-                              </span>
-                            </div>
-                            {conn.rule && (
-                              <div className="text-[9.5px] text-muted-foreground font-mono mt-0.5" title={conn.rule}>
-                                rule: {conn.rule}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
-
-                        {/* Real-time calculated speeds */}
-                        <TableCell className="py-2.5 px-4 font-mono font-normal">
-                          <div className="flex flex-col gap-0.5 text-[10.5px]">
-                            <span className="text-foreground">↓ {formatSpeed(conn.downSpeed || 0)}</span>
-                            <span className="text-muted-foreground">↑ {formatSpeed(conn.upSpeed || 0)}</span>
-                          </div>
-                        </TableCell>
-
-                        {/* Total bytes stats */}
-                        <TableCell className="py-2.5 px-4 font-mono font-normal">
-                          <div className="flex flex-col gap-0.5 text-[10.5px] text-muted-foreground">
-                            <span>↓ {formatBytes(conn.download)}</span>
-                            <span>↑ {formatBytes(conn.upload)}</span>
-                          </div>
-                        </TableCell>
-
-                        {/* Connection lifetime */}
-                        <TableCell className="py-2.5 px-4 text-foreground text-[11px] font-medium">
-                          {formatDuration(conn.start)}
-                        </TableCell>
-
-                        {/* Termination */}
-                        <TableCell className="py-2.5 px-4 text-center select-none">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
-                            onClick={() => handleKill(conn.id, `${host}:${port}`)}
-                            title="Force close connection"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
+                  {sorted.map((conn) => (
+                    <ConnectionRow
+                      key={conn.id}
+                      conn={conn}
+                      isSelected={selectedId === conn.id}
+                      onSelect={() => setSelectedId(selectedId === conn.id ? null : conn.id)}
+                      onKill={handleKill}
+                    />
+                  ))}
                 </TableBody>
               </Table>
             ) : (
