@@ -17,7 +17,7 @@ interface SegmentedControlProps<T extends string> {
 
 export function SegmentedControl<T extends string>({ value, onChange, options, className }: SegmentedControlProps<T>) {
   return (
-    <div className={cn("flex items-center bg-muted/60 p-0.5 border border-border/60 rounded-lg shrink-0", className)}>
+    <div className={cn("flex items-center bg-muted/60 p-0.5 border border-border/60 rounded-lg shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}>
       {options.map((opt) => {
         const Icon = opt.icon;
         const isActive = value === opt.value;
@@ -28,7 +28,7 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
             onClick={() => onChange(opt.value)}
             variant="ghost"
             className={cn(
-              "h-7 gap-1 px-3.5 text-2xs font-bold rounded-md select-none transition-all flex-1",
+              "h-7 gap-1 px-3.5 text-2xs font-bold rounded-md select-none transition-all flex-1 shrink-0",
               isActive
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-transparent"

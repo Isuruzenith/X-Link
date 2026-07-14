@@ -31,7 +31,7 @@ export function FormSelect({ label, value, onChange, options, placeholder, class
         <SelectTrigger className={cn("h-9 bg-background/50 border-border text-foreground text-xs focus:ring-1 focus:ring-ring justify-between", className)}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent position="popper">
           {options.map((opt) => (
             <SelectItem key={opt.value} value={opt.value} className="text-xs">
               {opt.label}

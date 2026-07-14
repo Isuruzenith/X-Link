@@ -18,17 +18,18 @@ const PROTOCOL_LABELS: Record<string, string> = {
   http: 'HTTP',
 };
 
-const Inp = ({ value, onChange, placeholder, type = 'text', mono = false }: {
+const Inp = ({ value, onChange, placeholder, type = 'text', mono = false, className }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   type?: string;
   mono?: boolean;
+  className?: string;
 }) => (
   <FormInput
     type={type}
     mono={mono}
-    className="h-8"
+    className={`h-8 truncate ${className || ''}`}
     value={value}
     onChange={onChange}
     placeholder={placeholder}
@@ -69,6 +70,13 @@ const SubCard = ({ title, children }: { title: string; children: React.ReactNode
 
 export function NodeEditor() {
   const store = useNodeEditorStore();
+  const errorRef = React.useRef<HTMLDivElement>(null);
+ 
+  React.useEffect(() => {
+    if (store.saveError && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [store.saveError]);
 
   if (!store.isOpen) return null;
 
@@ -526,7 +534,7 @@ export function NodeEditor() {
           )}
 
           {store.saveError && (
-            <div className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2 mt-2">
+            <div ref={errorRef} className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2 mt-2">
               <ShieldAlert className="size-3.5 shrink-0" />
               <span>{store.saveError}</span>
             </div>

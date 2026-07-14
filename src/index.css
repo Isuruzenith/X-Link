@@ -95,6 +95,8 @@
   --status-info-glow:   oklch(0.588 0.195 256.8 / 15%);
 
   /* CHART MONOCHROME VARIABLES */
+  --chart-download:       var(--foreground);
+  --chart-upload:         var(--muted-foreground);
   --chart-down-stroke:    var(--foreground);
   --chart-down-glow:      oklch(0 0 0 / 20%);
   --chart-down-fill-0:    oklch(0 0 0 / 8%);
@@ -622,7 +624,7 @@ body {
 .node-card:hover { border-color: var(--border-strong); background: var(--surface-hover); }
 .node-card.active { border-color: rgba(124,141,255,0.4); background: var(--accent-secondary-dim); }
 .node-name { font-size: 12.5px; font-weight: 500; color: var(--text-high); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.node-type-badge { font-size: 10px; font-family: var(--font-mono); background: rgba(74,158,255,0.06); color: var(--accent-cyan); border: 1px solid rgba(74,158,255,0.15); border-radius: 3px; padding: 0 5px; height: 18px; display: inline-flex; align-items: center; }
+.node-type-badge { font-size: 10px; font-family: var(--font-mono); background: rgba(74,158,255,0.06); color: var(--accent-cyan); border: 1px solid rgba(74,158,255,0.15); border-radius: var(--r-sm); padding: 0 5px; height: 18px; display: inline-flex; align-items: center; }
 
 /* Profile Card */
 .profile-card {
@@ -812,7 +814,7 @@ body {
   background: rgba(59,130,246,0.05); color: var(--text-low);
   border: 1px solid rgba(59,130,246,0.15); font-size: 12px; line-height: 1.5;
 }
-.info-box code { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,255,0.06); padding: 0 4px; border-radius: 3px; color: var(--accent-primary); }
+.info-box code { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,255,0.06); padding: 0 4px; border-radius: var(--r-sm); color: var(--accent-primary); }
 
 /* ── BADGE ─────────────────────────────────────────────────────────────────── */
 .outbound-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); letter-spacing: 0.4px; text-transform: uppercase; }
@@ -915,7 +917,7 @@ body {
   background: rgba(239, 68, 68, 0.25);
   border-color: var(--status-err);
   box-shadow: 0 0 14px var(--status-err-glow);
-  color: #ff6b6b;
+  color: var(--status-err);
 }
 
 .tun-shield-badge {
@@ -1107,6 +1109,8 @@ body {
   --status-info:        oklch(0.72 0.17 256.8);
   --status-info-dim:    oklch(0.72 0.17 256.8 / 10%);
   --status-info-glow:   oklch(0.72 0.17 256.8 / 20%);
+  --chart-download:       var(--foreground);
+  --chart-upload:         var(--muted-foreground);
   --chart-down-stroke:    var(--foreground);
   --chart-down-glow:      oklch(1 0 0 / 35%);
   --chart-down-fill-0:    oklch(1 0 0 / 15%);
@@ -1127,4 +1131,13 @@ body {
   html {
     @apply font-sans;
   }
+}
+
+/* Table row hover state fix */
+tr:hover {
+  background-color: var(--surface-hover);
+}
+tr[data-state="selected"]:hover,
+tr.bg-muted\/60:hover {
+  background-color: var(--surface-active) !important;
 }

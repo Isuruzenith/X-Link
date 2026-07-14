@@ -151,10 +151,10 @@ export function LogsView() {
                   className="flex items-start py-0.5 px-1.5 rounded mb-0.5 hover:bg-muted/30 transition-colors font-normal text-foreground/90"
                 >
                   {/* Timestamp */}
-                  <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal">
+                  <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal w-10 sm:w-14 truncate" title={log.timestamp}>
                     {log.timestamp}
                   </span>
-
+ 
                   {/* Level tag */}
                   <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
                     log.type === 'error' ? 'text-foreground font-black' :
@@ -163,9 +163,9 @@ export function LogsView() {
                   }`}>
                     {getLevelLabel(log.type)}
                   </span>
-
+ 
                   {/* Log content */}
-                  <span className={`flex-1 break-all font-normal text-[11px] ${
+                  <span className={`flex-1 whitespace-pre-wrap break-all font-normal text-[11px] ${
                     log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
                   }`}>
                     {renderHighlightedText(log.text)}

@@ -361,11 +361,11 @@ export function ConnectionsView() {
             ]}
           />
 
-          <span className="text-xs font-semibold text-muted-foreground ml-auto hidden sm:inline">
+          <span className="text-xs font-semibold text-muted-foreground ml-auto hidden sm:inline-block min-w-[20ch] text-right tabular-nums">
             {sorted.length} / {visibleConnections.length} active sockets
           </span>
         </div>
-
+ 
         {/* Connections table panel */}
         <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
           <ScrollArea className="flex-1 w-full min-h-0">
@@ -373,32 +373,38 @@ export function ConnectionsView() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[10.5px] uppercase font-bold tracking-wider text-muted-foreground select-none">
-                    <TableHead className="h-9 px-4 cursor-pointer hover:text-foreground" onClick={() => toggleSort('host')}>
-                      <div className="flex items-center gap-1">
+                    <TableHead className="h-9 px-4">
+                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[120px] max-w-[400px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('host')}>
                         <span>Destination</span>
-                        <ArrowUpDown className="size-3" />
+                        <ArrowUpDown className="size-3 shrink-0" />
                       </div>
                     </TableHead>
-                    <TableHead className="h-9 px-4">Network / Matched Rule</TableHead>
-                    <TableHead className="h-9 px-4 cursor-pointer hover:text-foreground" onClick={() => toggleSort('speed')}>
-                      <div className="flex items-center gap-1">
+                    <TableHead className="h-9 px-4">
+                      <div className="resize-x overflow-hidden min-w-[150px] max-w-[400px] pr-2">
+                        Network / Matched Rule
+                      </div>
+                    </TableHead>
+                    <TableHead className="h-9 px-4">
+                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('speed')}>
                         <span>Live Speed</span>
-                        <ArrowUpDown className="size-3" />
+                        <ArrowUpDown className="size-3 shrink-0" />
                       </div>
                     </TableHead>
-                    <TableHead className="h-9 px-4 cursor-pointer hover:text-foreground" onClick={() => toggleSort('bytes')}>
-                      <div className="flex items-center gap-1">
+                    <TableHead className="h-9 px-4">
+                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('bytes')}>
                         <span>Total Data</span>
-                        <ArrowUpDown className="size-3" />
+                        <ArrowUpDown className="size-3 shrink-0" />
                       </div>
                     </TableHead>
-                    <TableHead className="h-9 px-4 cursor-pointer hover:text-foreground" onClick={() => toggleSort('time')}>
-                      <div className="flex items-center gap-1">
+                    <TableHead className="h-9 px-4">
+                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[90px] max-w-[200px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('time')}>
                         <span>Uptime</span>
-                        <ArrowUpDown className="size-3" />
+                        <ArrowUpDown className="size-3 shrink-0" />
                       </div>
                     </TableHead>
-                    <TableHead className="h-9 px-4 w-14 text-center">Kill</TableHead>
+                    <TableHead className="h-9 px-4 w-14 text-center">
+                      <div className="w-full text-center">Kill</div>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

@@ -246,7 +246,7 @@ export function RoutingView() {
 
           <CardContent className="p-0 flex-1 flex flex-col overflow-hidden min-h-0">
             {showAddRule && (
-              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0">
+              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0 overflow-y-auto max-h-[200px] sm:max-h-none pr-1">
                 <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 items-end">
                   <div className="flex flex-col gap-1">
                     <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Rule Type</label>

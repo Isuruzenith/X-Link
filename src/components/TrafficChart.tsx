@@ -59,27 +59,45 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Padding
-    const padding = { top: 20, right: 15, bottom: 25, left: 55 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-
     // Retrieve theme colors dynamically
     const style = getComputedStyle(document.documentElement);
     const textLow = style.getPropertyValue('--text-low').trim() || '#52525b';
     const borderDefault = style.getPropertyValue('--border-default').trim() || 'rgba(255, 255, 255, 0.08)';
     const borderStrong = style.getPropertyValue('--border-strong').trim() || 'rgba(255, 255, 255, 0.15)';
-
-    const chartDownStroke = style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
+ 
+    const chartDownStroke = style.getPropertyValue('--chart-download').trim() || style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
     const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
     const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.15)';
     const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
-
-    const chartUpStroke = style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
+ 
+    const chartUpStroke = style.getPropertyValue('--chart-upload').trim() || style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
     const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
     const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.08)';
     const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
-
+ 
+    // Calculate maximum speed in the history to scale the Y-axis
+    let maxSpeed = 1024 * 100; // Minimum scale of 100 KB/s
+    if (history.length > 0) {
+      history.forEach((pt) => {
+        if (pt.up > maxSpeed) maxSpeed = pt.up;
+        if (pt.down > maxSpeed) maxSpeed = pt.down;
+      });
+    }
+ 
+    // Add a 15% buffer at the top
+    maxSpeed = maxSpeed * 1.15;
+ 
+    // Measure Y-axis text width to dynamically scale padding.left
+    ctx.font = '9px "Inter", sans-serif';
+    const longestLabel = formatSpeed(maxSpeed);
+    const labelWidth = ctx.measureText(longestLabel).width;
+    const paddingLeft = Math.max(48, Math.ceil(labelWidth + 12));
+ 
+    // Padding
+    const padding = { top: 20, right: 15, bottom: 25, left: paddingLeft };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+ 
     // Draw background grid lines
     ctx.strokeStyle = borderDefault;
     ctx.lineWidth = 1;
@@ -91,7 +109,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.lineTo(width - padding.right, y);
       ctx.stroke();
     }
-
+ 
     // If there is no history, draw empty state
     if (history.length === 0) {
       ctx.fillStyle = textLow;
@@ -101,17 +119,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.fillText('No real-time traffic data', width / 2, height / 2);
       return;
     }
-
-    // Calculate maximum speed in the history to scale the Y-axis
-    let maxSpeed = 1024 * 100; // Minimum scale of 100 KB/s
-    history.forEach((pt) => {
-      if (pt.up > maxSpeed) maxSpeed = pt.up;
-      if (pt.down > maxSpeed) maxSpeed = pt.down;
-    });
-
-    // Add a 15% buffer at the top
-    maxSpeed = maxSpeed * 1.15;
-
+ 
     // Draw Y axis labels
     ctx.fillStyle = textLow;
     ctx.font = '9px "Inter", sans-serif';

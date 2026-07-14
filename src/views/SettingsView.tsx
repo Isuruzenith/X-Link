@@ -77,8 +77,9 @@ export function SettingsView() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-4">
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
-                    <CardHeader className="p-0 pb-1 shrink-0">
+                    <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Proxy Mode</CardTitle>
+                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy)."
                       checked={settings.proxyMode === 'tun'}
@@ -96,8 +97,9 @@ export function SettingsView() {
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
-                    <CardHeader className="p-0 pb-1 shrink-0">
+                    <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">App Preferences</CardTitle>
+                      <Badge variant="secondary" className="h-4.5 px-1.5 text-[8.5px] font-bold bg-green-500/10 text-green-600 border border-green-500/25 select-none dark:text-green-400">Live</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => updateSettings({ closeToTray: v })} />
                     <FormSwitchRow title="Launch on System Login" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
@@ -105,15 +107,17 @@ export function SettingsView() {
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
-                    <CardHeader className="p-0 pb-1 shrink-0">
+                    <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Connection Optimization</CardTitle>
+                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Enable Multiplexing (Mux)" desc="Multiplexes multiple streams over a single connection" checked={settings.multiplex} onChange={(v) => updateSettings({ multiplex: v })} />
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
-                    <CardHeader className="p-0 pb-1 shrink-0">
+                    <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Appearance</CardTitle>
+                      <Badge variant="secondary" className="h-4.5 px-1.5 text-[8.5px] font-bold bg-green-500/10 text-green-600 border border-green-500/25 select-none dark:text-green-400">Live</Badge>
                     </CardHeader>
                     <SegmentedControl
                       value={theme}
@@ -129,8 +133,9 @@ export function SettingsView() {
                 </div>
 
                 <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3 h-fit">
-                  <CardHeader className="p-0 pb-1 shrink-0">
+                  <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-xs font-bold text-foreground">Inbound Ports</CardTitle>
+                    <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                   </CardHeader>
                   <FormSwitchRow title="Use Separate HTTP & SOCKS5 Ports" desc="Bind separate HTTP and SOCKS5 protocol listeners"
                     checked={settings.useSeparatePorts} onChange={(v) => updateSettings({ useSeparatePorts: v })} />
@@ -211,8 +216,9 @@ export function SettingsView() {
                 </div>
               )}
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">TUN Interface Configuration</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-2 gap-3.5">
                   <div className="flex flex-col gap-1.5">
@@ -254,8 +260,9 @@ export function SettingsView() {
           {settingsTab === 'sniff' && (
             <div className="flex flex-col gap-4">
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Traffic Sniffing & Protocol Detection</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Enable Traffic Sniffing" desc="Inspect connection metadata to extract domain names for routing"
                   checked={settings.sniffEnabled} onChange={(v) => updateSettings({ sniffEnabled: v })} />
@@ -279,8 +286,9 @@ export function SettingsView() {
           {settingsTab === 'dns' && (
             <div className="flex flex-col gap-4">
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">DNS Servers</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="flex flex-col gap-1.5">
@@ -302,8 +310,9 @@ export function SettingsView() {
               </Card>
 
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">DNS Options & Strategy</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
@@ -325,8 +334,9 @@ export function SettingsView() {
               </Card>
 
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Resolution Mode</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">DNS Mode</label>
@@ -353,8 +363,9 @@ export function SettingsView() {
               </Card>
 
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Routing</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Bypass LAN / Private IPs" desc="Route RFC-1918 addresses directly instead of through the proxy"
                   checked={settings.bypassLan} onChange={(v) => updateSettings({ bypassLan: v })} />
@@ -371,8 +382,9 @@ export function SettingsView() {
           {settingsTab === 'api' && (
             <div className="flex flex-col gap-4">
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-                <CardHeader className="p-0 pb-1 shrink-0">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Clash-Compatible REST API</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
                   checked={settings.apiEnabled} onChange={(v) => updateSettings({ apiEnabled: v })} />
