@@ -1,24 +1,45 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useDeferredValue } from 'react';
 import { Terminal, Copy, Trash2, Search } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useLogStore } from '../stores/logStore';
 import { useToastStore } from '../stores/toastStore';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { FormInput, SegmentedControl } from '@/components/form';
 
 export function LogsView() {
   const { logs, autoScroll, setAutoScroll, clearLogs, copyLogs } = useLogStore();
-  const endRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [filterText, setFilterText] = useState('');
+  const deferredFilterText = useDeferredValue(filterText);
   const [levelFilter, setLevelFilter] = useState<'all' | 'info' | 'warn' | 'error' | 'system'>('all');
 
+  const handleScroll = () => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Check if user is within 40px of bottom
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+    if (isAtBottom && !autoScroll) {
+      setAutoScroll(true);
+    } else if (!isAtBottom && autoScroll) {
+      setAutoScroll(false);
+    }
+  };
+
   useEffect(() => {
-    if (autoScroll && endRef.current) {
-      endRef.current.scrollIntoView({ behavior: 'smooth' });
+    const container = containerRef.current;
+    if (!container) return;
+
+    if (autoScroll) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [logs, autoScroll]);
 
   const filtered = logs.filter((l) => {
     if (levelFilter !== 'all' && l.type !== levelFilter) return false;
-    if (filterText && !l.text.toLowerCase().includes(filterText.toLowerCase())) return false;
+    if (deferredFilterText && !l.text.toLowerCase().includes(deferredFilterText.toLowerCase())) return false;
     return true;
   });
 
@@ -36,49 +57,18 @@ export function LogsView() {
         const tagText = part.slice(1, -1);
         const lowerTag = tagText.toLowerCase();
         
-        let color = '#4a9eff';
-        let bg = 'rgba(74, 158, 255, 0.08)';
-        let border = 'rgba(74, 158, 255, 0.15)';
+        let classes = 'text-foreground/75 bg-muted border-border/40';
         
-        if (lowerTag.includes('dns')) {
-          color = '#38bdf8'; // Sky blue
-          bg = 'rgba(56, 189, 248, 0.08)';
-          border = 'rgba(56, 189, 248, 0.15)';
-        } else if (lowerTag.includes('tun') || lowerTag.includes('route')) {
-          color = '#a855f7'; // Purple
-          bg = 'rgba(168, 85, 247, 0.08)';
-          border = 'rgba(168, 85, 247, 0.15)';
-        } else if (lowerTag.includes('system') || lowerTag.includes('core')) {
-          color = '#10b981'; // Green
-          bg = 'rgba(16, 185, 129, 0.08)';
-          border = 'rgba(16, 185, 129, 0.15)';
-        } else if (lowerTag.includes('warn')) {
-          color = '#f59e0b'; // Yellow
-          bg = 'rgba(245, 158, 11, 0.08)';
-          border = 'rgba(245, 158, 11, 0.15)';
+        if (lowerTag.includes('warn')) {
+          classes = 'text-amber-700 bg-amber-50/50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900/50';
         } else if (lowerTag.includes('err') || lowerTag.includes('fail')) {
-          color = '#ef4444'; // Red
-          bg = 'rgba(239, 68, 68, 0.08)';
-          border = 'rgba(239, 68, 68, 0.15)';
+          classes = 'text-destructive bg-destructive/10 border-destructive/20';
         }
         
         return (
           <span
             key={idx}
-            style={{
-              color,
-              background: bg,
-              border: `1px solid ${border}`,
-              padding: '1px 5px',
-              borderRadius: '4px',
-              fontSize: '10px',
-              fontWeight: 600,
-              marginRight: '6px',
-              display: 'inline-block',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              lineHeight: '1.2'
-            }}
+            className={`inline-block px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider border mr-1.5 leading-none ${classes}`}
           >
             {tagText}
           </span>
@@ -100,162 +90,97 @@ export function LogsView() {
       title="Console Logs"
       subtitle="Real-time core proxy logs and system events output"
       actions={
-        <div className="flex-row gap-12">
-          <button className="btn secondary sm" onClick={handleCopy}>
-            <Copy size={13} /> Copy All
-          </button>
-          <button className="btn secondary sm" onClick={clearLogs}>
-            <Trash2 size={13} /> Clear
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', borderLeft: '1px solid var(--border-subtle)', paddingLeft: '12px' }}>
-            <label className="switch-toggle" title="Autoscroll">
-              <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} />
-              <span className="switch-slider"></span>
+        <div className="flex items-center gap-2 select-none">
+          <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs font-semibold" onClick={handleCopy}>
+            <Copy className="size-3.5" /> Copy All
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs font-semibold" onClick={clearLogs}>
+            <Trash2 className="size-3.5" /> Clear
+          </Button>
+          <div className="flex items-center gap-2 border-l border-border/80 pl-3.5 ml-1 h-5">
+            <Switch id="autoscroll-toggle" checked={autoScroll} onCheckedChange={setAutoScroll} />
+            <label htmlFor="autoscroll-toggle" className="text-xs font-bold text-muted-foreground cursor-pointer select-none">
+              Autoscroll
             </label>
-            <span style={{ fontSize: '11px', color: 'var(--text-low)', fontWeight: 500 }}>Autoscroll</span>
           </div>
         </div>
       }
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(100vh - 130px)' }}>
+      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
 
         {/* Filter bar */}
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexShrink: 0 }}>
-          <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
-            <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-low)' }} />
-            <input
-              className="text-input"
-              style={{ paddingLeft: '32px', fontSize: '12.5px' }}
+        <div className="flex items-center gap-3 shrink-0 select-none">
+          <div className="relative flex-1 min-w-[140px] max-w-[320px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground z-10" />
+            <FormInput
+              className="pl-9 h-8"
               placeholder="Search console output…"
               value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
+              onChange={setFilterText}
             />
           </div>
           
-          <div className="seg-control">
-            {([
-              { key: 'all', label: 'All' },
-              { key: 'info', label: 'Info' },
-              { key: 'warn', label: 'Warn' },
-              { key: 'error', label: 'Errors' },
-              { key: 'system', label: 'System' }
-            ] as const).map((l) => (
-              <div
-                key={l.key}
-                className={`seg-item ${levelFilter === l.key ? 'active' : ''}`}
-                onClick={() => setLevelFilter(l.key)}
-                style={
-                  l.key === 'error' && levelFilter === l.key ? { color: '#ef4444' } :
-                  l.key === 'warn' && levelFilter === l.key ? { color: '#f59e0b' } :
-                  l.key === 'system' && levelFilter === l.key ? { color: '#10b981' } : undefined
-                }
-              >
-                {l.label}
-              </div>
-            ))}
-          </div>
+          <SegmentedControl
+            value={levelFilter}
+            onChange={(val) => setLevelFilter(val as 'all' | 'info' | 'warn' | 'error' | 'system')}
+            options={[
+              { label: 'All', value: 'all' },
+              { label: 'Info', value: 'info' },
+              { label: 'Warn', value: 'warn' },
+              { label: 'Errors', value: 'error' },
+              { label: 'System', value: 'system' }
+            ]}
+          />
           
-          <span style={{ fontSize: '12px', color: 'var(--text-low)', marginLeft: 'auto', fontWeight: 500 }}>
+          <span className="text-xs font-semibold text-muted-foreground ml-auto hidden sm:inline">
             Showing {filtered.length} of {logs.length} entries
           </span>
         </div>
 
-        {/* Terminal glass block */}
-        <div
-          className="glass-panel"
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 0,
-            overflow: 'hidden',
-            background: 'rgba(10, 11, 14, 0.75)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--shadow-lg)'
-          }}
-        >
+        {/* Terminal block */}
+        <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
           <div
-            style={{
-              flex: 1,
-              overflow: 'auto',
-              padding: '16px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              lineHeight: '1.8'
-            }}
+            ref={containerRef}
+            onScroll={handleScroll}
+            className="flex-1 w-full min-h-0 overflow-y-auto p-4 font-mono text-[11.5px] leading-relaxed"
           >
             {filtered.length > 0 ? (
               filtered.map((log, i) => (
                 <div
                   key={i}
-                  className={`log-line ${log.type}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    padding: '4px 6px',
-                    borderRadius: '4px',
-                    marginBottom: '2px',
-                    transition: 'background 0.15s ease',
-                    fontWeight: 300
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'transparent';
-                  }}
+                  className="flex items-start py-0.5 px-1.5 rounded mb-0.5 hover:bg-muted/30 transition-colors font-normal text-foreground/90"
                 >
                   {/* Timestamp */}
-                  <span
-                    style={{
-                      color: 'var(--text-low)',
-                      marginRight: '12px',
-                      userSelect: 'none',
-                      fontSize: '11px',
-                      opacity: 0.65,
-                      flexShrink: 0,
-                      fontWeight: 300
-                    }}
-                  >
+                  <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal w-10 sm:w-14 truncate" title={log.timestamp}>
                     {log.timestamp}
                   </span>
-
-                  {/* Level tag */}
-                  <span
-                    className="log-level"
-                    style={{
-                      width: '38px',
-                      flexShrink: 0,
-                      fontWeight: 500,
-                      fontSize: '9.5px',
-                      letterSpacing: '0.4px',
-                      marginRight: '8px',
-                      userSelect: 'none',
-                      color: log.type === 'error' ? '#ef4444' :
-                             log.type === 'warn'  ? '#f59e0b' :
-                             log.type === 'system' ? '#10b981' : '#3b82f6'
-                    }}
-                  >
+ 
+                  <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
+                    log.type === 'error' ? 'text-destructive font-black' :
+                    log.type === 'warn'  ? 'text-amber-600 dark:text-amber-500' :
+                    log.type === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-foreground/70'
+                  }`}>
                     {getLevelLabel(log.type)}
                   </span>
-
+ 
                   {/* Log content */}
-                  <span className="log-text" style={{ color: log.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'var(--text-med)', flex: 1, wordBreak: 'break-all', fontWeight: 300 }}>
+                  <span className={`flex-1 whitespace-pre-wrap break-all font-normal text-[11px] ${
+                    log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
+                  }`}>
                     {renderHighlightedText(log.text)}
                   </span>
                 </div>
               ))
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-low)' }}>
-                <Terminal size={36} style={{ strokeWidth: 1.2, marginBottom: '10px', opacity: 0.7 }} />
-                <span style={{ fontSize: '13px', fontWeight: 500 }}>
+              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none animate-in fade-in duration-200">
+                <Terminal className="size-9 opacity-60 stroke-[1.2]" />
+                <span className="text-xs font-bold text-foreground">
                   {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
                 </span>
               </div>
             )}
-            <div ref={endRef} />
           </div>
-        </div>
+        </Card>
       </div>
     </ViewShell>
   );

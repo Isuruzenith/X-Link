@@ -1,9 +1,24 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useDeferredValue, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Network, Search, X, ShieldAlert, ArrowUpDown } from 'lucide-react';
+import { ask } from '@tauri-apps/plugin-dialog';
+import { Network, Search, X, ShieldAlert, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { FormInput, SegmentedControl } from '@/components/form';
+import { cn } from '@/lib/utils';
 
 interface ConnectionMetadata {
   network: string;
@@ -29,14 +44,14 @@ interface ConnectionEntry {
 }
 
 const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 B';
+  if (bytes <= 0) return '0 B';
   const k = 1024, sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
 const formatSpeed = (bps: number): string => {
-  if (!bps || bps === 0) return '0 B/s';
+  if (bps <= 0) return '0 B/s';
   const k = 1024, sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
   const i = Math.floor(Math.log(bps) / Math.log(k));
   return parseFloat((bps / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
@@ -56,13 +71,122 @@ const formatDuration = (startIso: string): string => {
   }
 };
 
+const ConnectionRow = memo(({
+  conn,
+  isSelected,
+  onSelect,
+  onKill,
+  isKilling,
+}: {
+  conn: ConnectionEntry;
+  isSelected: boolean;
+  onSelect: () => void;
+  onKill: (id: string, label: string) => void;
+  isKilling: boolean;
+}) => {
+  const host = conn.metadata.host || conn.metadata.destinationIP;
+  const port = conn.metadata.destinationPort;
+  const isDirect = conn.chains.includes('direct');
+  const chainDisplay = conn.chains.join(' › ');
+
+  return (
+    <TableRow
+      className={`text-xs transition-colors border-b border-border/30 cursor-pointer ${
+        isSelected ? 'bg-muted/60 hover:bg-muted/70' : 'hover:bg-muted/20'
+      }`}
+      onClick={onSelect}
+    >
+      {/* Target Address */}
+      <TableCell className="py-2.5 px-4 max-w-[280px] font-normal">
+        <div className="flex flex-col gap-0.5">
+          <div className="font-bold text-foreground truncate" title={`${host}:${port}`}>
+            {host}
+            <span className="text-muted-foreground font-normal font-mono">:{port}</span>
+          </div>
+          <div className="flex gap-1.5 items-center mt-0.5 select-none">
+            <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-mono border-border bg-background/50 font-normal uppercase">
+              {conn.metadata.network}
+            </Badge>
+            <span className="text-[9.5px] text-muted-foreground">
+              type: {conn.metadata.type}
+            </span>
+          </div>
+        </div>
+      </TableCell>
+
+      {/* Matching Route Rule */}
+      <TableCell className="py-2.5 px-4 font-normal">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center select-none">
+            <Badge variant="outline" className={cn('text-2xs font-bold uppercase tracking-wide', 
+              isDirect 
+                ? 'bg-transparent text-muted-foreground border-border'
+                : 'bg-primary text-primary-foreground border-primary'
+            )}>
+              {chainDisplay}
+            </Badge>
+          </div>
+          {conn.rule && (
+            <div className="text-[9.5px] text-muted-foreground font-mono mt-0.5" title={conn.rule}>
+              rule: {conn.rule}
+            </div>
+          )}
+        </div>
+      </TableCell>
+
+      {/* Real-time calculated speeds */}
+      <TableCell className="py-2.5 px-4 font-mono font-normal">
+        <div className="flex flex-col gap-0.5 text-[10.5px]">
+          <span className="text-foreground">↓ {formatSpeed(conn.downSpeed || 0)}</span>
+          <span className="text-muted-foreground">↑ {formatSpeed(conn.upSpeed || 0)}</span>
+        </div>
+      </TableCell>
+
+      {/* Total bytes stats */}
+      <TableCell className="py-2.5 px-4 font-mono font-normal">
+        <div className="flex flex-col gap-0.5 text-[10.5px] text-muted-foreground">
+          <span>↓ {formatBytes(conn.download)}</span>
+          <span>↑ {formatBytes(conn.upload)}</span>
+        </div>
+      </TableCell>
+
+      {/* Connection lifetime */}
+      <TableCell className="py-2.5 px-4 text-foreground text-[11px] font-medium">
+        {formatDuration(conn.start)}
+      </TableCell>
+
+      {/* Termination */}
+      <TableCell className="py-2.5 px-4 text-center select-none" onClick={(e) => e.stopPropagation()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+          onClick={() => onKill(conn.id, `${host}:${port}`)}
+          title="Force close connection"
+          disabled={isKilling}
+        >
+          {isKilling ? (
+            <RefreshCw className="size-3.5 animate-spin" />
+          ) : (
+            <X className="size-3.5" />
+          )}
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+});
+ConnectionRow.displayName = 'ConnectionRow';
+
 export function ConnectionsView() {
   const { isConnected } = useConnectionStore();
   const [connections, setConnections] = useState<ConnectionEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
   const [filterType, setFilterType] = useState<'all' | 'proxy' | 'direct'>('all');
   const [sortBy, setSortBy] = useState<'host' | 'speed' | 'bytes' | 'time'>('bytes');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [killingIds, setKillingIds] = useState<Record<string, boolean>>({});
 
   const prevBytesRef = useRef<Record<string, { upload: number; download: number; time: number }>>({});
 
@@ -80,73 +204,96 @@ export function ConnectionsView() {
           const prev = prevBytesRef.current[conn.id];
           let upSpeed = 0;
           let downSpeed = 0;
+
           if (prev) {
-            const elapsed = (now - prev.time) / 1000;
-            if (elapsed > 0) {
-              upSpeed = Math.max(0, (conn.upload - prev.upload) / elapsed);
-              downSpeed = Math.max(0, (conn.download - prev.download) / elapsed);
+            const timeDiff = (now - prev.time) / 1000;
+            if (timeDiff > 0) {
+              upSpeed = Math.max(0, (conn.upload - prev.upload) / timeDiff);
+              downSpeed = Math.max(0, (conn.download - prev.download) / timeDiff);
             }
           }
-          return { ...conn, upSpeed, downSpeed };
+
+          return {
+            ...conn,
+            upSpeed,
+            downSpeed,
+          };
         });
 
-        // Store bytes and times in ref for the next interval
-        const nextRefs: Record<string, { upload: number; download: number; time: number }> = {};
-        list.forEach((conn) => {
-          nextRefs[conn.id] = { upload: conn.upload, download: conn.download, time: now };
+        // Update prev reference
+        const nextBytes: Record<string, { upload: number; download: number; time: number }> = {};
+        updatedList.forEach((c) => {
+          nextBytes[c.id] = { upload: c.upload, download: c.download, time: now };
         });
-        prevBytesRef.current = nextRefs;
+        prevBytesRef.current = nextBytes;
 
         setConnections(updatedList);
       } catch {
-        // Silent catch to prevent UI crash on boot or network drop
+        // fail silently
       }
     };
 
     fetchConnections();
-    const interval = setInterval(fetchConnections, 1500);
+    const interval = setInterval(fetchConnections, 1000);
     return () => clearInterval(interval);
   }, [isConnected]);
 
-  const visibleConnections = isConnected ? connections : [];
-
-  // Kill connection handler
-  const handleKill = async (id: string, dest: string) => {
+  const handleKill = async (id: string, label: string) => {
+    setKillingIds((prev) => ({ ...prev, [id]: true }));
     try {
       await invoke('close_connection', { id });
+      useToastStore.getState().addToast('info', `Closed connection to ${label}`);
       setConnections((prev) => prev.filter((c) => c.id !== id));
-      useToastStore.getState().addToast('success', `Closed connection to ${dest}`, 'Connection Closed');
-    } catch (e) {
-      useToastStore.getState().addToast('error', `Failed to close connection: ${e}`, 'Error');
+      if (selectedId === id) {
+        setSelectedId(null);
+      }
+    } catch {
+      useToastStore.getState().addToast('error', 'Failed to close connection');
+    } finally {
+      setKillingIds((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
     }
   };
 
-  // Kill all connections handler
   const handleKillAll = async () => {
-    if (window.confirm('Are you sure you want to close all active proxy connections?')) {
+    const confirmed = await ask('Close all active network connections?', {
+      title: 'X-Link',
+      kind: 'warning',
+    });
+    if (confirmed) {
       try {
         await invoke('close_all_connections');
+        useToastStore.getState().addToast('info', 'All connections closed');
         setConnections([]);
-        useToastStore.getState().addToast('success', 'Closed all active connections', 'Connections Reset');
-      } catch (e) {
-        useToastStore.getState().addToast('error', `Failed to close all connections: ${e}`, 'Error');
+        setSelectedId(null);
+      } catch {
+        useToastStore.getState().addToast('error', 'Failed to close connections');
       }
     }
   };
 
-  // Filtering
+  // Filter connections
+  const visibleConnections = isConnected ? connections : [];
+
   const filtered = visibleConnections.filter((c) => {
-    // Search query matching
-    const query = searchQuery.toLowerCase();
-    const matchesSearch =
-      (c.metadata.host || '').toLowerCase().includes(query) ||
-      (c.metadata.destinationIP || '').toLowerCase().includes(query) ||
-      (c.rule || '').toLowerCase().includes(query) ||
-      (c.chains.join(' > ') || '').toLowerCase().includes(query);
+    const host = c.metadata.host || c.metadata.destinationIP;
+    const rule = c.rule || '';
+    const ip = c.metadata.destinationIP || '';
+    
+    // Search query match
+    if (deferredSearchQuery.trim()) {
+      const q = deferredSearchQuery.toLowerCase();
+      const matchSearch =
+        host.toLowerCase().includes(q) ||
+        rule.toLowerCase().includes(q) ||
+        ip.toLowerCase().includes(q);
+      if (!matchSearch) return false;
+    }
 
-    if (!matchesSearch) return false;
-
-    // Type matching (direct or proxy)
+    // Type filter match
     const isDirect = c.chains.includes('direct');
     if (filterType === 'proxy' && isDirect) return false;
     if (filterType === 'direct' && !isDirect) return false;
@@ -192,212 +339,116 @@ export function ConnectionsView() {
       title="Connections"
       subtitle="Real-time network tunnels audit and packet statistics"
       actions={
-        <div className="flex-row gap-12">
+        <div className="flex items-center gap-2">
           {visibleConnections.length > 0 && (
-            <button className="btn danger sm" onClick={handleKillAll}>
-              <ShieldAlert size={13} /> Close All
-            </button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-8 gap-1 px-3 text-xs font-semibold"
+              onClick={handleKillAll}
+            >
+              <ShieldAlert className="size-3.5" /> Close All
+            </Button>
           )}
         </div>
       }
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(100vh - 130px)' }}>
+      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
         
         {/* Controls row */}
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexShrink: 0 }}>
-          <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
-            <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-low)' }} />
-            <input
-              className="text-input"
-              style={{ paddingLeft: '32px', fontSize: '12.5px' }}
+        <div className="flex items-center gap-3 shrink-0 select-none">
+          <div className="relative flex-1 min-w-[140px] max-w-[320px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground z-10" />
+            <FormInput
+              className="pl-9 h-8"
               placeholder="Filter by host, IP, rule..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={setSearchQuery}
             />
           </div>
           
-          <div className="seg-control">
-            {([
-              { key: 'all', label: 'All Tunnels' },
-              { key: 'proxy', label: 'Proxy Tunnels' },
-              { key: 'direct', label: 'Direct Tunnels' },
-            ] as const).map((f) => (
-              <div
-                key={f.key}
-                className={`seg-item ${filterType === f.key ? 'active' : ''}`}
-                onClick={() => setFilterType(f.key)}
-              >
-                {f.label}
-              </div>
-            ))}
-          </div>
+          <SegmentedControl
+            value={filterType}
+            onChange={(val) => setFilterType(val as 'all' | 'proxy' | 'direct')}
+            options={[
+              { value: 'all', label: 'All Tunnels' },
+              { value: 'proxy', label: 'Proxy Tunnels' },
+              { value: 'direct', label: 'Direct Tunnels' },
+            ]}
+          />
 
-          <span style={{ fontSize: '12px', color: 'var(--text-low)', marginLeft: 'auto', fontWeight: 500 }}>
+          <span className="text-xs font-semibold text-muted-foreground ml-auto hidden sm:inline-block min-w-[20ch] text-right tabular-nums">
             {sorted.length} / {visibleConnections.length} active sockets
           </span>
         </div>
-
+ 
         {/* Connections table panel */}
-        <div
-          className="glass-panel"
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 0,
-            overflow: 'hidden',
-            background: 'rgba(10, 11, 14, 0.65)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--shadow-lg)'
-          }}
-        >
-          <div style={{ flex: 1, overflow: 'auto' }}>
+        <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
+          <ScrollArea className="flex-1 w-full min-h-0">
             {sorted.length > 0 ? (
-              <table className="data-table" style={{ width: '100%' }}>
-                <thead>
-                  <tr style={{ background: 'rgba(0,0,0,0.1)' }}>
-                    <th style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => toggleSort('host')}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[10.5px] uppercase font-bold tracking-wider text-muted-foreground select-none">
+                    <TableHead className="h-9 px-4">
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[120px] max-w-[400px] pr-2 cursor-pointer transition-colors", sortBy === 'host' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')}>
                         <span>Destination</span>
-                        <ArrowUpDown size={10} />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
-                    </th>
-                    <th style={{ padding: '12px 16px' }}>Network / Matched Rule</th>
-                    <th style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => toggleSort('speed')}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    </TableHead>
+                    <TableHead className="h-9 px-4">
+                      <div className="resize-x overflow-hidden min-w-[150px] max-w-[400px] pr-2">
+                        Network / Matched Rule
+                      </div>
+                    </TableHead>
+                    <TableHead className="h-9 px-4">
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'speed' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')}>
                         <span>Live Speed</span>
-                        <ArrowUpDown size={10} />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
-                    </th>
-                    <th style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => toggleSort('bytes')}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    </TableHead>
+                    <TableHead className="h-9 px-4">
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'bytes' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')}>
                         <span>Total Data</span>
-                        <ArrowUpDown size={10} />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
-                    </th>
-                    <th style={{ padding: '12px 16px', cursor: 'pointer' }} onClick={() => toggleSort('time')}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    </TableHead>
+                    <TableHead className="h-9 px-4">
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[90px] max-w-[200px] pr-2 cursor-pointer transition-colors", sortBy === 'time' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')}>
                         <span>Uptime</span>
-                        <ArrowUpDown size={10} />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
-                    </th>
-                    <th style={{ padding: '12px 16px', width: '50px', textAlign: 'center' }}>Kill</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((conn) => {
-                    const host = conn.metadata.host || conn.metadata.destinationIP;
-                    const port = conn.metadata.destinationPort;
-                    const isDirect = conn.chains.includes('direct');
-                    const chainDisplay = conn.chains.join(' \u203a ');
-                    
-                    return (
-                      <tr key={conn.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                        {/* Target Address */}
-                        <td style={{ padding: '12px 16px', maxWidth: '280px', fontWeight: 300 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <div style={{ fontWeight: 400, color: 'var(--text-high)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`${host}:${port}`}>
-                              {host}
-                              <span style={{ color: 'var(--text-low)', fontWeight: 300 }}>:{port}</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                              <span style={{
-                                fontSize: '9px', fontWeight: 600, padding: '1px 4px', borderRadius: '3px',
-                                background: conn.metadata.network === 'udp' ? 'rgba(168, 85, 247, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                                color: conn.metadata.network === 'udp' ? '#a855f7' : '#3b82f6',
-                                textTransform: 'uppercase'
-                              }}>
-                                {conn.metadata.network}
-                              </span>
-                              <span style={{ fontSize: '10px', color: 'var(--text-low)', fontWeight: 300 }}>
-                                type: {conn.metadata.type}
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Matching Route Rule */}
-                        <td style={{ padding: '12px 16px', fontWeight: 300 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                              <span style={{
-                                fontSize: '10px', fontWeight: 500, padding: '2px 6px', borderRadius: '4px', border: '1px solid',
-                                background: isDirect ? 'var(--status-ok-dim)' : 'var(--accent-primary-dim)',
-                                color: isDirect ? 'var(--status-ok)' : 'var(--accent-primary)',
-                                borderColor: isDirect ? 'rgba(34,197,94,0.15)' : 'rgba(74,158,255,0.15)'
-                              }}>
-                                {chainDisplay}
-                              </span>
-                            </div>
-                            {conn.rule && (
-                              <div style={{ fontSize: '10px', color: 'var(--text-low)', fontFamily: 'var(--font-mono)', fontWeight: 300 }} title={conn.rule}>
-                                rule: {conn.rule}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Real-time calculated speeds */}
-                        <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontWeight: 300 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11.5px', fontWeight: 300 }}>
-                            <span style={{ color: 'var(--status-ok)' }}>↓ {formatSpeed(conn.downSpeed || 0)}</span>
-                            <span style={{ color: 'var(--accent-secondary)' }}>↑ {formatSpeed(conn.upSpeed || 0)}</span>
-                          </div>
-                        </td>
-
-                        {/* Total bytes stats */}
-                        <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontWeight: 300 }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11.5px', color: 'var(--text-med)', fontWeight: 300 }}>
-                            <span>↓ {formatBytes(conn.download)}</span>
-                            <span>↑ {formatBytes(conn.upload)}</span>
-                          </div>
-                        </td>
-
-                        {/* Connection lifetime */}
-                        <td style={{ padding: '12px 16px', color: 'var(--text-high)', fontSize: '12px', fontWeight: 300 }}>
-                          {formatDuration(conn.start)}
-                        </td>
-
-                        {/* Termination */}
-                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => handleKill(conn.id, `${host}:${port}`)}
-                            style={{
-                              background: 'transparent', border: 'none', color: 'var(--text-low)', cursor: 'pointer',
-                              width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              transition: 'all 0.15s'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
-                              e.currentTarget.style.color = '#ef4444';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'transparent';
-                              e.currentTarget.style.color = 'var(--text-low)';
-                            }}
-                            title="Force close connection"
-                          >
-                            <X size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    </TableHead>
+                    <TableHead className="h-9 px-4 w-14 text-center">
+                      <div className="w-full text-center">Kill</div>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sorted.map((conn) => (
+                    <ConnectionRow
+                      key={conn.id}
+                      conn={conn}
+                      isSelected={selectedId === conn.id}
+                      onSelect={() => setSelectedId(selectedId === conn.id ? null : conn.id)}
+                      onKill={handleKill}
+                      isKilling={!!killingIds[conn.id]}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-low)', padding: '40px' }}>
-                <Network size={44} style={{ strokeWidth: 1, marginBottom: '12px', opacity: 0.6 }} />
-                <span style={{ fontSize: '14px', fontWeight: 500 }}>
+              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground p-10 gap-3 select-none">
+                <Network className="size-10 opacity-60 stroke-[1.2]" />
+                <span className="text-xs font-bold text-foreground">
                   {!isConnected ? 'Proxy service is disconnected.' : 'No active network connections found.'}
                 </span>
                 {isConnected && searchQuery && (
-                  <span style={{ fontSize: '12px', marginTop: '4px' }}>Try modifying your filter query.</span>
+                  <span className="text-[10px]">Try modifying your filter query.</span>
                 )}
               </div>
             )}
-          </div>
-        </div>
+          </ScrollArea>
+        </Card>
       </div>
     </ViewShell>
   );

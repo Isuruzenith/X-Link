@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X-Link — Next-Generation Desktop Proxy Client</title>
+  <meta name="description" content="A premium, high-performance desktop proxy client built with Tauri v2, React, and Rust. Powered by a self-healing sing-box core.">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  
+  <!-- Inter & JetBrains Mono Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Sticky Navbar -->
+  <header class="navbar">
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <img src="assets/logo.png" alt="X-Link Logo" class="nav-logo">
+        <span class="nav-title">X-Link</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#download" class="nav-btn">Download</a>
+        <a href="https://github.com/Isuruzenith/X-Link" target="_blank" rel="noopener" class="nav-github-link">
+          <svg class="github-icon" viewBox="0 0 24 24" width="20" height="20">
+            <path fill="currentColor" d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+          </svg>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="glow-container">
+      <div class="glow-orb primary-orb"></div>
+      <div class="glow-orb secondary-orb"></div>
+    </div>
+    
+    <div class="container hero-content">
+      <div class="badge-wrapper">
+        <span class="version-badge" id="version-badge">v0.7.1</span>
+        <span class="badge-pill">Open Source</span>
+      </div>
+      
+      <h1 class="hero-title">Next-Generation<br>Desktop Proxy Client</h1>
+      <p class="hero-subtitle">
+        A premium, cross-platform utility powered by a self-managing sing-box core. Secure system-wide TUN tunnels, intelligent connection self-healing, and a glassmorphic dashboard.
+      </p>
+
+      <!-- Dynamic Download Area -->
+      <div class="download-box card" id="download">
+        <h3 class="download-box-title">Get X-Link Now</h3>
+        <p class="download-box-desc" id="detect-os-text">Detecting your operating system...</p>
+        
+        <div class="download-buttons">
+          <a href="https://github.com/Isuruzenith/X-Link/releases/latest" id="btn-win" class="btn download-btn">
+            <span class="btn-icon">🪟</span>
+            <div class="btn-text">
+              <span class="btn-subtext">Download for</span>
+              <span class="btn-maintext">Windows (.msi)</span>
+            </div>
+          </a>
+          
+          <a href="https://github.com/Isuruzenith/X-Link/releases/latest" id="btn-mac" class="btn download-btn">
+            <span class="btn-icon">🍎</span>
+            <div class="btn-text">
+              <span class="btn-subtext">Download for</span>
+              <span class="btn-maintext">macOS (.dmg)</span>
+            </div>
+          </a>
+          
+          <a href="https://github.com/Isuruzenith/X-Link/releases/latest" id="btn-linux" class="btn download-btn">
+            <span class="btn-icon">🐧</span>
+            <div class="btn-text">
+              <span class="btn-subtext">Download for</span>
+              <span class="btn-maintext">Linux (.deb)</span>
+            </div>
+          </a>
+        </div>
+        
+        <p class="alternate-downloads">
+          Need another version? <a href="https://github.com/Isuruzenith/X-Link/releases" target="_blank" rel="noopener">Browse all release assets on GitHub</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Designed for Power & Reliability</h2>
+        <p class="section-desc">X-Link combines premium visual aesthetics with advanced networking rules to keep you connected securely.</p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature-card card">
+          <div class="feature-icon">🔌</div>
+          <h3 class="feature-title">Multi-Protocol Support</h3>
+          <p class="feature-desc">Connect using VLESS (TCP Reality / WebSocket outbounds), VMess, Trojan, Shadowsocks, SOCKS5, and HTTP.</p>
+        </div>
+
+        <div class="feature-card card">
+          <div class="feature-icon">🛡️</div>
+          <h3 class="feature-title">Virtual TUN Interface</h3>
+          <p class="feature-desc">Creates a virtual network interface with automated administrator elevation helpers for seamless system-wide tunnels.</p>
+        </div>
+
+        <div class="feature-card card">
+          <div class="feature-icon">⚡</div>
+          <h3 class="feature-title">ALPN Self-Healing</h3>
+          <p class="feature-desc">Automatically strips "h2" from WebSocket configurations to prevent standard webservers (like Nginx) from dropping proxy connections.</p>
+        </div>
+
+        <div class="feature-card card">
+          <div class="feature-icon">🔄</div>
+          <h3 class="feature-title">5-Stage Connection Loop</h3>
+          <p class="feature-desc">Cycles systematically through TLS fingerprints, DNS bypasses, and TUN compatibility modes to resolve connection errors.</p>
+        </div>
+
+        <div class="feature-card card">
+          <div class="feature-icon">🌐</div>
+          <h3 class="feature-title">FakeIP DNS Routing</h3>
+          <p class="feature-desc">Zero-latency domain resolution using synthetic IP ranges (198.18.0.0/15) with automatic local bypass filters.</p>
+        </div>
+
+        <div class="feature-card card">
+          <div class="feature-icon">🎨</div>
+          <h3 class="feature-title">Glassmorphic Dashboard</h3>
+          <p class="feature-desc">Real-time canvas Speedometer, system tray minimize controls (🟢 🟡 🔴), and instant connection selector menus.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture Flowchart -->
+  <section class="section alt-bg" id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">Under the Hood</h2>
+        <p class="section-desc">Coordination flow between the React user interface, Rust Tauri layer, and the background sing-box executable.</p>
+      </div>
+
+      <div class="architecture-diagram card">
+        <div class="flow-step react-node">
+          <div class="node-title">React UI</div>
+          <div class="node-desc">TypeScript & Zustand Store</div>
+        </div>
+
+        <div class="flow-arrow">⇄ <span class="arrow-label">IPC Commands</span></div>
+
+        <div class="flow-step rust-node">
+          <div class="node-title">Tauri v2 (Rust)</div>
+          <div class="node-desc">Lifecycle, Settings & Elevation</div>
+        </div>
+
+        <div class="flow-arrow">➔ <span class="arrow-label">Spawns</span></div>
+
+        <div class="flow-step singbox-node">
+          <div class="node-title">sing-box Core</div>
+          <div class="node-desc">Sidecar Execution Engine</div>
+        </div>
+
+        <div class="split-connections">
+          <div class="split-line"></div>
+        </div>
+
+        <div class="sub-systems">
+          <div class="sub-node">
+            <div class="sub-title">Virtual TUN</div>
+            <div class="sub-desc">wintun.dll / utun adapter</div>
+          </div>
+          <div class="sub-node">
+            <div class="sub-title">DNS Engine</div>
+            <div class="sub-desc">FakeIP & Secure DoH</div>
+          </div>
+          <div class="sub-node">
+            <div class="sub-title">VLESS Server</div>
+            <div class="sub-desc">Encrypted Outbound Tunnel</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Open Source / Community -->
+  <section class="section">
+    <div class="container">
+      <div class="open-source-box card">
+        <div class="os-info">
+          <h2>100% Free & Open Source</h2>
+          <p>X-Link is licensed under the MIT License and developed by the community. We welcome developers, testers, and translators to help improve X-Link.</p>
+          <div class="badge-row">
+            <a href="https://github.com/Isuruzenith/X-Link/blob/main/LICENSE" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License"></a>
+            <a href="https://github.com/Isuruzenith/X-Link/blob/main/SECURITY.md" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/security-policy-critical.svg" alt="Security Policy"></a>
+            <a href="https://github.com/Isuruzenith/X-Link/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Code of Conduct"></a>
+          </div>
+        </div>
+        <div class="os-actions">
+          <a href="https://github.com/Isuruzenith/X-Link/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener" class="btn secondary-btn">Contributing Guidelines</a>
+          <a href="https://github.com/Isuruzenith/X-Link" target="_blank" rel="noopener" class="btn outline-btn">Star on GitHub ⭐</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container footer-content">
+      <div class="footer-left">
+        <p>Copyright © 2026 <a href="https://github.com/Isuruzenith" target="_blank" rel="noopener">Isuruzenith</a>. All rights reserved.</p>
+        <p class="footer-disclaimer">This is a client interface. You need to supply your own server/outbound credentials.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/Isuruzenith/X-Link/blob/main/SECURITY.md" target="_blank" rel="noopener">Security Policy</a>
+        <a href="https://github.com/Isuruzenith/X-Link/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

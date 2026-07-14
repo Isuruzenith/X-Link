@@ -18,6 +18,7 @@ src-tauri/gen/
 .env
 .env.*
 !.env.example
+.obsidian
 
 # OS metadata files
 Thumbs.db
@@ -43,6 +44,8 @@ desktop.ini
 src-tauri/binaries/test_config*.json
 src-tauri/binaries/test_proxy*.json
 
-# Sidecar binaries (should be downloaded/placed locally, not in git)
-src-tauri/binaries/*.exe
-src-tauri/binaries/*.dll
+# Sidecar binaries (downloaded at build-time, never committed)
+src-tauri/binaries/
+
+# Landing page assets (explicitly committed for GitHub Pages)
+!docs/

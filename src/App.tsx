@@ -272,11 +272,27 @@ export default function App() {
     return () => clearInterval(poll);
   }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
 
+  // Debounced window resize event listener
+  useEffect(() => {
+    let timer: number;
+    const handleResize = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        window.dispatchEvent(new Event('resize-debounced'));
+      }, 150);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
-    <div className="app-root">
+    <div className="app-root h-screen overflow-hidden relative">
       <NavRail activeTab={activeTab} onTabChange={setActiveTab} />
       
-      <div className="view-host">
+      <div className="view-host view-fade" key={activeTab}>
         {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
         {activeTab === 'profiles' && <ErrorBoundary fallbackTitle="Profiles Error"><ConfigView /></ErrorBoundary>}
         {activeTab === 'routing' && <ErrorBoundary fallbackTitle="Routing Error"><RoutingView /></ErrorBoundary>}

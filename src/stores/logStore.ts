@@ -30,7 +30,7 @@ export const useLogStore = create<LogState>((set, get) => ({
     const timestamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     
     set((state) => ({
-      logs: [...state.logs, { type, text: formattedText, timestamp }].slice(-500),
+      logs: [...state.logs, { type, text: formattedText, timestamp }].slice(-2000),
     }));
   },
 

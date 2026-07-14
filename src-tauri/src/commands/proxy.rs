@@ -1,4 +1,5 @@
 use crate::config::generator::TunSettings;
+use crate::constants::*;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -164,7 +165,7 @@ fn spawn_singbox_sidecar(
 async fn wait_for_startup_or_exit(
     term_rx: &mut oneshot::Receiver<Option<i32>>,
 ) -> Result<(), String> {
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(STARTUP_WAIT_MS)).await;
     match term_rx.try_recv() {
         Ok(code) => Err(format!(
             "spawn_failed: exited early during startup with code {:?}",
@@ -182,12 +183,12 @@ async fn probe_via_mixed_proxy(mixed_port: u16) -> Result<(), String> {
         .map_err(|e| format!("mixed probe setup failed: {}", e))?;
     let client = reqwest::Client::builder()
         .proxy(proxy)
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("mixed probe client failed: {}", e))?;
+        .map_err(|e| format!("mixed probe setup failed: {}", e))?;
 
     client
-        .get("https://www.gstatic.com/generate_204")
+        .get(HEALTH_CHECK_URL)
         .send()
         .await
         .map_err(|e| {
@@ -204,12 +205,12 @@ async fn probe_via_mixed_proxy(mixed_port: u16) -> Result<(), String> {
 async fn probe_via_tun_route() -> Result<(), String> {
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("TUN probe client failed: {}", e))?;
 
     client
-        .get("https://www.gstatic.com/generate_204")
+        .get(HEALTH_CHECK_URL)
         .send()
         .await
         .map_err(|e| {
@@ -291,12 +292,12 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
                     }) {
                         servers.push(serde_json::json!({
                             "tag": "fallback-bootstrap-1",
-                            "address": "1.1.1.1",
+                            "address": FALLBACK_DNS_PRIMARY,
                             "detour": "direct"
                         }));
                         servers.push(serde_json::json!({
                             "tag": "fallback-bootstrap-2",
-                            "address": "8.8.8.8",
+                            "address": FALLBACK_DNS_SECONDARY,
                             "detour": "direct"
                         }));
                     }
@@ -642,7 +643,7 @@ pub fn try_reload_proxy_config<'a>(
         let _ = toggle_proxy(app_handle.clone(), state_handle.clone(), false, None).await;
 
         // Give it a brief moment to shut down gracefully
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(SHUTDOWN_GRACE_PERIOD_MS)).await;
 
         // Start the proxy
         let res = toggle_proxy(app_handle, state_handle, true, tag).await;
@@ -795,7 +796,10 @@ pub async fn toggle_proxy(
             .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .output();
         // Brief delay to let sockets fully release
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(
+            SOCKET_RELEASE_DELAY_WINDOWS_MS,
+        ))
+        .await;
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -803,7 +807,10 @@ pub async fn toggle_proxy(
             .arg("-f")
             .arg("sing-box")
             .output();
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(
+            SOCKET_RELEASE_DELAY_OTHER_MS,
+        ))
+        .await;
     }
 
     // Clean up any stale state in state variable
@@ -822,7 +829,10 @@ pub async fn toggle_proxy(
     if killed_stale {
         let _ = crate::os::disable_system_proxy();
         *CONNECTION_START_TIME.lock().unwrap() = None;
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(
+            STALE_PROCESS_KILL_DELAY_MS,
+        ))
+        .await;
     }
 
     let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(
@@ -858,14 +868,14 @@ pub async fn toggle_proxy(
         Ok(())
     };
 
-    while attempt < 5 {
+    while attempt < MAX_FALLBACK_ATTEMPTS {
         if attempt > 0 {
             // Apply fallback patch for current attempt
-            if attempt <= 3 {
+            if attempt <= MAX_CONFIG_PATCH_ATTEMPTS {
                 if let Err(e) = patch_config_for_fallback(&config_path, attempt) {
                     state.push_log(format!("[System] Fallback patching failed: {}", e));
                 }
-            } else if attempt == 4 && current_mode == "tun" {
+            } else if attempt == (MAX_FALLBACK_ATTEMPTS - 1) && current_mode == "tun" {
                 state.push_log(
                     "[System] Retrying with Windows TUN compatibility profile...".to_string(),
                 );
@@ -897,7 +907,7 @@ pub async fn toggle_proxy(
                     e
                 ));
                 attempt += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS)).await;
                 continue;
             }
         };
@@ -911,7 +921,7 @@ pub async fn toggle_proxy(
                 e
             ));
             attempt += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS)).await;
             continue;
         }
 
@@ -932,7 +942,7 @@ pub async fn toggle_proxy(
                 ));
 
                 attempt += 1;
-                if attempt < 5 {
+                if attempt < MAX_FALLBACK_ATTEMPTS {
                     match attempt {
                         1 => state.push_log(
                             "[System] Retrying with Firefox TLS fingerprint fallback..."
@@ -947,7 +957,8 @@ pub async fn toggle_proxy(
                         ),
                         _ => {}
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS))
+                        .await;
                 }
             }
         }
@@ -993,8 +1004,8 @@ pub async fn toggle_proxy(
             state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);
             return Err(format!(
-                "Connection failed after 5 fallback attempts: {}",
-                last_error
+                "Connection failed after {} fallback attempts: {}",
+                MAX_FALLBACK_ATTEMPTS, last_error
             ));
         }
     }
@@ -1073,11 +1084,11 @@ pub async fn toggle_proxy(
                 }
             }
 
-            if consecutive_failures > 5 {
+            if consecutive_failures > TRAFFIC_MAX_CONSECUTIVE_FAILURES {
                 break;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(TRAFFIC_POLL_INTERVAL_SECS)).await;
         }
 
         if let Ok(mut up_s) = state_clone.upload_speed.lock() {

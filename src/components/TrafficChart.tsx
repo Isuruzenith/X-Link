@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface SpeedDataPoint {
   up: number; // in bytes/sec
@@ -11,43 +11,95 @@ interface TrafficChartProps {
 
 export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   // Helper to format speed to human readable format (e.g. 1.2 MB/s, 450 KB/s)
   const formatSpeed = (bytesPerSec: number): string => {
-    if (bytesPerSec === 0) return '0 B/s';
+    if (bytesPerSec <= 0) return '0 B/s';
     const k = 1024;
     const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
     const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
     return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Observe container size
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      if (!entries || entries.length === 0) return;
+      const { width, height } = entries[0].contentRect;
+      setDimensions({ width, height });
+    });
+
+    resizeObserver.observe(container);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || dimensions.width === 0 || dimensions.height === 0) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     // Handle high DPI screens (retina)
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = dimensions.width * dpr;
+    canvas.height = dimensions.height * dpr;
     ctx.scale(dpr, dpr);
 
-    const width = rect.width;
-    const height = rect.height;
+    const width = dimensions.width;
+    const height = dimensions.height;
 
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
+    // Retrieve theme colors dynamically
+    const style = getComputedStyle(document.documentElement);
+    const textLow = style.getPropertyValue('--text-low').trim() || '#52525b';
+    const borderDefault = style.getPropertyValue('--border-default').trim() || 'rgba(255, 255, 255, 0.08)';
+    const borderStrong = style.getPropertyValue('--border-strong').trim() || 'rgba(255, 255, 255, 0.15)';
+ 
+    const chartDownStroke = style.getPropertyValue('--chart-download').trim() || style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
+    const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
+    const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.15)';
+    const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
+ 
+    const chartUpStroke = style.getPropertyValue('--chart-upload').trim() || style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
+    const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
+    const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.08)';
+    const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
+ 
+    // Calculate maximum speed in the history to scale the Y-axis
+    let maxSpeed = 1024 * 100; // Minimum scale of 100 KB/s
+    if (history.length > 0) {
+      history.forEach((pt) => {
+        if (pt.up > maxSpeed) maxSpeed = pt.up;
+        if (pt.down > maxSpeed) maxSpeed = pt.down;
+      });
+    }
+ 
+    // Add a 15% buffer at the top
+    maxSpeed = maxSpeed * 1.15;
+ 
+    // Measure Y-axis text width to dynamically scale padding.left
+    ctx.font = '9px "Inter", sans-serif';
+    const longestLabel = formatSpeed(maxSpeed);
+    const labelWidth = ctx.measureText(longestLabel).width;
+    const paddingLeft = Math.max(48, Math.ceil(labelWidth + 12));
+ 
     // Padding
-    const padding = { top: 20, right: 15, bottom: 25, left: 55 };
+    const padding = { top: 20, right: 15, bottom: 25, left: paddingLeft };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
-
+ 
     // Draw background grid lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeStyle = borderDefault;
     ctx.lineWidth = 1;
     const gridCount = 4;
     for (let i = 0; i <= gridCount; i++) {
@@ -57,30 +109,20 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.lineTo(width - padding.right, y);
       ctx.stroke();
     }
-
+ 
     // If there is no history, draw empty state
     if (history.length === 0) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.font = '13px "Outfit", "Inter", sans-serif';
+      ctx.fillStyle = textLow;
+      ctx.font = '12px "Inter", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('No real-time traffic data', width / 2, height / 2);
       return;
     }
-
-    // Calculate maximum speed in the history to scale the Y-axis
-    let maxSpeed = 1024 * 100; // Minimum scale of 100 KB/s
-    history.forEach((pt) => {
-      if (pt.up > maxSpeed) maxSpeed = pt.up;
-      if (pt.down > maxSpeed) maxSpeed = pt.down;
-    });
-
-    // Add a 15% buffer at the top
-    maxSpeed = maxSpeed * 1.15;
-
+ 
     // Draw Y axis labels
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.font = '10px "Inter", sans-serif';
+    ctx.fillStyle = textLow;
+    ctx.font = '9px "Inter", sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let i = 0; i <= gridCount; i++) {
@@ -103,7 +145,8 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       data: number[],
       strokeColor: string,
       fillGradient: CanvasGradient,
-      glowColor: string
+      glowColor: string,
+      isDashed = false
     ) => {
       if (data.length < 2) return;
 
@@ -136,9 +179,14 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.shadowColor = glowColor;
       ctx.shadowBlur = 8;
       ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
+      if (isDashed) {
+        ctx.setLineDash([3, 3]);
+      } else {
+        ctx.setLineDash([]);
+      }
 
       ctx.beginPath();
       ctx.moveTo(firstPt.x, firstPt.y);
@@ -165,31 +213,31 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     );
 
     // Create Gradients
-    // Download (Teal glow)
+    // Download
     const downGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    downGrad.addColorStop(0, 'rgba(74, 158, 255, 0.25)');
-    downGrad.addColorStop(1, 'rgba(74, 158, 255, 0.00)');
+    downGrad.addColorStop(0, chartDownFill0);
+    downGrad.addColorStop(1, chartDownFill1);
 
-    // Upload (Purple/Violet glow)
+    // Upload
     const upGrad = ctx.createLinearGradient(0, padding.top, 0, padding.top + chartHeight);
-    upGrad.addColorStop(0, 'rgba(124, 141, 255, 0.25)');
-    upGrad.addColorStop(1, 'rgba(124, 141, 255, 0.00)');
+    upGrad.addColorStop(0, chartUpFill0);
+    upGrad.addColorStop(1, chartUpFill1);
 
     // Draw Download Curve first (background)
-    drawCurve(paddedDown, '#4A9EFF', downGrad, 'rgba(74, 158, 255, 0.5)');
+    drawCurve(paddedDown, chartDownStroke, downGrad, chartDownGlow, false);
 
     // Draw Upload Curve second (foreground)
-    drawCurve(paddedUp, '#7C8DFF', upGrad, 'rgba(124, 141, 255, 0.5)');
+    drawCurve(paddedUp, chartUpStroke, upGrad, chartUpGlow, true);
 
     // Draw X-axis line (subtle)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.strokeStyle = borderStrong;
     ctx.beginPath();
     ctx.moveTo(padding.left, padding.top + chartHeight);
     ctx.lineTo(width - padding.right, padding.top + chartHeight);
     ctx.stroke();
 
     // Draw timeline markers (e.g. -30s, -15s, Now)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.fillStyle = textLow;
     ctx.font = '9px "Inter", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
@@ -199,12 +247,14 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     ctx.textAlign = 'right';
     ctx.fillText('Live', width - padding.right, padding.top + chartHeight + 6);
 
-  }, [history]);
+  }, [history, dimensions]);
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       <canvas
         ref={canvasRef}
+        role="img"
+        aria-label="Real-time network traffic chart showing upload and download speeds"
         style={{
           width: '100%',
           height: '100%',

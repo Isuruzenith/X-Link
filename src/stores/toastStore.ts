@@ -9,12 +9,14 @@ export interface Toast {
   title?: string;
   message: string;
   duration?: number;
+  exiting?: boolean;
 }
 
 interface ToastState {
   toasts: Toast[];
   addToast: (type: ToastType, message: string, title?: string, duration?: number) => void;
   removeToast: (id: string) => void;
+  dismissToast: (id: string) => void;
 }
 
 export const useToastStore = create<ToastState>((set, get) => ({
@@ -24,16 +26,28 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const id = safeRandomUUID();
     const toast: Toast = { id, type, title, message, duration };
 
-    set({ toasts: [...get().toasts, toast] });
+    const currentToasts = get().toasts;
+    const maxToasts = 5;
+    let nextToasts = [...currentToasts, toast];
+    if (nextToasts.length > maxToasts) {
+      nextToasts = nextToasts.slice(nextToasts.length - maxToasts);
+    }
+    set({ toasts: nextToasts });
 
     if (duration > 0) {
       setTimeout(() => {
-        get().removeToast(id);
+        get().dismissToast(id);
       }, duration);
     }
   },
 
   removeToast: (id) => {
     set({ toasts: get().toasts.filter((t) => t.id !== id) });
+  },
+
+  dismissToast: (id) => {
+    set({
+      toasts: get().toasts.map((t) => t.id === id ? { ...t, exiting: true } : t)
+    });
   },
 }));

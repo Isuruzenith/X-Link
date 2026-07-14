@@ -3,58 +3,27 @@ import { ViewShell } from '../components/ViewShell';
 import { useRoutingStore } from '../stores/routingStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import type { RoutingRuleType, OutboundAction } from '../utils/store';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { FormInput, FormSelect, FormSwitchRow } from '@/components/form';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 
-const OUTBOUND_COLORS: Record<OutboundAction, string> = {
-  proxy: 'var(--accent-primary)',
-  direct: 'var(--status-ok)',
-  block: 'var(--status-err)',
-  dns: 'var(--accent-secondary)',
+const BadgeOutbound = ({ action }: { action: OutboundAction }) => {
+  const variantMap: Record<OutboundAction, string> = {
+    proxy: 'bg-primary text-primary-foreground border-primary',
+    direct: 'bg-transparent text-muted-foreground border-border',
+    block: 'bg-transparent text-muted-foreground border-dashed border-border',
+    dns: 'bg-muted text-muted-foreground border-border',
+  };
+
+  return (
+    <Badge variant="outline" className={cn('text-2xs font-bold uppercase tracking-wide', variantMap[action])}>
+      {action}
+    </Badge>
+  );
 };
-
-const BadgeOutbound = ({ action }: { action: OutboundAction }) => (
-  <span
-    className="outbound-badge"
-    style={{
-      background: `${OUTBOUND_COLORS[action]}18`,
-      color: OUTBOUND_COLORS[action],
-      border: `1px solid ${OUTBOUND_COLORS[action]}40`,
-    }}
-  >
-    {action}
-  </span>
-);
-
-const Inp = ({ value, onChange, placeholder, mono = false }: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  mono?: boolean;
-}) => (
-  <input
-    className="text-input"
-    style={mono ? { fontFamily: 'var(--font-mono)', fontSize: '12px' } : undefined}
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    placeholder={placeholder}
-  />
-);
-
-const Sel = ({ value, onChange, options }: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) => (
-  <select className="select-input" value={value} onChange={(e) => onChange(e.target.value)}>
-    {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-  </select>
-);
-
-const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
-  <label className="switch-toggle">
-    <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    <span className="switch-slider"></span>
-  </label>
-);
 
 export function RoutingView() {
   const {
@@ -86,287 +55,352 @@ export function RoutingView() {
       title="Routing"
       subtitle="Traffic routing engine — GeoIP, GeoSite, rule sets & split tunneling"
       actions={
-        <button
-          className="btn primary sm"
+        <Button
+          size="sm"
+          className="h-8 gap-1 px-3 text-xs font-semibold"
           onClick={() => {
             setEditingRule(null);
             setRuleForm({ type: 'geoip', value: '', outbound: 'direct', invert: false, notes: '' });
             setShowAddRule(true);
           }}
         >
-          <Plus size={14} /> Add Rule
-        </button>
+          <Plus className="size-3.5" /> Add Rule
+        </Button>
       }
     >
-      <div className="view-container">
+      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
         {/* Global + Rule Sets row */}
-        <div className="grid-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
           {/* Global Settings */}
-          <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <GitFork size={16} style={{ color: 'var(--accent-primary)' }} />
-              <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Global Routing</h3>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Final Outbound (Fallback)</label>
-              <Sel
-                value={settings.finalOutbound}
-                onChange={(v) => updateSettings({ finalOutbound: v as OutboundAction })}
-                options={[
-                  { value: 'proxy', label: '🌐 Proxy (default)' },
-                  { value: 'direct', label: '⚡ Direct' },
-                  { value: 'block', label: '🚫 Block' },
-                ]}
-              />
-            </div>
-            <div className="switch-container" style={{ padding: '10px 14px' }}>
-              <div className="switch-details">
-                <span className="switch-title" style={{ fontSize: '13px' }}>Bypass LAN / Private IPs</span>
-                <span className="switch-desc">Route RFC-1918 addresses directly</span>
+          <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
+            <CardHeader className="p-0 flex flex-row items-center gap-2 space-y-0 pb-1">
+              <GitFork className="size-4 text-muted-foreground" />
+              <CardTitle className="text-xs font-bold text-foreground">Global Routing</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 flex flex-col gap-3.5">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Final Outbound (Fallback)</label>
+                <FormSelect
+                  value={settings.finalOutbound}
+                  onChange={(v) => updateSettings({ finalOutbound: v as OutboundAction })}
+                  options={[
+                    { value: 'proxy', label: '🌐 Proxy (default)' },
+                    { value: 'direct', label: '⚡ Direct' },
+                    { value: 'block', label: '🚫 Block' },
+                  ]}
+                />
               </div>
-              <Toggle checked={settings.bypassLan} onChange={(v) => updateSettings({ bypassLan: v })} />
-            </div>
-          </div>
+              <FormSwitchRow
+                title="Bypass LAN / Private IPs"
+                desc="Route RFC-1918 addresses directly"
+                checked={settings.bypassLan}
+                onChange={(v) => updateSettings({ bypassLan: v })}
+              />
+            </CardContent>
+          </Card>
 
           {/* Rule Sets */}
-          <div className="glass-panel" style={{ gridColumn: 'span 2' }}>
-            <div className="flex-row-between" style={{ marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <Database size={16} style={{ color: 'var(--accent-primary)' }} />
-                <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Rule Sets</h3>
-                <span className="type-chip">{ruleSets.length}</span>
+          <Card className="col-span-1 md:col-span-2 p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden">
+            <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
+              <div className="flex items-center gap-2">
+                <Database className="size-4 text-muted-foreground" />
+                <CardTitle className="text-xs font-bold text-foreground">Rule Sets</CardTitle>
+                <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
+                  {ruleSets.length}
+                </Badge>
               </div>
-              <button className="btn secondary sm" onClick={() => setShowAddRuleSet(true)}>
-                <Plus size={13} /> Add Rule Set
-              </button>
-            </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 gap-1 px-2 text-[10px] font-semibold"
+                onClick={() => setShowAddRuleSet(true)}
+              >
+                <Plus className="size-3" /> Add Rule Set
+              </Button>
+            </CardHeader>
 
-            {showAddRuleSet && (
-              <div className="add-rule-form" style={{ marginBottom: '16px' }}>
-                <div className="flex-row-between" style={{ marginBottom: '12px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600 }}>Add Rule Set</span>
-                  <button className="btn-icon-only" style={{ border: 'none', background: 'transparent' }} onClick={() => setShowAddRuleSet(false)}>
-                    <X size={14} />
-                  </button>
+            <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
+              {showAddRuleSet && (
+                <div className="p-3 mb-3 bg-muted/40 border border-border/50 rounded-lg shrink-0 animate-[fade-in_150ms_ease-out]">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-xs font-bold text-foreground">Add Rule Set</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowAddRuleSet(false)}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
+                    <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
+                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Tag</label>
+                      <FormInput value={ruleSetForm.tag} onChange={(v) => setRuleSetForm({ tag: v })} placeholder="geoip-cn" mono />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Type</label>
+                      <FormSelect
+                        value={ruleSetForm.type}
+                        onChange={(v) => setRuleSetForm({ type: v as 'remote' | 'local' })}
+                        options={[{ value: 'remote', label: 'Remote' }, { value: 'local', label: 'Local' }]}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Format</label>
+                      <FormSelect
+                        value={ruleSetForm.format}
+                        onChange={(v) => setRuleSetForm({ format: v as 'binary' | 'source' })}
+                        options={[
+                          { value: 'binary', label: 'Binary (.srs)' },
+                          { value: 'source', label: 'Source (.json)' },
+                        ]}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Update</label>
+                      <FormSelect
+                        value={ruleSetForm.updateInterval}
+                        onChange={(v) => setRuleSetForm({ updateInterval: v })}
+                        options={[
+                          { value: '1h', label: '1h' },
+                          { value: '12h', label: '12h' },
+                          { value: '1d', label: '1d' },
+                          { value: '7d', label: '7d' },
+                        ]}
+                      />
+                    </div>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-8 col-span-2 sm:col-span-1 font-semibold"
+                      onClick={saveRuleSet}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  {ruleSetForm.type === 'remote' && (
+                    <div className="flex flex-col gap-1 mt-2.5">
+                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Remote URL</label>
+                      <FormInput value={ruleSetForm.url || ''} onChange={(v) => setRuleSetForm({ url: v })} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" />
+                    </div>
+                  )}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 110px 90px auto', gap: '10px', alignItems: 'end' }}>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Tag</label>
-                    <Inp value={ruleSetForm.tag} onChange={(v) => setRuleSetForm({ tag: v })} placeholder="geoip-cn" mono />
+              )}
+
+              <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[170px] pr-1">
+                {ruleSets.map((rs) => (
+                  <div key={rs.id} className="flex items-center gap-2 p-2 bg-muted/40 border border-border/40 rounded-lg min-w-0">
+                    <Database className="size-3 text-muted-foreground shrink-0" />
+                    <span className="font-mono text-xs font-bold text-foreground truncate min-w-0 pr-1">{rs.tag}</span>
+                    <Badge variant="secondary" className="h-4 px-1.5 text-[8.5px] font-semibold tracking-wider bg-background/50 border border-border/40 text-muted-foreground shrink-0">{rs.type}</Badge>
+                    <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-semibold tracking-wider border-border bg-background/30 text-muted-foreground shrink-0">{rs.format}</Badge>
+                    <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-normal border-border/40 text-muted-foreground/80 shrink-0">↻ {rs.updateInterval}</Badge>
+                    {rs.lastUpdated && (
+                      <Badge className="h-4 px-1.5 text-[8.5px] font-bold bg-foreground text-background shrink-0">
+                        ✓ Cached
+                      </Badge>
+                    )}
+                    <div className="flex gap-1 ml-auto shrink-0 pl-1.5">
+                      {rs.type === 'remote' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 text-muted-foreground hover:text-foreground rounded"
+                          onClick={() => updateRuleSet(rs)}
+                          disabled={updatingRuleSet === rs.id}
+                        >
+                          <Download className={`size-3 ${updatingRuleSet === rs.id ? 'animate-spin' : ''}`} />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                        onClick={() => deleteRuleSet(rs.id)}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
                   </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Type</label>
-                    <Sel
-                      value={ruleSetForm.type}
-                      onChange={(v) => setRuleSetForm({ type: v as 'remote' | 'local' })}
-                      options={[{ value: 'remote', label: 'Remote' }, { value: 'local', label: 'Local' }]}
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Format</label>
-                    <Sel
-                      value={ruleSetForm.format}
-                      onChange={(v) => setRuleSetForm({ format: v as 'binary' | 'source' })}
-                      options={[
-                        { value: 'binary', label: 'Binary (.srs)' },
-                        { value: 'source', label: 'Source (.json)' },
-                      ]}
-                    />
-                  </div>
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Update</label>
-                    <Sel
-                      value={ruleSetForm.updateInterval}
-                      onChange={(v) => setRuleSetForm({ updateInterval: v })}
-                      options={[
-                        { value: '1h', label: '1h' },
-                        { value: '12h', label: '12h' },
-                        { value: '1d', label: '1d' },
-                        { value: '7d', label: '7d' },
-                      ]}
-                    />
-                  </div>
-                  <button className="btn primary" style={{ height: '34px', paddingBottom: 0 }} onClick={saveRuleSet}>Add</button>
-                </div>
-                {ruleSetForm.type === 'remote' && (
-                  <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
-                    <label className="form-label">Remote URL</label>
-                    <Inp value={ruleSetForm.url || ''} onChange={(v) => setRuleSetForm({ url: v })} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" />
-                  </div>
+                ))}
+                {ruleSets.length === 0 && (
+                  <p className="text-center text-muted-foreground py-6 text-[11px] leading-relaxed">
+                    No rule sets. Add a remote GeoIP/GeoSite rule set above.
+                  </p>
                 )}
               </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
-              {ruleSets.map((rs) => (
-                <div key={rs.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--r-sm)' }}>
-                  <Database size={12} style={{ color: 'var(--text-low)', flexShrink: 0 }} />
-                  <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>{rs.tag}</span>
-                  <span className="type-chip">{rs.type}</span>
-                  <span className="type-chip" style={{ background: 'rgba(168,85,247,0.1)', color: '#d8b4fe', border: '1px solid rgba(168,85,247,0.2)' }}>{rs.format}</span>
-                  <span className="type-chip">↻ {rs.updateInterval}</span>
-                  {rs.lastUpdated && (
-                    <span className="type-chip" style={{ background: 'rgba(34,197,94,0.1)', color: '#86efac', border: '1px solid rgba(34,197,94,0.2)' }}>
-                      ✓ Cached
-                    </span>
-                  )}
-                  <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                    {rs.type === 'remote' && (
-                      <button className="btn-icon-only" style={{ width: '24px', height: '24px' }} onClick={() => updateRuleSet(rs)} disabled={updatingRuleSet === rs.id}>
-                        <Download size={11} className={updatingRuleSet === rs.id ? 'spin' : ''} />
-                      </button>
-                    )}
-                    <button className="btn-icon-only danger" style={{ width: '24px', height: '24px' }} onClick={() => deleteRuleSet(rs.id)}>
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {ruleSets.length === 0 && (
-                <p style={{ textAlign: 'center', color: 'var(--text-low)', padding: '20px', fontSize: '13px' }}>
-                  No rule sets. Add a remote GeoIP/GeoSite rule set above.
-                </p>
-              )}
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Rules Table */}
-        <div className="glass-panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-            <Filter size={16} style={{ color: 'var(--accent-primary)' }} />
-            <h3 style={{ fontSize: '14px', fontWeight: 600 }}>Routing Rules</h3>
-            <span className="type-chip">{routingRules.length} rules</span>
-          </div>
+        <Card className="p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden flex-1 min-h-0">
+          <CardHeader className="p-0 pb-3 flex flex-row items-center gap-2 space-y-0 shrink-0">
+            <Filter className="size-4 text-muted-foreground" />
+            <CardTitle className="text-xs font-bold text-foreground">Routing Rules</CardTitle>
+            <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
+              {routingRules.filter(r => r.enabled !== false).length} / {routingRules.length} active
+            </Badge>
+          </CardHeader>
 
-          {showAddRule && (
-            <div className="add-rule-form">
-              <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 130px 70px 1fr auto', gap: '10px', alignItems: 'end' }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Rule Type</label>
-                  <Sel
-                    value={ruleForm.type}
-                    onChange={(v) => setRuleForm({ type: v as RoutingRuleType })}
-                    options={[
-                      { value: 'geoip', label: 'GeoIP' },
-                      { value: 'geosite', label: 'GeoSite' },
-                      { value: 'domain', label: 'Domain' },
-                      { value: 'domain_suffix', label: 'Domain Suffix' },
-                      { value: 'domain_keyword', label: 'Domain Keyword' },
-                      { value: 'ip_cidr', label: 'IP CIDR' },
-                      { value: 'port', label: 'Port' },
-                      { value: 'port_range', label: 'Port Range' },
-                      { value: 'rule_set', label: 'Rule Set' },
-                      { value: 'process_name', label: 'Process Name' },
-                    ]}
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Value</label>
-                  {ruleForm.type === 'rule_set' ? (
-                    <Sel
-                      value={ruleForm.value}
-                      onChange={(v) => setRuleForm({ value: v })}
+          <CardContent className="p-0 flex-1 flex flex-col overflow-hidden min-h-0">
+            {showAddRule && (
+              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0 overflow-y-auto max-h-[200px] sm:max-h-none pr-1 animate-[fade-in_150ms_ease-out]">
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 items-end">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Rule Type</label>
+                    <FormSelect
+                      value={ruleForm.type}
+                      onChange={(v) => setRuleForm({ type: v as RoutingRuleType })}
                       options={[
-                        { value: '', label: 'Select Rule Set...' },
-                        ...ruleSets.map((rs) => ({ value: rs.tag, label: rs.tag })),
+                        { value: 'geoip', label: 'GeoIP' },
+                        { value: 'geosite', label: 'GeoSite' },
+                        { value: 'domain', label: 'Domain' },
+                        { value: 'domain_suffix', label: 'Domain Suffix' },
+                        { value: 'domain_keyword', label: 'Domain Keyword' },
+                        { value: 'ip_cidr', label: 'IP CIDR' },
+                        { value: 'port', label: 'Port' },
+                        { value: 'port_range', label: 'Port Range' },
+                        { value: 'rule_set', label: 'Rule Set' },
+                        { value: 'process_name', label: 'Process Name' },
                       ]}
                     />
-                  ) : (
-                    <Inp
-                      value={ruleForm.value}
-                      onChange={(v) => setRuleForm({ value: v })}
-                      placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
-                      mono
+                  </div>
+                  <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
+                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Value</label>
+                    {ruleForm.type === 'rule_set' ? (
+                      <FormSelect
+                        value={ruleForm.value}
+                        onChange={(v) => setRuleForm({ value: v })}
+                        options={[
+                          { value: '', label: 'Select Set...' },
+                          ...ruleSets.map((rs) => ({ value: rs.tag, label: rs.tag })),
+                        ]}
+                      />
+                    ) : (
+                      <FormInput
+                        value={ruleForm.value}
+                        onChange={(v) => setRuleForm({ value: v })}
+                        placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
+                        mono
+                      />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Outbound</label>
+                    <FormSelect
+                      value={ruleForm.outbound}
+                      onChange={(v) => setRuleForm({ outbound: v as OutboundAction })}
+                      options={[
+                        { value: 'proxy', label: '🌐 Proxy' },
+                        { value: 'direct', label: '⚡ Direct' },
+                        { value: 'block', label: '🚫 Block' },
+                        { value: 'dns', label: '🔍 DNS' },
+                      ]}
                     />
-                  )}
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Outbound</label>
-                  <Sel
-                    value={ruleForm.outbound}
-                    onChange={(v) => setRuleForm({ outbound: v as OutboundAction })}
-                    options={[
-                      { value: 'proxy', label: '🌐 Proxy' },
-                      { value: 'direct', label: '⚡ Direct' },
-                      { value: 'block', label: '🚫 Block' },
-                      { value: 'dns', label: '🔍 DNS' },
-                    ]}
-                  />
-                </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Invert</label>
-                  <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '6px' }}>
-                    <Toggle checked={ruleForm.invert} onChange={(v) => setRuleForm({ invert: v })} />
+                  </div>
+                  <div className="flex flex-col gap-1 items-center">
+                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Invert</label>
+                    <div className="h-8 flex items-center">
+                      <Switch checked={ruleForm.invert} onCheckedChange={(v) => setRuleForm({ invert: v })} />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Notes</label>
+                    <FormInput value={ruleForm.notes || ''} onChange={(v) => setRuleForm({ notes: v })} placeholder="e.g. China bypass" />
+                  </div>
+                  <div className="flex gap-1 shrink-0 pb-0.5 justify-end">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-8 font-semibold text-xs px-3"
+                      onClick={saveRoutingRule}
+                    >
+                      {editingRule ? 'Update' : 'Add'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-8"
+                      onClick={() => { setShowAddRule(false); setEditingRule(null); }}
+                    >
+                      <X className="size-4" />
+                    </Button>
                   </div>
                 </div>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">Notes</label>
-                  <Inp value={ruleForm.notes || ''} onChange={(v) => setRuleForm({ notes: v })} placeholder="e.g. China bypass" />
-                </div>
-                <div style={{ display: 'flex', gap: '6px', paddingBottom: '1px' }}>
-                  <button className="btn primary" style={{ height: '34px' }} onClick={saveRoutingRule}>
-                    {editingRule ? 'Update' : 'Add'}
-                  </button>
-                  <button className="btn secondary" style={{ height: '34px', padding: '0 10px' }} onClick={() => { setShowAddRule(false); setEditingRule(null); }}>
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="rules-table">
-            <div className="rules-table-header">
-              <span style={{ width: '28px' }}>#</span>
-              <span style={{ width: '50px' }}>Active</span>
-              <span style={{ flex: '0 0 140px' }}>Type</span>
-              <span style={{ flex: 1 }}>Value</span>
-              <span style={{ flex: '0 0 100px' }}>Outbound</span>
-              <span style={{ flex: 1 }}>Notes</span>
-              <span style={{ flex: '0 0 60px', textAlign: 'right' }}>Actions</span>
-            </div>
-            {routingRules.map((rule, i) => (
-              <div key={rule.id} className="rules-table-row" style={rule.enabled === false ? { opacity: 0.4 } : undefined}>
-                <span style={{ width: '28px', color: 'var(--text-low)', fontSize: '11px' }}>{i + 1}</span>
-                <span style={{ width: '50px', display: 'flex', alignItems: 'center' }}>
-                  <Toggle
-                    checked={rule.enabled !== false}
-                    onChange={(checked) => toggleRoutingRuleEnabled(rule.id, checked)}
-                  />
-                </span>
-                <span style={{ flex: '0 0 140px' }}>
-                  <span className="type-chip" style={{ fontFamily: 'var(--font-mono)' }}>{rule.type}{rule.invert ? ' !' : ''}</span>
-                </span>
-                <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-high)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rule.value}</span>
-                <span style={{ flex: '0 0 100px' }}><BadgeOutbound action={rule.outbound} /></span>
-                <span style={{ flex: 1, fontSize: '11px', color: 'var(--text-low)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rule.notes || '—'}</span>
-                <span style={{ flex: '0 0 60px', display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                  <button
-                    className="btn-icon-only"
-                    style={{ width: '24px', height: '24px' }}
-                    onClick={() => { setEditingRule(rule); setShowAddRule(true); }}
-                  >
-                    <Edit3 size={11} />
-                  </button>
-                  <button className="btn-icon-only danger" style={{ width: '24px', height: '24px' }} onClick={() => deleteRoutingRule(rule.id)}>
-                    <Trash2 size={11} />
-                  </button>
-                </span>
-              </div>
-            ))}
-            {routingRules.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--text-low)', padding: '40px 0', fontSize: '13px' }}>
-                No routing rules. All traffic falls to final outbound ({settings.finalOutbound}).
               </div>
             )}
-          </div>
 
-          <div className="info-box" style={{ marginTop: '16px' }}>
-            <Info size={12} />
-            <span>Rules evaluate top-to-bottom. First match wins. Hardcoded: dns → dns-out, private IPs → direct.</span>
-          </div>
-        </div>
+            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              <div className="rules-table border border-border/40 rounded-lg overflow-hidden bg-muted/10 flex-1 flex flex-col min-h-0">
+                <div className="rules-table-header bg-muted/40 border-b border-border/60 text-[10px] uppercase font-bold tracking-wider text-muted-foreground py-2.5 px-3 flex items-center shrink-0">
+                  <span className="w-7">#</span>
+                  <span className="w-12">Active</span>
+                  <span className="w-32 shrink-0">Type</span>
+                  <span className="flex-1 truncate">Value</span>
+                  <span className="w-24 shrink-0">Outbound</span>
+                  <span className="flex-1 truncate">Notes</span>
+                  <span className="w-16 shrink-0 text-right">Actions</span>
+                </div>
+                <div className="flex-1 overflow-y-auto flex flex-col divide-y divide-border/30">
+                  {routingRules.map((rule, i) => (
+                    <div
+                      key={rule.id}
+                      className={`flex items-center text-xs py-2 px-3 hover:bg-muted/20 transition-all animate-[fade-in_150ms_ease-out] ${
+                        rule.enabled === false ? 'opacity-40' : ''
+                      }`}
+                    >
+                      <span className="w-7 text-[10px] text-muted-foreground font-mono">{i + 1}</span>
+                      <span className="w-12 flex items-center">
+                        <Switch
+                          checked={rule.enabled !== false}
+                          onCheckedChange={(checked) => toggleRoutingRuleEnabled(rule.id, checked)}
+                        />
+                      </span>
+                      <span className="w-32 shrink-0 pr-1">
+                        <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] font-mono border-border bg-background/50 font-normal">
+                          {rule.type}{rule.invert ? ' !' : ''}
+                        </Badge>
+                      </span>
+                      <span className="flex-1 font-mono text-[11px] text-foreground truncate min-w-0 pr-1" title={rule.value}>{rule.value}</span>
+                      <span className="w-24 shrink-0 pr-1"><BadgeOutbound action={rule.outbound} /></span>
+                      <span className="flex-1 text-[11px] text-muted-foreground truncate min-w-0 pr-1" title={rule.notes || ''}>{rule.notes || '—'}</span>
+                      <span className="w-16 shrink-0 flex gap-1 justify-end pl-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 text-muted-foreground hover:text-foreground rounded"
+                          onClick={() => { setEditingRule(rule); setShowAddRule(true); }}
+                        >
+                          <Edit3 className="size-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
+                          onClick={() => deleteRoutingRule(rule.id)}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </span>
+                    </div>
+                  ))}
+                  {routingRules.length === 0 && (
+                    <div className="text-center text-muted-foreground py-8 text-xs">
+                      No routing rules. All traffic falls to final outbound ({settings.finalOutbound}).
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="info-box mt-3 bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
+              <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+              <span>Rules evaluate top-to-bottom. First match wins. Hardcoded: dns → dns-out, private IPs → direct.</span>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </ViewShell>
   );
