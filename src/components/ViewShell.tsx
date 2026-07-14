@@ -21,7 +21,7 @@ export function ViewShell({ title, subtitle, actions, children }: ViewShellProps
         {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
       </div>
       <div 
-        className="flex-1 overflow-y-auto bg-background/50 flex flex-col min-h-0"
+        className="flex-1 overflow-hidden bg-background/50 flex flex-col min-h-0"
         style={{ padding: '10px' }}
       >
         {children}

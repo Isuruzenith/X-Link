@@ -68,9 +68,9 @@ export function RoutingView() {
         </Button>
       }
     >
-      <div className="flex flex-col gap-6 overflow-hidden flex-1 min-h-0">
+      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
         {/* Global + Rule Sets row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
           {/* Global Settings */}
           <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
             <CardHeader className="p-0 flex flex-row items-center gap-2 space-y-0 pb-1">

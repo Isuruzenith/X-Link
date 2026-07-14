@@ -47,7 +47,7 @@ export function SettingsView() {
 
   return (
     <ViewShell title="Settings" subtitle="Proxy mode, TUN, sniffing, DNS and API options">
-      <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-6 overflow-hidden flex-1 min-h-0">
+      <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-[10px] overflow-hidden h-full w-full min-h-0">
         {/* Secondary nav */}
         <div className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible shrink-0 pb-1 md:pb-0">
           {sideNavItems.map(([id, Icon, label]) => (

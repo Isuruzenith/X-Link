@@ -273,7 +273,7 @@ export default function App() {
   }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
 
   return (
-    <div className="app-root h-screen overflow-hidden">
+    <div className="app-root h-screen overflow-hidden relative">
       <NavRail activeTab={activeTab} onTabChange={setActiveTab} />
       
       <div className="view-host">

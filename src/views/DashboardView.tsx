@@ -100,7 +100,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
       }
     >
-      <div className="flex flex-col h-full w-full" style={{ gap: '10px' }}>
+      <div className="flex flex-col flex-1 min-h-0 w-full" style={{ gap: '10px' }}>
         {/* Top row: Connect + Chart */}
         <div className="grid grid-cols-1 md:grid-cols-3 flex-1 w-full" style={{ gap: '10px' }}>
           {/* Connect Panel */}
@@ -140,10 +140,10 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
 
             {/* Active Node & Quick Switch details */}
             {isConnected && (selectedNodeTag || nodes.length > 1) && (
-              <div className="w-full flex flex-col gap-3 shrink-0 mt-auto pt-3 border-t border-border/10">
+              <div className="w-full flex flex-col gap-3.5 shrink-0 mt-auto pt-3 border-t border-border/10">
                 {/* Active Node */}
                 {selectedNodeTag && (
-                  <div className="w-full bg-muted/30 border border-border/40 rounded-lg p-2.5 flex items-center gap-2.5">
+                  <div className="w-full bg-muted/20 border border-border/40 rounded-lg p-3 flex flex-col items-center justify-center text-center gap-2">
                     {(() => {
                       const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
                       const activeServerCode = geo && geo !== 'loading'
@@ -157,7 +157,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                       return (
                         <>
                           {activeServerCode ? (
-                            <div className="flex items-center justify-center shrink-0 w-5 h-3.5 overflow-hidden rounded-[1px] border border-border/30">
+                            <div className="flex items-center justify-center shrink-0 w-5.5 h-4 overflow-hidden rounded-[2px] border border-border/40 shadow-sm">
                               <img
                                 src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
                                 alt={activeServerCode}
@@ -170,13 +170,13 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                           ) : (
                             <Zap className="size-3.5 text-muted-foreground shrink-0" />
                           )}
-                          <div className="flex flex-col min-w-0 flex-1 text-left">
-                            <span className="text-xs font-semibold text-foreground truncate flex items-center gap-1">
-                              <Zap className="size-2.5 text-foreground shrink-0" />
+                          <div className="flex flex-col items-center min-w-0 w-full">
+                            <span className="text-xs font-bold text-foreground truncate max-w-full flex items-center gap-1 justify-center">
+                              <Zap className="size-2.5 text-foreground shrink-0 animate-pulse" />
                               {selectedNodeTag}
                             </span>
                             {(activeCountryName || activeRegion) && (
-                              <span className="text-2xs text-muted-foreground truncate">
+                              <span className="text-2xs text-muted-foreground truncate max-w-full mt-0.5">
                                 {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
                               </span>
                             )}
@@ -190,9 +190,9 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                 {/* Quick Switch */}
                 {nodes.length > 1 && (
                   <div className="w-full flex flex-col">
-                    <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase mb-2 text-left">Quick Switch</span>
+                    <span className="text-[9px] font-bold tracking-wider text-muted-foreground uppercase mb-2 text-center block w-full">Quick Switch</span>
                     <ScrollArea className="max-h-16 w-full">
-                      <div className="flex flex-wrap gap-1.5 justify-start pr-2">
+                      <div className="flex flex-wrap gap-1.5 justify-center pr-0">
                         {nodes.slice(0, 8).map((node) => (
                           <Button
                             key={node.tag}
