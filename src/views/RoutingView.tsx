@@ -121,7 +121,7 @@ export function RoutingView() {
 
             <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
               {showAddRuleSet && (
-                <div className="p-3 mb-3 bg-muted/40 border border-border/50 rounded-lg shrink-0">
+                <div className="p-3 mb-3 bg-muted/40 border border-border/50 rounded-lg shrink-0 animate-[fade-in_150ms_ease-out]">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-xs font-bold text-foreground">Add Rule Set</span>
                     <Button
@@ -240,13 +240,13 @@ export function RoutingView() {
             <Filter className="size-4 text-muted-foreground" />
             <CardTitle className="text-xs font-bold text-foreground">Routing Rules</CardTitle>
             <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
-              {routingRules.length} rules
+              {routingRules.filter(r => r.enabled !== false).length} / {routingRules.length} active
             </Badge>
           </CardHeader>
 
           <CardContent className="p-0 flex-1 flex flex-col overflow-hidden min-h-0">
             {showAddRule && (
-              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0 overflow-y-auto max-h-[200px] sm:max-h-none pr-1">
+              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0 overflow-y-auto max-h-[200px] sm:max-h-none pr-1 animate-[fade-in_150ms_ease-out]">
                 <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 items-end">
                   <div className="flex flex-col gap-1">
                     <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Rule Type</label>
@@ -347,7 +347,7 @@ export function RoutingView() {
                   {routingRules.map((rule, i) => (
                     <div
                       key={rule.id}
-                      className={`flex items-center text-xs py-2 px-3 hover:bg-muted/20 transition-all ${
+                      className={`flex items-center text-xs py-2 px-3 hover:bg-muted/20 transition-all animate-[fade-in_150ms_ease-out] ${
                         rule.enabled === false ? 'opacity-40' : ''
                       }`}
                     >

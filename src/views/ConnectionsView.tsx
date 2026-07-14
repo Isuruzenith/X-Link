@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useDeferredValue, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
-import { Network, Search, X, ShieldAlert, ArrowUpDown } from 'lucide-react';
+import { Network, Search, X, ShieldAlert, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FormInput, SegmentedControl } from '@/components/form';
+import { cn } from '@/lib/utils';
 
 interface ConnectionMetadata {
   network: string;
@@ -74,12 +75,14 @@ const ConnectionRow = memo(({
   conn,
   isSelected,
   onSelect,
-  onKill
+  onKill,
+  isKilling,
 }: {
   conn: ConnectionEntry;
   isSelected: boolean;
   onSelect: () => void;
   onKill: (id: string, label: string) => void;
+  isKilling: boolean;
 }) => {
   const host = conn.metadata.host || conn.metadata.destinationIP;
   const port = conn.metadata.destinationPort;
@@ -115,13 +118,13 @@ const ConnectionRow = memo(({
       <TableCell className="py-2.5 px-4 font-normal">
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center select-none">
-            <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-sm border ${
-              isDirect
-                ? 'bg-transparent border-border text-muted-foreground'
-                : 'bg-foreground border-foreground text-background'
-            }`}>
+            <Badge variant="outline" className={cn('text-2xs font-bold uppercase tracking-wide', 
+              isDirect 
+                ? 'bg-transparent text-muted-foreground border-border'
+                : 'bg-primary text-primary-foreground border-primary'
+            )}>
               {chainDisplay}
-            </span>
+            </Badge>
           </div>
           {conn.rule && (
             <div className="text-[9.5px] text-muted-foreground font-mono mt-0.5" title={conn.rule}>
@@ -160,8 +163,13 @@ const ConnectionRow = memo(({
           className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
           onClick={() => onKill(conn.id, `${host}:${port}`)}
           title="Force close connection"
+          disabled={isKilling}
         >
-          <X className="size-3.5" />
+          {isKilling ? (
+            <RefreshCw className="size-3.5 animate-spin" />
+          ) : (
+            <X className="size-3.5" />
+          )}
         </Button>
       </TableCell>
     </TableRow>
@@ -178,6 +186,7 @@ export function ConnectionsView() {
   const [sortBy, setSortBy] = useState<'host' | 'speed' | 'bytes' | 'time'>('bytes');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [killingIds, setKillingIds] = useState<Record<string, boolean>>({});
 
   const prevBytesRef = useRef<Record<string, { upload: number; download: number; time: number }>>({});
 
@@ -230,6 +239,7 @@ export function ConnectionsView() {
   }, [isConnected]);
 
   const handleKill = async (id: string, label: string) => {
+    setKillingIds((prev) => ({ ...prev, [id]: true }));
     try {
       await invoke('close_connection', { id });
       useToastStore.getState().addToast('info', `Closed connection to ${label}`);
@@ -239,6 +249,12 @@ export function ConnectionsView() {
       }
     } catch {
       useToastStore.getState().addToast('error', 'Failed to close connection');
+    } finally {
+      setKillingIds((prev) => {
+        const copy = { ...prev };
+        delete copy[id];
+        return copy;
+      });
     }
   };
 
@@ -374,9 +390,9 @@ export function ConnectionsView() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[10.5px] uppercase font-bold tracking-wider text-muted-foreground select-none">
                     <TableHead className="h-9 px-4">
-                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[120px] max-w-[400px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('host')}>
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[120px] max-w-[400px] pr-2 cursor-pointer transition-colors", sortBy === 'host' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')}>
                         <span>Destination</span>
-                        <ArrowUpDown className="size-3 shrink-0" />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4">
@@ -385,21 +401,21 @@ export function ConnectionsView() {
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('speed')}>
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'speed' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')}>
                         <span>Live Speed</span>
-                        <ArrowUpDown className="size-3 shrink-0" />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('bytes')}>
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'bytes' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')}>
                         <span>Total Data</span>
-                        <ArrowUpDown className="size-3 shrink-0" />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className="flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[90px] max-w-[200px] pr-2 cursor-pointer hover:text-foreground" onClick={() => toggleSort('time')}>
+                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[90px] max-w-[200px] pr-2 cursor-pointer transition-colors", sortBy === 'time' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')}>
                         <span>Uptime</span>
-                        <ArrowUpDown className="size-3 shrink-0" />
+                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4 w-14 text-center">
@@ -415,6 +431,7 @@ export function ConnectionsView() {
                       isSelected={selectedId === conn.id}
                       onSelect={() => setSelectedId(selectedId === conn.id ? null : conn.id)}
                       onKill={handleKill}
+                      isKilling={!!killingIds[conn.id]}
                     />
                   ))}
                 </TableBody>

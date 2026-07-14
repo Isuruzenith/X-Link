@@ -1,5 +1,6 @@
 import React from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, RotateCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface Props {
   children: React.ReactNode;
@@ -32,31 +33,34 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          padding: '40px 24px', textAlign: 'center', color: 'var(--text-low)',
-          height: '100%', minHeight: '200px',
-        }}>
-          <div style={{
-            width: '56px', height: '56px', borderRadius: '50%',
-            background: 'var(--status-err-dim)', border: '1px solid rgba(239,68,68,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px',
-          }}>
-            <AlertCircle size={24} style={{ color: 'var(--status-err)' }} />
+        <div className="flex flex-col items-center justify-center p-10 text-center text-muted-foreground h-full min-h-[200px]">
+          <div className="size-14 rounded-full bg-destructive/10 border border-destructive/25 flex items-center justify-center mb-4 shadow-sm">
+            <AlertCircle className="size-6 text-destructive" />
           </div>
-          <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-high)', marginBottom: '8px' }}>
+          <h3 className="text-sm font-bold text-foreground mb-2">
             {this.props.fallbackTitle || 'Something went wrong'}
           </h3>
-          <p style={{ fontSize: '12px', maxWidth: '340px', lineHeight: '1.5', marginBottom: '16px' }}>
+          <p className="text-xs max-w-[340px] leading-relaxed mb-4 text-muted-foreground/80">
             {this.state.error?.message || 'An unexpected error occurred in this component.'}
           </p>
-          <button
-            className="btn primary sm"
-            onClick={this.handleReset}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <RefreshCw size={13} /> Try Again
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={this.handleReset}
+              className="h-8.5 gap-1.5 px-4 text-xs font-semibold"
+            >
+              <RefreshCw className="size-3.5" /> Try Again
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => window.location.reload()}
+              className="h-8.5 gap-1.5 px-4 text-xs font-semibold"
+            >
+              <RotateCw className="size-3.5" /> Reload App
+            </Button>
+          </div>
         </div>
       );
     }

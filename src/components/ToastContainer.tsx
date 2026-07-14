@@ -1,6 +1,7 @@
 import { X, CheckCircle, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { useToastStore, type ToastType } from '../stores/toastStore';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 const TOAST_ICONS: Record<ToastType, typeof CheckCircle> = {
   success: CheckCircle,
@@ -17,7 +18,7 @@ const TOAST_CLASSES: Record<ToastType, { border: string; icon: string }> = {
 };
 
 export function ToastContainer() {
-  const { toasts, removeToast } = useToastStore();
+  const { toasts, removeToast, dismissToast } = useToastStore();
 
   if (toasts.length === 0) return null;
 
@@ -27,15 +28,30 @@ export function ToastContainer() {
       <div className="fixed bottom-0 inset-x-0 h-28 bg-gradient-to-t from-background/80 to-transparent pointer-events-none backdrop-blur-[2px] z-[190]" />
 
       {/* Centered Toast List */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2 w-[360px] max-w-[calc(100vw-32px)] pointer-events-none">
+      <div 
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2 w-[360px] max-w-[calc(100vw-32px)] pointer-events-none"
+        style={{ transformOrigin: 'right center' }}
+      >
         {toasts.map((toast) => {
           const Icon = TOAST_ICONS[toast.type];
           const classes = TOAST_CLASSES[toast.type];
+          const isExiting = toast.exiting;
 
           return (
             <div
               key={toast.id}
-              className={`flex items-start gap-3 p-3.5 px-4 rounded-xl bg-card/95 border shadow-lg backdrop-blur-md pointer-events-auto transition-all animate-in fade-in slide-in-from-bottom-5 duration-300 ${classes.border}`}
+              onAnimationEnd={() => {
+                if (isExiting) {
+                  removeToast(toast.id);
+                }
+              }}
+              className={cn(
+                "flex items-start gap-3 p-3.5 px-4 rounded-xl bg-card/95 border shadow-lg backdrop-blur-md pointer-events-auto transition-all duration-300",
+                isExiting 
+                  ? "animate-out fade-out slide-out-to-bottom-5" 
+                  : "animate-in fade-in slide-in-from-bottom-5",
+                classes.border
+              )}
             >
               <Icon className={`size-4 shrink-0 mt-0.5 ${classes.icon}`} />
               
@@ -55,7 +71,7 @@ export function ToastContainer() {
                 size="icon"
                 aria-label="Dismiss notification"
                 className="size-6 text-muted-foreground hover:text-foreground hover:bg-muted/40 rounded shrink-0 -mt-0.5 -mr-1"
-                onClick={() => removeToast(toast.id)}
+                onClick={() => dismissToast(toast.id)}
               >
                 <X className="size-3.5" />
               </Button>

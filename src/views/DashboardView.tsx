@@ -80,6 +80,16 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
     }
   }, [isConnected, activeNode, nodeGeoCache, fetchNodeGeo]);
 
+  // Clear connecting animation immediately on status change
+  useEffect(() => {
+    const el = document.querySelector('.power-button-outer');
+    if (el) {
+      if (connectionStatus !== 'connecting') {
+        el.classList.remove('connecting');
+      }
+    }
+  }, [connectionStatus]);
+
   return (
     <ViewShell
       title="Dashboard"
@@ -87,7 +97,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
       actions={
         <div className="flex items-center gap-2">
           {isElevated ? (
-            <Badge variant="outline" className="flex items-center gap-1.5 px-2.5 py-1 text-xs border-border bg-muted/40 text-foreground">
+            <Badge variant="outline" className="flex items-center justify-center gap-1.5 px-2.5 py-1 text-xs border-border bg-muted/40 text-foreground leading-none">
               <Shield className="size-3.5 text-muted-foreground" />
               <span>TUN: Active</span>
             </Badge>
@@ -100,9 +110,9 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
       }
     >
-      <div className="flex flex-col flex-1 min-h-0 w-full" style={{ gap: '10px' }}>
+      <div className="flex flex-col flex-1 min-h-0 w-full gap-2">
         {/* Top row: Connect + Chart */}
-        <div className="grid grid-cols-1 md:grid-cols-3 flex-1 w-full" style={{ gap: '10px' }}>
+        <div className="grid grid-cols-1 md:grid-cols-3 flex-1 w-full gap-2">
           {/* Connect Panel */}
           <Card className="flex flex-col p-3.5 bg-card border border-border shadow-sm h-full overflow-hidden min-h-[280px] min-w-0">
             <div className="flex flex-col items-center justify-center flex-1 min-h-0 py-2">
@@ -131,7 +141,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                 </p>
               </div>
               {isConnected && (
-                <Badge variant="secondary" className="connect-mode-badge mt-2.5 flex items-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5">
+                <Badge variant="secondary" className="connect-mode-badge mt-2.5 flex items-center justify-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5 leading-none">
                   <Network className="size-2.5" />
                   <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
                 </Badge>
@@ -241,7 +251,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
 
         {/* Metrics */}
-        <div className="flex flex-wrap shrink-0 w-full" style={{ gap: '10px' }}>
+        <div className="flex flex-wrap shrink-0 w-full gap-2">
           {[
             { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes) },
             { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes) },
@@ -266,8 +276,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
 
         {/* Ports bar */}
         <div 
-          className="bg-card border-t border-border shadow-sm shrink-0 rounded-none"
-          style={{ paddingTop: '6px', paddingBottom: '6px', paddingLeft: '10px', paddingRight: '10px', marginLeft: '-10px', marginRight: '-10px', marginBottom: '-10px' }}
+          className="bg-card border-t border-border shadow-sm shrink-0 rounded-none py-2 px-4 -mx-4 -mb-4 mt-2"
         >
           <div className="flex flex-row flex-wrap justify-between items-center gap-y-1 w-full">
             <h3 className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Active Inbound Ports</h3>
@@ -292,7 +301,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                 </span>
               ))}
               {settings.wifiSharing && (
-                <Badge variant="outline" className="h-4.5 gap-1 text-[9px] text-foreground font-semibold px-1.5 border-border bg-muted/30">
+                <Badge variant="outline" className="h-5 gap-1 text-[9px] text-foreground font-semibold px-1.5 border-border bg-muted/30 leading-none">
                   <Wifi className="size-2.5" />
                   <span>LAN Sharing On</span>
                 </Badge>

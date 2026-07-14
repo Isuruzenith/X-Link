@@ -31,7 +31,7 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
               "h-7 gap-1 px-3.5 text-2xs font-bold rounded-md select-none transition-all flex-1 shrink-0",
               isActive
                 ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-transparent"
+                : "text-foreground/70 hover:text-foreground hover:bg-transparent"
             )}
           >
             {Icon && <Icon className="size-3 shrink-0" />}

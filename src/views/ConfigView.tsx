@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react';
 import { Globe, RefreshCw, Check, ShieldAlert, Clipboard, FileUp, Edit3, Zap, CornerDownLeft, Trash2, ArrowRight, Link2, Activity } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { ViewShell } from '../components/ViewShell';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useProfileStore, getCountryCode, type GeoCacheEntry } from '../stores/profileStore';
@@ -154,6 +156,7 @@ function ServerCard({
 
   return (
     <Card
+      id={`node-card-${node.tag}`}
       className={`p-3 bg-card border transition-all duration-150 cursor-pointer shadow-sm hover:bg-muted/40 flex flex-row justify-between items-center min-w-0 ${
         isNodeSelected ? 'border-foreground bg-accent/10 ring-1 ring-foreground/20' : 'border-border'
       }`}
@@ -260,6 +263,31 @@ export function ConfigView() {
   const stats = useStatsStore((s) => s.stats);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) || null;
+  const [urlError, setUrlError] = useState<string | null>(null);
+ 
+  // Keep active node visible during scroll when selection changes
+  useEffect(() => {
+    if (selectedNodeTag) {
+      const el = document.getElementById(`node-card-${selectedNodeTag}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [selectedNodeTag]);
+ 
+  const handleContentChange = (val: string) => {
+    setImportContent(val);
+    const trimmed = val.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.toLowerCase().includes('://')) {
+      if (trimmed.startsWith('http') && !/^(https?:\/\/)[^\s$.?#].[^\s]*$/i.test(trimmed)) {
+        setUrlError('Please enter a valid URL (e.g., https://example.com/config).');
+      } else {
+        setUrlError(null);
+      }
+    } else {
+      setUrlError(null);
+    }
+  };
 
   const handleImportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -324,9 +352,9 @@ export function ConfigView() {
               />
               <div className="flex gap-2">
                 <FormInput
-                  className="h-8 flex-1"
+                  className={cn("h-8 flex-1", urlError && "border-destructive focus-visible:ring-destructive")}
                   value={importContent}
-                  onChange={setImportContent}
+                  onChange={handleContentChange}
                   placeholder="Paste vless://, ss://, subscription URL…"
                 />
                 <Button
@@ -350,6 +378,11 @@ export function ConfigView() {
                   {isImporting ? <RefreshCw className="size-3.5 animate-spin" /> : <CornerDownLeft className="size-4" />}
                 </Button>
               </div>
+              {urlError && (
+                <div className="text-[10px] text-destructive -mt-1 pl-1 leading-normal">
+                  {urlError}
+                </div>
+              )}
               {importError && (
                 <div className="bg-destructive/10 text-destructive text-[11px] px-3 py-1.5 rounded border border-destructive/20 flex items-center gap-2">
                   <ShieldAlert className="size-3.5" /> {importError}
@@ -425,10 +458,27 @@ export function ConfigView() {
                 })}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-muted-foreground h-full min-h-[120px] gap-2">
-                <Globe className="size-8 opacity-40 stroke-[1.5]" />
-                <p className="text-xs font-bold text-foreground">No Profiles Yet</p>
-                <p className="text-[10px] text-center max-w-[220px]">Add a profile above using a subscription link, config file, or pasting node URIs.</p>
+              <div className="flex flex-col items-center justify-center text-muted-foreground py-10 gap-3 border border-dashed border-border/60 rounded-xl m-2">
+                <div className="size-12 rounded-full bg-muted/40 flex items-center justify-center border border-border/40 shrink-0">
+                  <Globe className="size-6 text-muted-foreground opacity-60 stroke-[1.5]" />
+                </div>
+                <div className="flex flex-col items-center gap-1 text-center px-4">
+                  <p className="text-xs font-bold text-foreground">No Profiles Loaded</p>
+                  <p className="text-[10.5px] text-muted-foreground max-w-[220px] leading-relaxed">
+                    Import a subscription URL, choose a config file, or paste sharing URIs to get started.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Button variant="outline" size="sm" className="h-7 text-2xs px-3 font-semibold" onClick={pickFileAndImport}>
+                    Choose File
+                  </Button>
+                  <Button variant="secondary" size="sm" className="h-7 text-2xs px-3 font-semibold" onClick={() => {
+                    const el = document.querySelector('input[placeholder*="Paste"]');
+                    if (el) (el as HTMLInputElement).focus();
+                  }}>
+                    Paste URL
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -483,8 +533,19 @@ export function ConfigView() {
                     ))}
                   </div>
                 ) : (
-                  <div className="flex items-center justify-center h-24 text-muted-foreground">
-                    <p className="text-xs">No customizable servers found.</p>
+                  <div className="flex flex-col items-center justify-center text-muted-foreground py-10 gap-3 border border-dashed border-border/60 rounded-xl m-2">
+                    <div className="size-12 rounded-full bg-muted/40 flex items-center justify-center border border-border/40 shrink-0">
+                      <Zap className="size-6 text-muted-foreground opacity-60 stroke-[1.5]" />
+                    </div>
+                    <div className="flex flex-col items-center gap-1 text-center px-4">
+                      <p className="text-xs font-bold text-foreground">No Servers Available</p>
+                      <p className="text-[10.5px] text-muted-foreground max-w-[220px] leading-relaxed">
+                        This profile does not contain any customizable outbound proxy nodes.
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" className="h-7 text-2xs px-3 font-semibold mt-1" onClick={testAllNodes} disabled>
+                      Check Connectivity
+                    </Button>
                   </div>
                 )}
               </div>

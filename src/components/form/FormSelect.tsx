@@ -28,7 +28,7 @@ export function FormSelect({ label, value, onChange, options, placeholder, class
     <div className="flex flex-col gap-1.5 w-full">
       {label && <Label className="text-2xs font-bold text-muted-foreground uppercase tracking-wider">{label}</Label>}
       <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger className={cn("h-9 bg-background/50 border-border text-foreground text-xs focus:ring-1 focus:ring-ring justify-between", className)}>
+        <SelectTrigger className={cn("h-9 bg-background/50 border-border text-foreground text-xs focus:ring-1 focus:ring-ring justify-between", disabled && "opacity-50 cursor-not-allowed pointer-events-none", className)}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent position="popper">

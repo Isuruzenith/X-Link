@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, RefreshCw, ShieldAlert, Info } from 'lucide-react';
+import { X, RefreshCw, ShieldAlert, Info, Eye, EyeOff } from 'lucide-react';
 import { useNodeEditorStore } from '../../stores/nodeEditorStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,6 +56,36 @@ const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean
     className="shrink-0"
   />
 );
+ 
+const ToggleInput = ({ value, onChange, placeholder, mono = false }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  mono?: boolean;
+}) => {
+  const [show, setShow] = React.useState(false);
+  return (
+    <div className="relative w-full flex items-center">
+      <FormInput
+        type={show ? "text" : "password"}
+        mono={mono}
+        className="h-8 pr-8 w-full truncate overflow-ellipsis"
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="absolute right-1 size-6 text-muted-foreground hover:text-foreground hover:bg-transparent rounded"
+        onClick={() => setShow(!show)}
+      >
+        {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+      </Button>
+    </div>
+  );
+};
 
 const SubCard = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <Card className="p-4 bg-muted/20 border-border/60 shadow-none flex flex-col gap-3">
@@ -86,7 +116,7 @@ export function NodeEditor() {
   return (
     <>
       <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm transition-all duration-200" onClick={store.closeEditor} />
-      <div className="fixed inset-y-0 right-0 z-50 h-full w-[420px] bg-card border-l border-border shadow-lg flex flex-col transition-all duration-300 ease-in-out">
+      <div className="fixed inset-y-0 right-0 z-50 h-full w-[420px] bg-card border-l border-border shadow-lg flex flex-col transition-all duration-200 ease">
         {/* Header */}
         <div className="flex justify-between items-center px-5 py-4 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
@@ -176,7 +206,7 @@ export function NodeEditor() {
                 <SubCard title="Authentication">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase">UUID *</label>
-                    <Inp value={store.editUuid} onChange={(v) => store.setField('editUuid', v)} placeholder="uuid-here" mono />
+                    <ToggleInput value={store.editUuid} onChange={(v) => store.setField('editUuid', v)} placeholder="uuid-here" mono />
                   </div>
                   {store.editProtocol === 'vless' && (
                     <div className="flex flex-col gap-1.5">
@@ -198,11 +228,9 @@ export function NodeEditor() {
                 <SubCard title="Trojan Authentication">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
-                    <input
-                      type="password"
-                      className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                    <ToggleInput
                       value={store.editPassword}
-                      onChange={(e) => store.setField('editPassword', e.target.value)}
+                      onChange={(v) => store.setField('editPassword', v)}
                       placeholder="Trojan password"
                     />
                   </div>
@@ -213,11 +241,10 @@ export function NodeEditor() {
                 <SubCard title="Shadowsocks">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
-                    <input
-                      type="password"
-                      className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                    <ToggleInput
                       value={store.editPassword}
-                      onChange={(e) => store.setField('editPassword', e.target.value)}
+                      onChange={(v) => store.setField('editPassword', v)}
+                      placeholder="Password"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -240,11 +267,10 @@ export function NodeEditor() {
                 <SubCard title="Hysteria2">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase">Auth Password *</label>
-                    <input
-                      type="password"
-                      className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                    <ToggleInput
                       value={store.editHy2Auth}
-                      onChange={(e) => store.setField('editHy2Auth', e.target.value)}
+                      onChange={(v) => store.setField('editHy2Auth', v)}
+                      placeholder="Auth Password"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -282,15 +308,14 @@ export function NodeEditor() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase">UUID *</label>
-                      <Inp value={store.editTuicUuid} onChange={(v) => store.setField('editTuicUuid', v)} placeholder="UUID" mono />
+                      <ToggleInput value={store.editTuicUuid} onChange={(v) => store.setField('editTuicUuid', v)} placeholder="UUID" mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
-                      <input
-                        type="password"
-                        className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                      <ToggleInput
                         value={store.editTuicPassword}
-                        onChange={(e) => store.setField('editTuicPassword', e.target.value)}
+                        onChange={(v) => store.setField('editTuicPassword', v)}
+                        placeholder="Password"
                       />
                     </div>
                   </div>
@@ -343,11 +368,9 @@ export function NodeEditor() {
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-bold text-muted-foreground uppercase">Password</label>
-                    <input
-                      type="password"
-                      className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                    <ToggleInput
                       value={store.editSocksPassword}
-                      onChange={(e) => store.setField('editSocksPassword', e.target.value)}
+                      onChange={(v) => store.setField('editSocksPassword', v)}
                       placeholder="Optional"
                     />
                   </div>
@@ -369,11 +392,9 @@ export function NodeEditor() {
                     </div>
                     <div className="flex flex-col gap-1.5">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase">Password</label>
-                      <input
-                        type="password"
-                        className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
+                      <ToggleInput
                         value={store.editHttpPassword}
-                        onChange={(e) => store.setField('editHttpPassword', e.target.value)}
+                        onChange={(v) => store.setField('editHttpPassword', v)}
                         placeholder="Optional"
                       />
                     </div>

@@ -1141,3 +1141,23 @@ tr[data-state="selected"]:hover,
 tr.bg-muted\/60:hover {
   background-color: var(--surface-active) !important;
 }
+
+@keyframes view-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.view-fade {
+  animation: view-fade-in 150ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-delay: -1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    background-attachment: initial !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+}

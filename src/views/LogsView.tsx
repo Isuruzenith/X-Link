@@ -57,12 +57,12 @@ export function LogsView() {
         const tagText = part.slice(1, -1);
         const lowerTag = tagText.toLowerCase();
         
-        let classes = 'text-muted-foreground bg-muted border-border/40';
+        let classes = 'text-foreground/75 bg-muted border-border/40';
         
         if (lowerTag.includes('warn')) {
-          classes = 'text-foreground bg-transparent border-dashed border-border';
+          classes = 'text-amber-700 bg-amber-50/50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900/50';
         } else if (lowerTag.includes('err') || lowerTag.includes('fail')) {
-          classes = 'text-background bg-foreground border-foreground';
+          classes = 'text-destructive bg-destructive/10 border-destructive/20';
         }
         
         return (
@@ -155,11 +155,10 @@ export function LogsView() {
                     {log.timestamp}
                   </span>
  
-                  {/* Level tag */}
                   <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
-                    log.type === 'error' ? 'text-foreground font-black' :
-                    log.type === 'warn'  ? 'text-muted-foreground' :
-                    log.type === 'system' ? 'text-muted-foreground/80' : 'text-muted-foreground/60'
+                    log.type === 'error' ? 'text-destructive font-black' :
+                    log.type === 'warn'  ? 'text-amber-600 dark:text-amber-500' :
+                    log.type === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-foreground/70'
                   }`}>
                     {getLevelLabel(log.type)}
                   </span>
