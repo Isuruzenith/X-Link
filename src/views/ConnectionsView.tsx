@@ -227,7 +227,7 @@ export function ConnectionsView() {
         </div>
       }
     >
-      <div className="flex flex-col gap-3 h-full overflow-hidden flex-1">
+      <div className="flex flex-col gap-6 overflow-hidden flex-1 min-h-0">
         
         {/* Controls row */}
         <div className="flex items-center gap-3 shrink-0 select-none">

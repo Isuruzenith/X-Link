@@ -100,11 +100,11 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
       }
     >
-      <div className="flex flex-col gap-4 h-full overflow-hidden flex-1 min-h-0">
+      <div className="flex flex-col h-full w-full" style={{ gap: '10px' }}>
         {/* Top row: Connect + Chart */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
+        <div className="grid grid-cols-1 md:grid-cols-3 flex-1 w-full" style={{ gap: '10px' }}>
           {/* Connect Panel */}
-          <Card className="flex flex-col justify-between p-4 bg-card border-border shadow-sm h-full overflow-hidden min-h-[280px]">
+          <Card className="flex flex-col p-3.5 bg-card border border-border shadow-sm h-full overflow-hidden min-h-[280px] min-w-0">
             <div className="flex flex-col items-center justify-center flex-1 min-h-0 py-2">
               <div className="power-button-container shrink-0">
                 <div className={`power-button-outer ${connectionStatus === 'connected' ? 'connected' : connectionStatus === 'connecting' ? 'connecting' : ''}`} />
@@ -118,99 +118,106 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                   <Power size={26} />
                 </button>
               </div>
-              <h3 className="connect-status-label mt-3 font-bold text-sm tracking-wide">
-                {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
-              </h3>
-              <p className="connect-status-sub text-xs text-muted-foreground mt-0.5 text-center max-w-[200px] truncate">
-                {connectionStatus === 'connected'
-                  ? `${activeProfile?.name || 'Default'}`
-                  : connectionStatus === 'connecting'
-                    ? 'Establishing secure tunnels...'
-                    : 'Toggle power to start proxy'}
-              </p>
+              <div className="flex flex-col items-center gap-1 mt-3.5 text-center">
+                <h3 className="connect-status-label font-bold text-sm tracking-wide text-foreground">
+                  {connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}
+                </h3>
+                <p className="connect-status-sub text-xs text-muted-foreground max-w-[200px] truncate leading-normal">
+                  {connectionStatus === 'connected'
+                    ? `${activeProfile?.name || 'Default'}`
+                    : connectionStatus === 'connecting'
+                      ? 'Establishing secure tunnels...'
+                      : 'Toggle power to start proxy'}
+                </p>
+              </div>
               {isConnected && (
-                <Badge variant="secondary" className="connect-mode-badge mt-2 flex items-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5">
+                <Badge variant="secondary" className="connect-mode-badge mt-2.5 flex items-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5">
                   <Network className="size-2.5" />
                   <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
                 </Badge>
               )}
             </div>
 
-            {/* Active Node */}
-            {isConnected && selectedNodeTag && (
-              <div className="w-full bg-muted/30 border border-border/40 rounded-lg p-2.5 flex items-center gap-2.5 shrink-0">
-                {(() => {
-                  const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
-                  const activeServerCode = geo && geo !== 'loading'
-                    ? geo.countryCode
-                    : (activeNode ? getCountryCode(activeNode.tag) : null);
-                  const activeRegion = geo && geo !== 'loading' && (geo.cityName || geo.regionName)
-                    ? `${geo.cityName || ''}${geo.cityName && geo.regionName ? ', ' : ''}${geo.regionName || ''}`
-                    : '';
-                  const activeCountryName = geo && geo !== 'loading' ? geo.countryName : '';
+            {/* Active Node & Quick Switch details */}
+            {isConnected && (selectedNodeTag || nodes.length > 1) && (
+              <div className="w-full flex flex-col gap-3 shrink-0 mt-auto pt-3 border-t border-border/10">
+                {/* Active Node */}
+                {selectedNodeTag && (
+                  <div className="w-full bg-muted/30 border border-border/40 rounded-lg p-2.5 flex items-center gap-2.5">
+                    {(() => {
+                      const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
+                      const activeServerCode = geo && geo !== 'loading'
+                        ? geo.countryCode
+                        : (activeNode ? getCountryCode(activeNode.tag) : null);
+                      const activeRegion = geo && geo !== 'loading' && (geo.cityName || geo.regionName)
+                        ? `${geo.cityName || ''}${geo.cityName && geo.regionName ? ', ' : ''}${geo.regionName || ''}`
+                        : '';
+                      const activeCountryName = geo && geo !== 'loading' ? geo.countryName : '';
 
-                  return (
-                    <>
-                      {activeServerCode ? (
-                        <div className="flex items-center justify-center shrink-0 w-5 h-3.5 overflow-hidden rounded-[1px] border border-border/30">
-                          <img
-                            src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
-                            alt={activeServerCode}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <Zap className="size-3.5 text-muted-foreground shrink-0" />
-                      )}
-                      <div className="flex flex-col min-w-0 flex-1 text-left">
-                        <span className="text-xs font-semibold text-foreground truncate flex items-center gap-1">
-                          <Zap className="size-2.5 text-foreground shrink-0" />
-                          {selectedNodeTag}
-                        </span>
-                        {(activeCountryName || activeRegion) && (
-                          <span className="text-2xs text-muted-foreground truncate">
-                            {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
-                          </span>
+                      return (
+                        <>
+                          {activeServerCode ? (
+                            <div className="flex items-center justify-center shrink-0 w-5 h-3.5 overflow-hidden rounded-[1px] border border-border/30">
+                              <img
+                                src={`https://flagcdn.com/w40/${activeServerCode.toLowerCase()}.png`}
+                                alt={activeServerCode}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <Zap className="size-3.5 text-muted-foreground shrink-0" />
+                          )}
+                          <div className="flex flex-col min-w-0 flex-1 text-left">
+                            <span className="text-xs font-semibold text-foreground truncate flex items-center gap-1">
+                              <Zap className="size-2.5 text-foreground shrink-0" />
+                              {selectedNodeTag}
+                            </span>
+                            {(activeCountryName || activeRegion) && (
+                              <span className="text-2xs text-muted-foreground truncate">
+                                {activeCountryName}{activeCountryName && activeRegion ? ' - ' : ''}{activeRegion}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Quick Switch */}
+                {nodes.length > 1 && (
+                  <div className="w-full flex flex-col">
+                    <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase mb-2 text-left">Quick Switch</span>
+                    <ScrollArea className="max-h-16 w-full">
+                      <div className="flex flex-wrap gap-1.5 justify-start pr-2">
+                        {nodes.slice(0, 8).map((node) => (
+                          <Button
+                            key={node.tag}
+                            onClick={() => selectNode(node)}
+                            variant={selectedNodeTag === node.tag ? 'default' : 'secondary'}
+                            size="xs"
+                            className="h-6 px-2.5 text-2xs font-semibold rounded-full shrink-0 whitespace-nowrap"
+                            title={node.tag}
+                          >
+                            <span className="truncate max-w-[100px]">{node.tag}</span>
+                          </Button>
+                        ))}
+                        {nodes.length > 8 && (
+                          <span className="text-2xs text-muted-foreground px-1.5 py-0.5 font-semibold shrink-0 self-center">+{nodes.length - 8}</span>
                         )}
                       </div>
-                    </>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* Quick Switch */}
-            {isConnected && nodes.length > 1 && (
-              <div className="w-full flex flex-col shrink-0 border-t border-border/20 pt-3">
-                <span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase mb-2">Quick Switch</span>
-                <ScrollArea className="max-h-16 w-full">
-                  <div className="flex flex-wrap gap-1.5 justify-center pr-2">
-                    {nodes.slice(0, 8).map((node) => (
-                      <Button
-                        key={node.tag}
-                        onClick={() => selectNode(node)}
-                        variant={selectedNodeTag === node.tag ? 'default' : 'secondary'}
-                        size="xs"
-                        className="h-6 px-2.5 text-2xs font-semibold rounded-full shrink-0"
-                        title={node.tag}
-                      >
-                        {node.tag}
-                      </Button>
-                    ))}
-                    {nodes.length > 8 && (
-                      <span className="text-2xs text-muted-foreground px-1.5 py-0.5 font-semibold shrink-0 self-center">+{nodes.length - 8}</span>
-                    )}
+                    </ScrollArea>
                   </div>
-                </ScrollArea>
+                )}
               </div>
             )}
           </Card>
 
           {/* Chart */}
-          <Card className="col-span-1 md:col-span-2 bg-card border-border shadow-sm flex flex-col overflow-hidden h-full min-h-[280px] p-4">
+          <Card className="col-span-1 md:col-span-2 bg-card border border-border shadow-sm flex flex-col overflow-hidden h-full min-h-[280px] p-3.5 min-w-0">
             <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
               <CardTitle className="text-sm font-semibold tracking-tight">Bandwidth</CardTitle>
               <div className="flex items-center gap-4 text-xs shrink-0">
@@ -231,7 +238,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </div>
 
         {/* Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+        <div className="grid grid-cols-2 md:grid-cols-4 shrink-0 w-full" style={{ gap: '10px' }}>
           {[
             { icon: DownloadCloud, label: 'Total Down',   value: formatBytes(downloadBytes) },
             { icon: UploadCloud,   label: 'Total Up',     value: formatBytes(uploadBytes) },
@@ -240,25 +247,28 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
           ].map(({ icon: Icon, label, value, clickable }) => (
             <Card
               key={label}
-              className={`py-2.5 px-4 bg-card border border-border shadow-sm flex items-center gap-3 transition-colors shrink-0 ${clickable ? 'cursor-pointer hover:bg-accent/40 active:bg-accent/70' : ''}`}
+              className={`p-3.5 bg-card border border-border shadow-sm flex flex-row items-center gap-3 transition-colors shrink-0 ${clickable ? 'cursor-pointer hover:bg-accent/40 active:bg-accent/70' : ''}`}
               onClick={clickable ? () => onNavigateToTab?.('connections') : undefined}
             >
-              <div className="size-8 rounded-md bg-muted flex items-center justify-center text-foreground border border-border/40 shrink-0">
-                <Icon className="size-3.5" />
+              <div className="size-9 rounded-md bg-muted flex items-center justify-center text-foreground border border-border/40 shrink-0">
+                <Icon className="size-5" />
               </div>
               <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</span>
-                <span className="text-sm font-semibold text-foreground truncate tabular-nums">{value}</span>
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-0.5">{label}</span>
+                <span className="text-base font-bold text-foreground truncate tabular-nums leading-none">{value}</span>
               </div>
             </Card>
           ))}
         </div>
 
         {/* Ports bar */}
-        <Card className="py-2.5 px-4 bg-card border-border shadow-sm shrink-0">
-          <div className="flex flex-row flex-wrap justify-between items-center gap-y-2 w-full">
+        <div 
+          className="bg-card border-t border-border shadow-sm shrink-0 rounded-none"
+          style={{ paddingTop: '6px', paddingBottom: '6px', paddingLeft: '10px', paddingRight: '10px', marginLeft: '-10px', marginRight: '-10px', marginBottom: '-10px' }}
+        >
+          <div className="flex flex-row flex-wrap justify-between items-center gap-y-1 w-full">
             <h3 className="text-2xs font-semibold text-muted-foreground uppercase tracking-wider">Active Inbound Ports</h3>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground font-medium">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-foreground font-medium">
               {[
                 ...(settings.useSeparatePorts
                   ? [
@@ -271,22 +281,22 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
                 ...(settings.apiEnabled ? [{ label: 'API', port: settings.apiPort }] : []),
               ].map(({ label, port }, i) => (
                 <span key={label} className="flex items-center gap-2">
-                  {i > 0 && <Separator orientation="vertical" className="h-3 hidden sm:block" />}
+                  {i > 0 && <Separator orientation="vertical" className="h-2.5 hidden sm:block" />}
                   <span className="flex items-center gap-1">
                     <span className="text-muted-foreground font-normal">{label}:</span>
-                    <span className="font-mono bg-muted px-1.5 py-0.5 rounded border border-border/30 text-xs tabular-nums">{port}</span>
+                    <span className="font-mono bg-muted px-1 py-0.5 rounded border border-border/30 text-[10px] tabular-nums">{port}</span>
                   </span>
                 </span>
               ))}
               {settings.wifiSharing && (
-                <Badge variant="outline" className="h-5 gap-1 text-2xs text-foreground font-semibold px-2 border-border bg-muted/30">
+                <Badge variant="outline" className="h-4.5 gap-1 text-[9px] text-foreground font-semibold px-1.5 border-border bg-muted/30">
                   <Wifi className="size-2.5" />
                   <span>LAN Sharing On</span>
                 </Badge>
               )}
             </div>
           </div>
-        </Card>
+        </div>
       </div>
     </ViewShell>
   );

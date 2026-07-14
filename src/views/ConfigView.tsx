@@ -290,7 +290,7 @@ export function ConfigView() {
 
   return (
     <ViewShell title="Profiles" subtitle="Manage proxy configurations and server nodes">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full overflow-hidden flex-1">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-hidden flex-1 min-h-0">
         {/* Left panel: Profile list + Import */}
         <Card className="p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden h-full">
           {/* Import Form */}
