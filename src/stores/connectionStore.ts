@@ -9,6 +9,7 @@ import { toUserFriendlyError } from '../utils/errors';
 interface ConnectionState {
   isConnected: boolean;
   connectionStatus: 'connected' | 'connecting' | 'disconnected';
+  effectiveProxyMode: 'tun' | 'system' | null;
   uptime: number;
   httpPort: number;
   socksPort: number;
@@ -23,6 +24,7 @@ interface ConnectionState {
   // Actions
   setPorts: (ports: { httpPort?: number; socksPort?: number; mixedPort?: number }) => void;
   setConnectionStatus: (status: 'connected' | 'connecting' | 'disconnected') => void;
+  setEffectiveProxyMode: (mode: 'tun' | 'system' | null) => void;
   setIsConnected: (connected: boolean) => void;
   setUptime: (time: number) => void;
   updateTrafficStats: (stats: {
@@ -40,6 +42,7 @@ interface ConnectionState {
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   isConnected: false,
   connectionStatus: 'disconnected',
+  effectiveProxyMode: null,
   uptime: 0,
   httpPort: 7890,
   socksPort: 7891,
@@ -52,7 +55,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   speedHistory: [],
 
   setPorts: (ports) => set((state) => ({ ...state, ...ports })),
-  setConnectionStatus: (status) => set({ connectionStatus: status }),
+  setConnectionStatus: (status) => set({ connectionStatus: status, ...(status === 'disconnected' ? { effectiveProxyMode: null } : {}) }),
+  setEffectiveProxyMode: (mode) => set({ effectiveProxyMode: mode }),
   setIsConnected: (connected) => set({ isConnected: connected }),
   setUptime: (time) => set({ uptime: time }),
 
@@ -79,13 +83,18 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
     if (connectionStatus !== 'disconnected') {
       try {
-        set({ connectionStatus: 'disconnected', isConnected: false });
         const result = await invoke<string>('toggle_proxy', { start: false, selectedOutboundTag: null });
         if (result === 'stopped') {
+          set({ connectionStatus: 'disconnected', isConnected: false, effectiveProxyMode: null });
           logStore.pushSystemLog('Proxy tunnels stopped.');
         }
       } catch (e) {
         logStore.pushSystemLog(`Error stopping proxy: ${e}`);
+        useToastStore.getState().addToast('error', toUserFriendlyError(String(e)), 'Disconnect Failed');
+        try {
+          const status = await invoke<{ status: ConnectionState['connectionStatus'] }>('get_proxy_status');
+          set({ connectionStatus: status.status, isConnected: status.status === 'connected' });
+        } catch { /* keep the last known state */ }
       }
     } else {
       if (!activeProfile) {
@@ -106,19 +115,11 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         }
       }
 
-      // TUN mode requires admin privileges — rollback to system proxy if not elevated
-      if (settings.proxyMode === 'tun' && !isElevated) {
-        logStore.pushSystemLog('TUN mode requires Administrator privileges. Not elevated. Rolling back to System Proxy mode...');
-        
-        const settingsStore = useSettingsStore.getState();
-        await settingsStore.updateSettings({ proxyMode: 'system' });
-        useToastStore.getState().addToast('warning', 'Switched to System Proxy mode (TUN requires Admin rights).', 'Fallback Activated');
-        
-        // Re-trigger connect in system proxy mode
-        setTimeout(() => {
-          get().toggleConnect();
-        }, 500);
-        return;
+      // Use a session override; never rewrite the saved TUN preference.
+      const modeOverride = settings.proxyMode === 'tun' && !isElevated ? 'system' : null;
+      if (modeOverride) {
+        logStore.pushSystemLog('TUN requires Administrator privileges. Using System Proxy for this session.');
+        useToastStore.getState().addToast('warning', 'Using System Proxy for this session (TUN requires Admin rights).', 'Fallback Activated');
       }
 
       try {
@@ -135,14 +136,25 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       set({ connectionStatus: 'connecting' });
 
       try {
-        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: outboundTag });
-        if (result === 'started') {
-          set({ isConnected: true, connectionStatus: 'connected' });
-          logStore.pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);
-          useToastStore.getState().addToast('success', `Secured via Mixed port ${mixedPort}`, 'Connection Established');
+        const result = await invoke<string>('toggle_proxy', { start: true, selectedOutboundTag: outboundTag, modeOverride });
+        if (result !== 'started') throw new Error(`Unexpected proxy start response: ${result}`);
+        set({ isConnected: true, connectionStatus: 'connected', effectiveProxyMode: modeOverride ?? settings.proxyMode });
+        try {
+          const status = await invoke<{ effectiveProxyMode: 'tun' | 'system' | null }>('get_proxy_status');
+          set({ effectiveProxyMode: status.effectiveProxyMode });
+        } catch {
+          set({ effectiveProxyMode: null });
+          logStore.pushSystemLog('Connected, but effective proxy mode could not be read.');
         }
+        logStore.pushSystemLog(`sing-box established on port Mixed:${mixedPort}.`);
+        useToastStore.getState().addToast('success', `Secured via Mixed port ${mixedPort}`, 'Connection Established');
       } catch (e) {
-        set({ connectionStatus: 'disconnected' });
+        try {
+          const status = await invoke<{ status: ConnectionState['connectionStatus']; effectiveProxyMode: 'tun' | 'system' | null }>('get_proxy_status');
+          set({ connectionStatus: status.status, isConnected: status.status === 'connected', effectiveProxyMode: status.effectiveProxyMode });
+        } catch {
+          set({ connectionStatus: 'disconnected', isConnected: false, effectiveProxyMode: null });
+        }
         logStore.pushSystemLog(`Startup error: ${e}`);
         useToastStore.getState().addToast('error', toUserFriendlyError(String(e)), 'Connection Failed');
       }

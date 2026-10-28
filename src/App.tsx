@@ -29,14 +29,16 @@ export default function App() {
   const connectionCountedRef = useRef(false);
 
   // Zustand Store hooks
-  const { initSettings, checkElevated, fetchVersions, setConflictingPorts } = useSettingsStore();
+  const { initSettings, checkElevated, fetchVersions, setConflictingPorts, setPortStatuses } = useSettingsStore();
   const { initProfiles, refreshNodes } = useProfileStore();
   const { initRouting } = useRoutingStore();
   const { pushLog, pushSystemLog } = useLogStore();
   const { initStats, recordTraffic, recordNewConnection } = useStatsStore();
   const {
+    connectionStatus,
     setIsConnected,
     setConnectionStatus,
+    setEffectiveProxyMode,
     setUptime,
     updateTrafficStats,
     resetTrafficStats,
@@ -99,6 +101,8 @@ export default function App() {
                 if (result === 'started') {
                   setIsConnected(true);
                   setConnectionStatus('connected');
+                  const running = await invoke<{ effectiveProxyMode: 'tun' | 'system' | null }>('get_proxy_status');
+                  setEffectiveProxyMode(running.effectiveProxyMode);
                   pushSystemLog(`sing-box established automatically on Mixed port ${updatedSettings.mixedPort}.`);
                 } else {
                   setConnectionStatus('disconnected');
@@ -165,6 +169,15 @@ export default function App() {
       initSettings();
     });
 
+    const unlistenNode = listen<{ profileId: string; tag: string }>('node-switched', (event) => {
+      const { profileId, tag } = event.payload;
+      if (profileId && tag) {
+        useProfileStore.getState().syncNodeFromTray(profileId, tag).catch((error) => {
+          pushSystemLog(`Failed to synchronize tray node selection: ${error}`);
+        });
+      }
+    });
+
     // Fetch initial log buffer from Rust sidecar manager
     (async () => {
       try {
@@ -187,25 +200,29 @@ export default function App() {
       unlistenTerm.then((f) => f());
       unlistenStatus.then((f) => f());
       unlistenSettings.then((f) => f());
+      unlistenNode.then((f) => f());
     };
-  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, initStats, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setIsConnected, setPorts]);
+  }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, initStats, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setEffectiveProxyMode, setIsConnected, setPorts]);
 
   // ── PORT CONFLICT DETECTOR ─────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const ports = [httpPort, socksPort, mixedPort];
-      const conflicts: number[] = [];
-      for (const p of ports) {
-        try {
-          const res = await invoke<number | null>('check_port_conflict', { ports: [p] });
-          if (res) conflicts.push(p);
-        } catch {
-          // ignore
-        }
+      try {
+        const results = await invoke<Array<{ port: number; ownership: 'free' | 'own' | 'external' | 'unknown' }>>('check_port_status', { ports });
+        if (cancelled) return;
+        const statuses = Object.fromEntries(results.map(({ port, ownership }) => [port, ownership]));
+        setPortStatuses(statuses);
+        setConflictingPorts(results.filter(({ ownership }) => ownership === 'external').map(({ port }) => port));
+      } catch {
+        if (cancelled) return;
+        setPortStatuses(Object.fromEntries(ports.map((port) => [port, 'unknown' as const])));
+        setConflictingPorts([]);
       }
-      setConflictingPorts(conflicts);
     })();
-  }, [activeTab, httpPort, socksPort, mixedPort, setConflictingPorts]);
+    return () => { cancelled = true; };
+  }, [activeTab, connectionStatus, httpPort, socksPort, mixedPort, setConflictingPorts, setPortStatuses]);
 
   // ── TRAFFIC & STATUS POLLING ───────────────────────────────────────────────
   useEffect(() => {
@@ -218,11 +235,13 @@ export default function App() {
           mixedPort: number;
           tunEnabled: boolean;
           uptime: number;
+          effectiveProxyMode: 'tun' | 'system' | null;
         }>('get_proxy_status');
         
         const active = status.status === 'connected';
         setIsConnected(active);
         setConnectionStatus(status.status);
+        setEffectiveProxyMode(status.effectiveProxyMode);
         setUptime(status.uptime);
         
         if (active) {
@@ -270,7 +289,7 @@ export default function App() {
       }
     }, 1000);
     return () => clearInterval(poll);
-  }, [setIsConnected, setConnectionStatus, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
+  }, [setIsConnected, setConnectionStatus, setEffectiveProxyMode, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
 
   // Debounced window resize event listener
   useEffect(() => {

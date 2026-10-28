@@ -9,10 +9,100 @@ interface TrafficChartProps {
   history: SpeedDataPoint[];
 }
 
+interface ResolvedChartColors {
+  textLow: string;
+  borderDefault: string;
+  borderStrong: string;
+  chartDownStroke: string;
+  chartDownGlow: string;
+  chartDownFill0: string;
+  chartDownFill1: string;
+  chartUpStroke: string;
+  chartUpGlow: string;
+  chartUpFill0: string;
+  chartUpFill1: string;
+}
+
+function resolveBrowserColor(cssValue: string, fallback: string): string {
+  if (!cssValue) return fallback;
+  const trimmed = cssValue.trim();
+  if (!trimmed) return fallback;
+
+  if (typeof document !== 'undefined') {
+    try {
+      const probe = document.createElement('div');
+      probe.style.display = 'none';
+      probe.style.color = trimmed;
+      document.documentElement.appendChild(probe);
+      const computed = getComputedStyle(probe).color;
+      document.documentElement.removeChild(probe);
+      if (computed && computed !== '' && !computed.includes('var(')) {
+        return computed;
+      }
+    } catch {
+      // fallback to safe value
+    }
+  }
+
+  return trimmed.includes('var(') ? fallback : trimmed;
+}
+
+function readThemeColors(): ResolvedChartColors {
+  if (typeof document === 'undefined') {
+    return {
+      textLow: '#71717a',
+      borderDefault: 'rgba(255, 255, 255, 0.08)',
+      borderStrong: 'rgba(255, 255, 255, 0.15)',
+      chartDownStroke: '#ffffff',
+      chartDownGlow: 'rgba(255, 255, 255, 0.35)',
+      chartDownFill0: 'rgba(255, 255, 255, 0.15)',
+      chartDownFill1: 'rgba(255, 255, 255, 0)',
+      chartUpStroke: '#a1a1aa',
+      chartUpGlow: 'rgba(161, 161, 170, 0.2)',
+      chartUpFill0: 'rgba(161, 161, 170, 0.08)',
+      chartUpFill1: 'rgba(161, 161, 170, 0)',
+    };
+  }
+
+  const isDark = document.documentElement.classList.contains('dark') ||
+    document.documentElement.getAttribute('data-theme') === 'dark';
+
+  const defaultBorder = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)';
+  const defaultBorderStrong = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)';
+  const defaultTextLow = isDark ? '#71717a' : '#71717a';
+
+  const defaultDownStroke = isDark ? '#ffffff' : '#18181b';
+  const defaultDownGlow = isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.2)';
+  const defaultDownFill0 = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.08)';
+  const defaultDownFill1 = 'rgba(0, 0, 0, 0)';
+
+  const defaultUpStroke = isDark ? '#a1a1aa' : '#71717a';
+  const defaultUpGlow = isDark ? 'rgba(161, 161, 170, 0.2)' : 'rgba(0, 0, 0, 0.12)';
+  const defaultUpFill0 = isDark ? 'rgba(161, 161, 170, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+  const defaultUpFill1 = 'rgba(0, 0, 0, 0)';
+
+  const rootStyle = getComputedStyle(document.documentElement);
+
+  return {
+    textLow: resolveBrowserColor(rootStyle.getPropertyValue('--text-low'), defaultTextLow),
+    borderDefault: resolveBrowserColor(rootStyle.getPropertyValue('--border-default') || rootStyle.getPropertyValue('--border'), defaultBorder),
+    borderStrong: resolveBrowserColor(rootStyle.getPropertyValue('--border-strong'), defaultBorderStrong),
+    chartDownStroke: resolveBrowserColor(rootStyle.getPropertyValue('--chart-down-stroke') || rootStyle.getPropertyValue('--chart-download'), defaultDownStroke),
+    chartDownGlow: resolveBrowserColor(rootStyle.getPropertyValue('--chart-down-glow'), defaultDownGlow),
+    chartDownFill0: resolveBrowserColor(rootStyle.getPropertyValue('--chart-down-fill-0'), defaultDownFill0),
+    chartDownFill1: resolveBrowserColor(rootStyle.getPropertyValue('--chart-down-fill-1'), defaultDownFill1),
+    chartUpStroke: resolveBrowserColor(rootStyle.getPropertyValue('--chart-up-stroke') || rootStyle.getPropertyValue('--chart-upload'), defaultUpStroke),
+    chartUpGlow: resolveBrowserColor(rootStyle.getPropertyValue('--chart-up-glow'), defaultUpGlow),
+    chartUpFill0: resolveBrowserColor(rootStyle.getPropertyValue('--chart-up-fill-0'), defaultUpFill0),
+    chartUpFill1: resolveBrowserColor(rootStyle.getPropertyValue('--chart-up-fill-1'), defaultUpFill1),
+  };
+}
+
 export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [colors, setColors] = useState<ResolvedChartColors>(readThemeColors);
 
   // Helper to format speed to human readable format (e.g. 1.2 MB/s, 450 KB/s)
   const formatSpeed = (bytesPerSec: number): string => {
@@ -40,6 +130,37 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     };
   }, []);
 
+  // Update theme colors when theme changes without re-reading per traffic sample
+  useEffect(() => {
+    const updateColors = () => {
+      setColors(readThemeColors());
+    };
+
+    updateColors();
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && (m.attributeName === 'class' || m.attributeName === 'data-theme')) {
+          updateColors();
+          break;
+        }
+      }
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme'],
+    });
+
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    mql.addEventListener('change', updateColors);
+
+    return () => {
+      observer.disconnect();
+      mql.removeEventListener('change', updateColors);
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || dimensions.width === 0 || dimensions.height === 0) return;
@@ -59,22 +180,20 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
-    // Retrieve theme colors dynamically
-    const style = getComputedStyle(document.documentElement);
-    const textLow = style.getPropertyValue('--text-low').trim() || '#52525b';
-    const borderDefault = style.getPropertyValue('--border-default').trim() || 'rgba(255, 255, 255, 0.08)';
-    const borderStrong = style.getPropertyValue('--border-strong').trim() || 'rgba(255, 255, 255, 0.15)';
- 
-    const chartDownStroke = style.getPropertyValue('--chart-download').trim() || style.getPropertyValue('--chart-down-stroke').trim() || '#ffffff';
-    const chartDownGlow = style.getPropertyValue('--chart-down-glow').trim() || 'rgba(255, 255, 255, 0.2)';
-    const chartDownFill0 = style.getPropertyValue('--chart-down-fill-0').trim() || 'rgba(255, 255, 255, 0.15)';
-    const chartDownFill1 = style.getPropertyValue('--chart-down-fill-1').trim() || 'rgba(255, 255, 255, 0)';
- 
-    const chartUpStroke = style.getPropertyValue('--chart-upload').trim() || style.getPropertyValue('--chart-up-stroke').trim() || '#a1a1aa';
-    const chartUpGlow = style.getPropertyValue('--chart-up-glow').trim() || 'rgba(161, 161, 170, 0.15)';
-    const chartUpFill0 = style.getPropertyValue('--chart-up-fill-0').trim() || 'rgba(161, 161, 170, 0.08)';
-    const chartUpFill1 = style.getPropertyValue('--chart-up-fill-1').trim() || 'rgba(161, 161, 170, 0)';
- 
+    const {
+      textLow,
+      borderDefault,
+      borderStrong,
+      chartDownStroke,
+      chartDownGlow,
+      chartDownFill0,
+      chartDownFill1,
+      chartUpStroke,
+      chartUpGlow,
+      chartUpFill0,
+      chartUpFill1,
+    } = colors;
+
     // Calculate maximum speed in the history to scale the Y-axis
     let maxSpeed = 1024 * 100; // Minimum scale of 100 KB/s
     if (history.length > 0) {
@@ -247,7 +366,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     ctx.textAlign = 'right';
     ctx.fillText('Live', width - padding.right, padding.top + chartHeight + 6);
 
-  }, [history, dimensions]);
+  }, [history, dimensions, colors]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>

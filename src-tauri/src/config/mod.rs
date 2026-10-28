@@ -1,11 +1,10 @@
 use serde_json::Value;
 use std::net::IpAddr;
-#[cfg(target_os = "windows")]
-use std::process::Command;
 
 pub mod adapters;
 pub mod generator;
 pub mod rules;
+pub mod subscription;
 pub mod validator;
 
 pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -> Vec<String> {
@@ -233,6 +232,7 @@ pub fn resolve_dns_address(configured: Option<&str>) -> String {
     "1.1.1.1".to_string()
 }
 
+#[cfg(not(target_os = "windows"))]
 fn extract_ip_from_line(line: &str) -> Option<String> {
     for token in line.split(|c: char| c.is_whitespace() || c == ':' || c == ',') {
         let cleaned = token.trim();
@@ -247,126 +247,214 @@ fn extract_ip_from_line(line: &str) -> Option<String> {
     None
 }
 
-#[cfg(target_os = "windows")]
-fn get_system_dns_address() -> Option<String> {
-    use std::os::windows::process::CommandExt;
-    let output = Command::new("ipconfig")
-        .arg("/all")
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+/// Internal adapter representation used to select an operational physical/default DNS adapter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DetectedAdapter {
+    pub name: String,
+    pub description: String,
+    pub is_physical: bool,
+    pub is_operational: bool,
+    pub has_ipv4_gateway: bool,
+    pub has_ipv6_gateway: bool,
+    pub dns_servers: Vec<IpAddr>,
+}
 
-    struct AdapterInfo {
-        _name: String,
-        is_virtual: bool,
-        dns_servers: Vec<String>,
-        has_gateway: bool,
-    }
-
-    let mut adapters = Vec::new();
-    let mut current_adapter: Option<AdapterInfo> = None;
-    let mut in_dns_block = false;
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // A line starting with no whitespace indicates the start of a new section/adapter
-        if !line.starts_with(' ') && !line.starts_with('\t') {
-            if let Some(adapter) = current_adapter.take() {
-                adapters.push(adapter);
+/// Selects the best DNS server address from a list of detected network adapters.
+///
+/// Priority:
+/// 1. Operational, physical adapter with default gateway (IPv4 or IPv6) and valid non-excluded DNS.
+/// 2. Operational, physical adapter with valid non-excluded DNS.
+/// 3. Any operational adapter with default gateway and valid non-excluded DNS.
+/// 4. Any operational adapter with valid non-excluded DNS.
+/// 5. None (fallback).
+pub fn select_best_dns_server(adapters: &[DetectedAdapter]) -> Option<IpAddr> {
+    fn is_tun_or_xlink_ip(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => {
+                // Sing-box TUN default FakeIP / internal DNS addresses
+                *v4 == std::net::Ipv4Addr::new(172, 19, 0, 2)
             }
-            in_dns_block = false;
-            let section_name = trimmed.trim_end_matches(':').to_string();
-            current_adapter = Some(AdapterInfo {
-                _name: section_name,
-                is_virtual: false,
-                dns_servers: Vec::new(),
-                has_gateway: false,
-            });
-            continue;
-        }
-
-        if let Some(ref mut adapter) = current_adapter {
-            if line.contains("Description") {
-                if let Some(desc) = line.split(':').nth(1) {
-                    let desc_trimmed = desc.trim().to_string();
-                    let desc_lower = desc_trimmed.to_lowercase();
-                    // Identify virtual/TAP adapters
-                    if desc_lower.contains("tap")
-                        || desc_lower.contains("virtual")
-                        || desc_lower.contains("vpn")
-                        || desc_lower.contains("vmware")
-                        || desc_lower.contains("virtualbox")
-                        || desc_lower.contains("hyper-v")
-                        || desc_lower.contains("loopback")
-                        || desc_lower.contains("pseudo")
-                    {
-                        adapter.is_virtual = true;
-                    }
-                }
-            } else if line.contains("Default Gateway") {
-                if let Some(gw) = line.split(':').nth(1) {
-                    let gw_trimmed = gw.trim();
-                    if !gw_trimmed.is_empty() && gw_trimmed != "0.0.0.0" {
-                        adapter.has_gateway = true;
-                    }
-                }
-            } else if line.contains("DNS Servers") {
-                in_dns_block = true;
-                if let Some(ip) = extract_ip_from_line(line) {
-                    if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
-                        adapter.dns_servers.push(ip);
-                    }
-                }
-            } else if in_dns_block {
-                if let Some(ip) = extract_ip_from_line(line) {
-                    if ip != "172.19.0.2" && ip != "fdfe:dcba:9876::2" {
-                        adapter.dns_servers.push(ip);
-                    }
-                } else {
-                    in_dns_block = false;
-                }
+            IpAddr::V6(v6) => {
+                // Sing-box TUN IPv6 internal DNS address
+                *v6 == "fdfe:dcba:9876::2".parse::<std::net::Ipv6Addr>().unwrap()
             }
         }
     }
 
-    if let Some(adapter) = current_adapter {
-        adapters.push(adapter);
+    fn is_valid_dns(ip: &IpAddr) -> bool {
+        !ip.is_loopback() && !ip.is_unspecified() && !is_tun_or_xlink_ip(ip)
     }
 
-    // Prioritize non-virtual adapters with default gateways
-    for adapter in &adapters {
-        if !adapter.is_virtual && adapter.has_gateway && !adapter.dns_servers.is_empty() {
-            return Some(adapter.dns_servers[0].clone());
+    fn is_xlink_or_tun_adapter(adapter: &DetectedAdapter) -> bool {
+        let name_lower = adapter.name.to_lowercase();
+        let desc_lower = adapter.description.to_lowercase();
+        name_lower.contains("x-link")
+            || name_lower.contains("sing-box")
+            || desc_lower.contains("wintun")
+            || desc_lower.contains("tap-windows")
+    }
+
+    let operational: Vec<&DetectedAdapter> = adapters
+        .iter()
+        .filter(|a| a.is_operational && !is_xlink_or_tun_adapter(a))
+        .collect();
+
+    // 1. Physical adapter with default gateway
+    for a in &operational {
+        if a.is_physical && (a.has_ipv4_gateway || a.has_ipv6_gateway) {
+            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
+                return Some(*dns);
+            }
         }
     }
 
-    // Prioritize non-virtual adapters with DNS servers
-    for adapter in &adapters {
-        if !adapter.is_virtual && !adapter.dns_servers.is_empty() {
-            return Some(adapter.dns_servers[0].clone());
+    // 2. Physical adapter without gateway
+    for a in &operational {
+        if a.is_physical {
+            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
+                return Some(*dns);
+            }
         }
     }
 
-    // Prioritize virtual adapters with default gateways
-    for adapter in &adapters {
-        if adapter.is_virtual && adapter.has_gateway && !adapter.dns_servers.is_empty() {
-            return Some(adapter.dns_servers[0].clone());
+    // 3. Any operational adapter with gateway
+    for a in &operational {
+        if a.has_ipv4_gateway || a.has_ipv6_gateway {
+            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
+                return Some(*dns);
+            }
         }
     }
 
-    // Fallback to any adapter with DNS servers
-    for adapter in &adapters {
-        if !adapter.dns_servers.is_empty() {
-            return Some(adapter.dns_servers[0].clone());
+    // 4. Any operational adapter with DNS
+    for a in &operational {
+        if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
+            return Some(*dns);
         }
     }
 
     None
+}
+
+#[cfg(target_os = "windows")]
+fn get_system_dns_address() -> Option<String> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use windows::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
+        GAA_FLAG_SKIP_MULTICAST, IP_ADAPTER_ADDRESSES_LH,
+    };
+    use windows::Win32::Networking::WinSock::{
+        AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
+    };
+
+    unsafe {
+        let flags = GAA_FLAG_INCLUDE_GATEWAYS | GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST;
+        let mut buf_len: u32 = 16384;
+        let mut buffer: Vec<u8> = vec![0u8; buf_len as usize];
+
+        let mut ret = GetAdaptersAddresses(
+            AF_UNSPEC.0 as u32,
+            flags,
+            None,
+            Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH),
+            &mut buf_len,
+        );
+
+        if ret == ERROR_BUFFER_OVERFLOW.0 {
+            buffer.resize(buf_len as usize, 0);
+            ret = GetAdaptersAddresses(
+                AF_UNSPEC.0 as u32,
+                flags,
+                None,
+                Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH),
+                &mut buf_len,
+            );
+        }
+
+        if ret != 0 {
+            return None;
+        }
+
+        let mut adapters = Vec::new();
+        let mut curr_ptr = buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
+
+        while !curr_ptr.is_null() {
+            let entry = &*curr_ptr;
+
+            let name = if !entry.AdapterName.0.is_null() {
+                windows::core::PCSTR(entry.AdapterName.0)
+                    .to_string()
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let description = if !entry.Description.0.is_null() {
+                entry.Description.to_string().unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let if_type = entry.IfType;
+            // IF_TYPE_ETHERNET_CSMACD = 6, IF_TYPE_IEEE80211 = 71
+            let is_physical = if_type == 6 || if_type == 71;
+
+            // IfOperStatusUp = 1
+            let is_operational = entry.OperStatus.0 == 1;
+
+            let mut has_ipv4_gateway = false;
+            let mut has_ipv6_gateway = false;
+            let mut gw_ptr = entry.FirstGatewayAddress;
+            while !gw_ptr.is_null() {
+                let gw_entry = &*gw_ptr;
+                let sock_ptr = gw_entry.Address.lpSockaddr;
+                if !sock_ptr.is_null() {
+                    let family = (*sock_ptr).sa_family;
+                    if family == AF_INET {
+                        has_ipv4_gateway = true;
+                    } else if family == AF_INET6 {
+                        has_ipv6_gateway = true;
+                    }
+                }
+                gw_ptr = gw_entry.Next;
+            }
+
+            let mut dns_servers = Vec::new();
+            let mut dns_ptr = entry.FirstDnsServerAddress;
+            while !dns_ptr.is_null() {
+                let dns_entry = &*dns_ptr;
+                let sock_ptr = dns_entry.Address.lpSockaddr;
+                if !sock_ptr.is_null() {
+                    let family = (*sock_ptr).sa_family;
+                    if family == AF_INET {
+                        let sin = &*(sock_ptr as *const SOCKADDR_IN);
+                        let ip_bytes = sin.sin_addr.S_un.S_addr.to_ne_bytes();
+                        dns_servers.push(IpAddr::V4(Ipv4Addr::from(ip_bytes)));
+                    } else if family == AF_INET6 {
+                        let sin6 = &*(sock_ptr as *const SOCKADDR_IN6);
+                        let ip_bytes = sin6.sin6_addr.u.Byte;
+                        dns_servers.push(IpAddr::V6(Ipv6Addr::from(ip_bytes)));
+                    }
+                }
+                dns_ptr = dns_entry.Next;
+            }
+
+            adapters.push(DetectedAdapter {
+                name,
+                description,
+                is_physical,
+                is_operational,
+                has_ipv4_gateway,
+                has_ipv6_gateway,
+                dns_servers,
+            });
+
+            curr_ptr = entry.Next;
+        }
+
+        select_best_dns_server(&adapters).map(|ip| ip.to_string())
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -511,5 +599,147 @@ mod tests {
                 .unwrap_or(false)
         });
         assert!(auto_ruleset_rule.is_none());
+    }
+
+    #[test]
+    fn test_select_best_dns_server_physical_with_gateway_preferred() {
+        use std::net::Ipv4Addr;
+
+        let adapters = vec![
+            DetectedAdapter {
+                name: "VirtualBox Host-Only Ethernet Adapter".to_string(),
+                description: "VirtualBox Host-Only Ethernet Adapter".to_string(),
+                is_physical: false,
+                is_operational: true,
+                has_ipv4_gateway: false,
+                has_ipv6_gateway: false,
+                dns_servers: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 56, 1))],
+            },
+            DetectedAdapter {
+                name: "Wi-Fi".to_string(),
+                description: "Intel(R) Wi-Fi 6 AX200 160MHz".to_string(),
+                is_physical: true,
+                is_operational: true,
+                has_ipv4_gateway: true,
+                has_ipv6_gateway: false,
+                dns_servers: vec![
+                    IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+                    IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+                ],
+            },
+        ];
+
+        let selected = select_best_dns_server(&adapters);
+        assert_eq!(selected, Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn test_select_best_dns_server_skips_disconnected_and_tun() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+
+        let adapters = vec![
+            // Operational TUN adapter (wintun / X-Link) with sing-box internal DNS
+            DetectedAdapter {
+                name: "x-link-tun".to_string(),
+                description: "Wintun Userspace Tunnel".to_string(),
+                is_physical: false,
+                is_operational: true,
+                has_ipv4_gateway: true,
+                has_ipv6_gateway: false,
+                dns_servers: vec![
+                    IpAddr::V4(Ipv4Addr::new(172, 19, 0, 2)),
+                    IpAddr::V6("fdfe:dcba:9876::2".parse::<Ipv6Addr>().unwrap()),
+                ],
+            },
+            // Physical but disconnected (not operational)
+            DetectedAdapter {
+                name: "Ethernet".to_string(),
+                description: "Realtek PCIe GbE Family Controller".to_string(),
+                is_physical: true,
+                is_operational: false,
+                has_ipv4_gateway: true,
+                has_ipv6_gateway: false,
+                dns_servers: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))],
+            },
+            // Operational physical Wi-Fi with valid DNS
+            DetectedAdapter {
+                name: "Wi-Fi".to_string(),
+                description: "Qualcomm Wi-Fi Adapter".to_string(),
+                is_physical: true,
+                is_operational: true,
+                has_ipv4_gateway: true,
+                has_ipv6_gateway: false,
+                dns_servers: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))],
+            },
+        ];
+
+        let selected = select_best_dns_server(&adapters);
+        assert_eq!(selected, Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1))));
+    }
+
+    #[test]
+    fn test_select_best_dns_server_ipv6_dns() {
+        use std::net::Ipv6Addr;
+
+        let adapters = vec![DetectedAdapter {
+            name: "Ethernet".to_string(),
+            description: "Intel Gigabit Ethernet".to_string(),
+            is_physical: true,
+            is_operational: true,
+            has_ipv4_gateway: false,
+            has_ipv6_gateway: true,
+            dns_servers: vec![IpAddr::V6(
+                "2001:4860:4860::8888".parse::<Ipv6Addr>().unwrap(),
+            )],
+        }];
+
+        let selected = select_best_dns_server(&adapters);
+        assert_eq!(
+            selected,
+            Some(IpAddr::V6(
+                "2001:4860:4860::8888".parse::<Ipv6Addr>().unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_select_best_dns_server_no_usable_dns() {
+        use std::net::Ipv4Addr;
+
+        let adapters = vec![DetectedAdapter {
+            name: "Loopback".to_string(),
+            description: "Loopback Adapter".to_string(),
+            is_physical: false,
+            is_operational: true,
+            has_ipv4_gateway: false,
+            has_ipv6_gateway: false,
+            dns_servers: vec![
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            ],
+        }];
+
+        assert_eq!(select_best_dns_server(&adapters), None);
+    }
+
+    #[test]
+    fn test_resolve_dns_address_preserves_explicit_preference() {
+        assert_eq!(resolve_dns_address(Some("8.8.4.4")), "8.8.4.4");
+        assert_eq!(resolve_dns_address(Some("  1.1.1.2  ")), "1.1.1.2");
+    }
+
+    #[test]
+    fn test_build_route_exclude_addresses_includes_local_dns() {
+        let excludes = build_route_exclude_addresses("192.168.1.1", &[]);
+        assert!(
+            excludes.contains(&"192.168.1.1/32".to_string()),
+            "Excludes must contain detected /32 IPv4 DNS"
+        );
+
+        let excludes_v6 = build_route_exclude_addresses("2001:db8::53", &[]);
+        assert!(
+            excludes_v6.contains(&"2001:db8::53/128".to_string()),
+            "Excludes must contain detected /128 IPv6 DNS"
+        );
     }
 }

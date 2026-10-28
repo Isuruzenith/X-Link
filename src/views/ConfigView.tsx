@@ -40,6 +40,8 @@ function ProfileHeaderCard({
   isConnected,
   nodeGeoCache,
   latencyResults,
+  onRefresh,
+  isRefreshing,
 }: {
   selectedProfile: Profile;
   activeProfileId: string | null;
@@ -48,6 +50,8 @@ function ProfileHeaderCard({
   isConnected: boolean;
   nodeGeoCache: Record<string, GeoCacheEntry | 'loading'>;
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
 }) {
   const activeNode = selectedNodeTag ? nodes.find((n: ProxyNode) => n.tag === selectedNodeTag) : null;
   const geo = activeNode ? nodeGeoCache[activeNode.server] : null;
@@ -63,22 +67,38 @@ function ProfileHeaderCard({
   return (
     <Card className="p-4 bg-muted/40 border-border mb-4 shrink-0 shadow-none">
       {/* Top row: Profile name + badges */}
-      <div className={activeNode ? 'mb-3' : 'mb-0'}>
-        <h2 className="text-base font-bold text-foreground mb-1.5">
-          {selectedProfile.name}
-        </h2>
-        <div className="flex gap-1.5 flex-wrap">
-          <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-muted-foreground">
-            <Zap className="size-2.5" />
-            <span>{selectedProfile.nodeCount} Nodes</span>
-          </Badge>
-          {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
-            <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-foreground">
-              <Link2 className="size-2.5" />
-              <span>Subscription</span>
+      <div className={`flex justify-between items-start ${activeNode ? 'mb-3' : 'mb-0'}`}>
+        <div>
+          <h2 className="text-base font-bold text-foreground mb-1.5">
+            {selectedProfile.name}
+          </h2>
+          <div className="flex gap-1.5 flex-wrap">
+            <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-muted-foreground">
+              <Zap className="size-2.5" />
+              <span>{selectedProfile.nodeCount} Nodes</span>
             </Badge>
-          )}
+            {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
+              <Badge variant="outline" className="h-5 px-2 text-[10px] font-medium border-border/80 bg-background/50 gap-1 text-foreground">
+                <Link2 className="size-2.5" />
+                <span>Subscription</span>
+              </Badge>
+            )}
+          </div>
         </div>
+
+        {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && onRefresh && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1 px-2.5 text-[10.5px] shrink-0"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+            title="Refresh subscription in-place"
+          >
+            <RefreshCw className={cn("size-3", isRefreshing && "animate-spin")} />
+            <span>{isRefreshing ? 'Refreshing…' : 'Refresh'}</span>
+          </Button>
+        )}
       </div>
 
       {/* Active server details strip */}
@@ -254,6 +274,8 @@ export function ConfigView() {
     deleteProfile,
     testAllNodes,
     selectProfile,
+    refreshSubscription,
+    refreshingProfileId,
     nodeGeoCache,
     activatingNodeTag,
   } = useProfileStore();
@@ -443,6 +465,21 @@ export function ConfigView() {
                         {!isSelected && !isActive && (
                           <ArrowRight className="size-3.5 text-muted-foreground/60" />
                         )}
+                        {profile.type === 'subscription' && profile.subscriptionUrl && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-7 text-muted-foreground hover:text-foreground rounded"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              refreshSubscription(profile.id);
+                            }}
+                            disabled={refreshingProfileId === profile.id}
+                            title="Refresh subscription"
+                          >
+                            <RefreshCw className={cn("size-3.5", refreshingProfileId === profile.id && "animate-spin")} />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -496,6 +533,8 @@ export function ConfigView() {
                 isConnected={isConnected}
                 nodeGeoCache={nodeGeoCache}
                 latencyResults={latencyResults}
+                onRefresh={() => refreshSubscription(selectedProfile.id)}
+                isRefreshing={refreshingProfileId === selectedProfile.id}
               />
 
               <div className="flex justify-between items-center mb-3 shrink-0 px-0.5">

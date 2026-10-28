@@ -44,12 +44,16 @@ interface ProfileState {
   latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
   isTestingLatency: boolean;
 
+  // Subscription refresh state
+  refreshingProfileId: string | null;
+
   // Computed getters
   activeProfile: () => Profile | null;
 
   // Actions
   initProfiles: () => Promise<void>;
   refreshNodes: (profileId?: string) => Promise<void>;
+  syncNodeFromTray: (profileId: string, tag: string) => Promise<void>;
   selectNode: (node: { tag: string }) => Promise<void>;
   setImportName: (name: string) => void;
   setImportContent: (content: string) => void;
@@ -62,7 +66,9 @@ interface ProfileState {
   testAllNodes: () => Promise<void>;
   updateNodesList: (newNodes: ProxyNode[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
+  refreshSubscription: (profileId: string) => Promise<void>;
   fetchNodeGeo: (server: string, tag: string) => Promise<void>;
+  clearNodeGeoCache: () => void;
 }
 
 const detectNameFromContent = (text: string): string => {
@@ -175,6 +181,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   isImporting: false,
   latencyResults: {},
   isTestingLatency: false,
+  refreshingProfileId: null,
 
   activeProfile: () => {
     const { profiles, activeProfileId } = get();
@@ -231,6 +238,20 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     } catch {
       set({ nodes: [] });
     }
+  },
+
+  syncNodeFromTray: async (profileId, tag) => {
+    const { activeProfileId, profiles } = get();
+    if (profileId !== activeProfileId) return;
+
+    const nodes = await invoke<ProxyNode[]>('get_profile_outbounds', { profileId });
+    if (!nodes.some((node) => node.tag === tag)) return;
+
+    const updatedProfiles = profiles.map((profile) =>
+      profile.id === profileId ? { ...profile, selectedNodeTag: tag } : profile
+    );
+    await storeHelper.saveProfiles(updatedProfiles);
+    set({ profiles: updatedProfiles, nodes, selectedNodeTag: tag });
   },
 
   selectNode: async (node) => {
@@ -411,51 +432,76 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const logStore = useLogStore.getState();
     const connectionStore = useConnectionStore.getState();
     const { profiles, activeProfileId } = get();
+    let metadataChanged = false;
+    let switchedToNext = false;
 
     const profile = profiles.find((p) => p.id === profileId);
     if (!profile) return;
 
-    // If deleting the active profile while connected, disconnect first
-    if (profileId === activeProfileId && connectionStore.isConnected) {
-      try {
-        await invoke('toggle_proxy', { enable: false });
-      } catch { /* ignore disconnect errors */ }
-    }
-
-    // Remove from backend
-    try {
-      await invoke('delete_profile_config', { profileId });
-    } catch { /* ignore if file doesn't exist */ }
-
-    // Remove from store
-    await storeHelper.deleteProfile(profileId);
     const updatedProfiles = profiles.filter((p) => p.id !== profileId);
+    const newActiveId = profileId === activeProfileId ? (updatedProfiles[0]?.id ?? null) : activeProfileId;
+    const newSelectedId = get().selectedProfileId === profileId ? newActiveId : get().selectedProfileId;
 
-    const newActiveId = profileId === activeProfileId
-      ? (updatedProfiles.length > 0 ? updatedProfiles[0].id : null)
-      : activeProfileId;
+    try {
+      if (profileId === activeProfileId) {
+        const current = await invoke<{ status: string }>('get_proxy_status');
+        if (current.status !== 'disconnected') {
+          await invoke<string>('toggle_proxy', { start: false, selectedOutboundTag: null });
+        }
+        const status = await invoke<{ status: string }>('get_proxy_status');
+        if (status.status !== 'disconnected') throw new Error('The proxy is still running.');
+        connectionStore.setIsConnected(false);
+        connectionStore.setConnectionStatus('disconnected');
+      }
 
-    const { selectedProfileId } = get();
-    const newSelectedId = profileId === selectedProfileId
-      ? newActiveId
-      : selectedProfileId;
+      // Persist the frontend metadata before deleting the native config; restore it if either
+      // native operation fails so the UI never claims a profile was removed prematurely.
+      metadataChanged = true;
+      await storeHelper.deleteProfile(profileId);
 
-    set({ profiles: updatedProfiles, activeProfileId: newActiveId, selectedProfileId: newSelectedId });
+      if (profileId === activeProfileId && newActiveId) {
+        const nextProfile = updatedProfiles.find((p) => p.id === newActiveId);
+        await invoke('switch_profile', { profileId: newActiveId, selectedNodeTag: nextProfile?.selectedNodeTag ?? null });
+        switchedToNext = true;
+      }
+      await invoke('delete_profile_config', { profileId });
 
-    // If we switched to a new active profile, load its nodes
-    if (newActiveId && newActiveId !== activeProfileId) {
+      set({ profiles: updatedProfiles, activeProfileId: newActiveId, selectedProfileId: newSelectedId });
+      if (newSelectedId) {
+        await get().refreshNodes(newSelectedId);
+      } else {
+        set({ nodes: [], selectedNodeTag: null });
+      }
+      logStore.pushSystemLog(`Profile "${profile.name}" deleted.`);
+    } catch (err) {
+      const rollbackErrors: string[] = [];
+      if (metadataChanged) {
+        try {
+          await storeHelper.saveProfiles(profiles);
+          await storeHelper.setActiveProfileId(activeProfileId);
+        } catch (rollbackError) {
+          rollbackErrors.push(`metadata restore failed: ${rollbackError}`);
+        }
+      }
+      if (switchedToNext) {
+        try {
+          await invoke('switch_profile', {
+            profileId,
+            selectedNodeTag: profile.selectedNodeTag,
+          });
+        } catch (rollbackError) {
+          rollbackErrors.push(`active config restore failed: ${rollbackError}`);
+        }
+      }
+      const detail = rollbackErrors.length ? `${err}; ${rollbackErrors.join('; ')}` : String(err);
+      logStore.pushSystemLog(`Failed to delete profile "${profile.name}": ${detail}`);
+      useToastStore.getState().addToast('error', 'Could not safely delete the profile. Check the connection and try again.', 'Delete Failed');
       try {
-        await invoke('switch_profile', { profileId: newActiveId });
-      } catch { /* ignore */ }
+        const status = await invoke<{ status: 'connected' | 'connecting' | 'disconnected' }>('get_proxy_status');
+        connectionStore.setConnectionStatus(status.status);
+        connectionStore.setIsConnected(status.status === 'connected');
+      } catch { /* retain the last known status */ }
     }
-
-    if (newSelectedId) {
-      await get().refreshNodes(newSelectedId);
-    } else {
-      set({ nodes: [], selectedNodeTag: null });
-    }
-
-    logStore.pushSystemLog(`Profile "${profile.name}" deleted.`);
   },
 
   switchProfile: async (profileId) => {
@@ -523,9 +569,9 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     }));
 
     try {
-      const res = await fetch(`https://freeipapi.com/api/json/${server}`);
-      if (!res.ok) throw new Error('API failed');
-      const data = await res.json();
+      if (!useSettingsStore.getState().settings.geoLookupEnabled) throw new Error('Geo lookup disabled');
+      if (server !== server.trim() || server.includes('%')) throw new Error('Only literal public IP addresses can be looked up');
+      const data = await invoke<GeoCacheEntry>('lookup_node_geo', { server });
       if (data && data.countryCode && data.countryCode.length === 2) {
         const code = data.countryCode.toLowerCase();
         set((state) => ({
@@ -556,6 +602,50 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
           }
         }
       }));
+    }
+  },
+
+  clearNodeGeoCache: () => set({ nodeGeoCache: {} }),
+
+  refreshSubscription: async (profileId: string) => {
+    const { refreshingProfileId, profiles, selectedProfileId, activeProfileId } = get();
+    if (refreshingProfileId) return; // Prevent double invocation
+
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+    if (profile.type !== 'subscription' || !profile.subscriptionUrl) {
+      useToastStore.getState().addToast('warning', 'Only subscription profiles can be refreshed.', 'Cannot Refresh');
+      return;
+    }
+
+    set({ refreshingProfileId: profileId });
+    const logStore = useLogStore.getState();
+    logStore.pushSystemLog(`Refreshing subscription for "${profile.name}"...`);
+
+    try {
+      const result = await invoke<ImportResult>('refresh_subscription', { profileId });
+
+      // Native refresh writes profiles.json; reload the plugin's cached store before reading it.
+      const updatedProfiles = await storeHelper.reloadProfiles();
+      set({ profiles: updatedProfiles });
+
+      logStore.pushSystemLog(`Subscription "${result.name}" refreshed successfully with ${result.nodeCount} nodes.`);
+      useToastStore.getState().addToast(
+        'success',
+        `"${result.name}" updated with ${result.nodeCount} nodes.`,
+        'Subscription Refreshed'
+      );
+
+      // If the refreshed profile is currently selected in the UI, refresh nodes view
+      if (selectedProfileId === profileId || activeProfileId === profileId) {
+        await get().refreshNodes(profileId);
+      }
+    } catch (err) {
+      const errMsg = mapImportError(String(err));
+      logStore.pushSystemLog(`Subscription refresh failed for "${profile.name}": ${errMsg}`);
+      useToastStore.getState().addToast('error', errMsg, 'Refresh Failed');
+    } finally {
+      set({ refreshingProfileId: null });
     }
   },
 }));

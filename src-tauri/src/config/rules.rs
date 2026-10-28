@@ -56,10 +56,10 @@ pub fn build_singbox_rule(
 ) -> Option<Value> {
     let outbound = map_outbound_action(&rule.outbound);
     let invert = rule.invert;
- 
+
     let mut value = rule.value.clone();
     let mut rule_type = rule.rule_type.as_str();
- 
+
     // Self-heal: Parse Clash-like or prefix-based routing values (e.g. domain:google.com, geosite:google)
     if value.starts_with("domain:") {
         value = value.strip_prefix("domain:").unwrap().to_string();
@@ -83,7 +83,7 @@ pub fn build_singbox_rule(
         value = value.strip_prefix("ip:").unwrap().to_string();
         rule_type = "ip_cidr";
     }
- 
+
     let mut obj = match rule_type {
         "domain" => serde_json::json!({ "domain":         [value], "outbound": outbound }),
         "domain_suffix" => {

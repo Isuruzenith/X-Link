@@ -202,10 +202,10 @@ async fn handle_toggle_proxy(app: AppHandle) -> Result<(), String> {
     let status = state.get_status();
 
     if status != crate::state::ConnectionStatus::Disconnected {
-        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, None).await?;
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, None, None).await?;
     } else {
         let selected_tag = crate::commands::config::get_selected_outbound_tag(&app);
-        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, selected_tag)
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), true, selected_tag, None)
             .await?;
     }
 
@@ -338,14 +338,29 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let state = app_handle.state::<crate::state::ProxyState>();
-                    let _ = crate::commands::proxy::switch_node_hot(
+                    match crate::commands::proxy::switch_node_hot(
                         app_handle.clone(),
                         state.clone(),
-                        node_tag,
+                        node_tag.clone(),
                     )
-                    .await;
-                    update_tray(&app_handle);
-                    let _ = app_handle.emit("node-switched", ());
+                    .await
+                    {
+                        Ok(()) => {
+                            update_tray(&app_handle);
+                            if let Ok(Some(profile_id)) =
+                                crate::commands::config::get_active_profile_id(&app_handle)
+                            {
+                                let _ = app_handle.emit(
+                                    "node-switched",
+                                    serde_json::json!({ "profileId": profile_id, "tag": node_tag }),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            state.push_log(format!("[System] Tray node switch failed: {}", error));
+                            update_tray(&app_handle);
+                        }
+                    }
                 });
                 return;
             }
@@ -362,21 +377,26 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                     if status != crate::state::ConnectionStatus::Disconnected {
                         let selected_tag =
                             crate::commands::config::get_selected_outbound_tag(&app_handle);
-                        let _ = crate::commands::proxy::toggle_proxy(
+                        if crate::commands::proxy::toggle_proxy(
                             app_handle.clone(),
                             state.clone(),
                             false,
                             None,
+                            None,
                         )
-                        .await;
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        let _ = crate::commands::proxy::toggle_proxy(
-                            app_handle.clone(),
-                            state.clone(),
-                            true,
-                            selected_tag,
-                        )
-                        .await;
+                        .await
+                        .is_ok()
+                        {
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            let _ = crate::commands::proxy::toggle_proxy(
+                                app_handle.clone(),
+                                state.clone(),
+                                true,
+                                selected_tag,
+                                None,
+                            )
+                            .await;
+                        }
                     }
 
                     update_tray(&app_handle);
@@ -399,24 +419,31 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                         let selected_tag =
                             crate::commands::config::get_selected_outbound_tag(&app_handle);
 
-                        // Stop the proxy
-                        let _ = crate::commands::proxy::toggle_proxy(
+                        let mode_override = state
+                            .effective_proxy_mode
+                            .lock()
+                            .ok()
+                            .and_then(|mode| mode.clone());
+                        if crate::commands::proxy::toggle_proxy(
                             app_handle.clone(),
                             state.clone(),
                             false,
                             None,
+                            None,
                         )
-                        .await;
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-                        // Start the proxy again
-                        let _ = crate::commands::proxy::toggle_proxy(
-                            app_handle.clone(),
-                            state.clone(),
-                            true,
-                            selected_tag,
-                        )
-                        .await;
+                        .await
+                        .is_ok()
+                        {
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            let _ = crate::commands::proxy::toggle_proxy(
+                                app_handle.clone(),
+                                state.clone(),
+                                true,
+                                selected_tag,
+                                mode_override,
+                            )
+                            .await;
+                        }
                         update_tray(&app_handle);
                     });
                 }

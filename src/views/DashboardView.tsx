@@ -43,6 +43,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
   const {
     isConnected,
     connectionStatus,
+    effectiveProxyMode,
     uptime,
     uploadBytes,
     downloadBytes,
@@ -143,7 +144,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
               {isConnected && (
                 <Badge variant="secondary" className="connect-mode-badge mt-2.5 flex items-center justify-center gap-1 text-2xs font-medium border border-border/40 px-2 py-0.5 leading-none">
                   <Network className="size-2.5" />
-                  <span>{settings.proxyMode === 'tun' ? 'TUN Mode' : 'System Proxy'}</span>
+                  <span>{effectiveProxyMode === 'tun' ? 'TUN Mode' : effectiveProxyMode === 'system' ? 'System Proxy' : 'Mode unknown'}</span>
                 </Badge>
               )}
             </div>

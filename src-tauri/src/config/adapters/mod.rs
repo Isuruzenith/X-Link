@@ -87,9 +87,7 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         SubscriptionFormat::ClashYaml => clash::adapt(&decoded_bytes),
         SubscriptionFormat::RawUriList => raw_uri::adapt(&decoded_bytes),
         SubscriptionFormat::Unknown => {
-            let hint = String::from_utf8_lossy(&decoded_bytes);
-            let limit = std::cmp::min(100, hint.len());
-            Err(format!("subscription_format_unknown: {}", &hint[0..limit]))
+            Err("subscription_format_unknown: Unsupported subscription format".to_string())
         }
     }
 }
@@ -97,6 +95,13 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_subscription_does_not_echo_credentials() {
+        let error = adapt("secret-token-🗝️".as_bytes()).unwrap_err();
+        assert!(error.contains("subscription_format_unknown"));
+        assert!(!error.contains("secret-token"));
+    }
 
     #[test]
     fn test_adapt_multiline_base64() {

@@ -150,6 +150,7 @@ export interface Settings {
   apiPort: number;
   apiSecret: string;
   apiCors: boolean;
+  geoLookupEnabled: boolean;
 
   // DNS
   primaryDns: string;
@@ -200,6 +201,7 @@ const DEFAULT_SETTINGS: Settings = {
   apiPort: 9090,
   apiSecret: '',
   apiCors: true,
+  geoLookupEnabled: false,
 
   primaryDns: 'https://1.1.1.1/dns-query',
   fallbackDns: 'https://8.8.8.8/dns-query',
@@ -362,14 +364,16 @@ export const storeHelper = {
     }
   },
 
+  async reloadProfiles(): Promise<Profile[]> {
+    const store = await getProfilesStore();
+    await store.reload({ ignoreDefaults: true });
+    return (await store.get<Profile[]>('profiles')) ?? [];
+  },
+
   async saveProfiles(profiles: Profile[]): Promise<void> {
-    try {
-      const store = await getProfilesStore();
-      await store.set('profiles', profiles);
-      await store.save();
-    } catch (e) {
-      console.error('Failed to save profiles:', e);
-    }
+    const store = await getProfilesStore();
+    await store.set('profiles', profiles);
+    await store.save();
   },
 
   async getActiveProfileId(): Promise<string | null> {
@@ -382,25 +386,21 @@ export const storeHelper = {
   },
 
   async setActiveProfileId(id: string | null): Promise<void> {
-    try {
-      const store = await getProfilesStore();
-      await store.set('activeProfileId', id);
-      await store.save();
-    } catch (e) {
-      console.error('Failed to set active profile ID:', e);
-    }
+    const store = await getProfilesStore();
+    await store.set('activeProfileId', id);
+    await store.save();
   },
 
   async deleteProfile(profileId: string): Promise<void> {
-    const profiles = await this.getProfiles();
+    const store = await getProfilesStore();
+    const profiles = (await store.get<Profile[]>('profiles')) ?? [];
+    const activeId = (await store.get<string>('activeProfileId')) ?? null;
     const updated = profiles.filter((p) => p.id !== profileId);
-    await this.saveProfiles(updated);
-
-    const activeId = await this.getActiveProfileId();
+    await store.set('profiles', updated);
     if (activeId === profileId) {
-      // If we deleted the active profile, switch to the first remaining or null
-      await this.setActiveProfileId(updated.length > 0 ? updated[0].id : null);
+      await store.set('activeProfileId', updated[0]?.id ?? null);
     }
+    await store.save();
   },
 
   /**

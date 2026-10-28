@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import { storeHelper, type RoutingRule, type RuleSet } from '../utils/store';
 import { useLogStore } from './logStore';
 import { invoke } from '@tauri-apps/api/core';
+import { connectedApplyDeps, createApplier, reportApplyOutcome } from '../utils/connectedApply';
+
+interface RoutingSnapshot { rules: RoutingRule[]; ruleSets: RuleSet[] }
+
+// Routing edits are persisted first, then applied to a connected session with a
+// validated cold restart; on failure the snapshot taken before the first edit in
+// the debounce window is restored (see utils/applyPolicy.ts).
+let applierInstance: ReturnType<typeof createApplier<RoutingSnapshot>> | null = null;
+
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -30,7 +39,24 @@ interface RoutingState {
   updateRuleSet: (rs: RuleSet) => Promise<void>;
 }
 
-export const useRoutingStore = create<RoutingState>((set, get) => ({
+export const useRoutingStore = create<RoutingState>((set, get) => {
+  const getApplier = () => applierInstance ??= createApplier<RoutingSnapshot>({
+    ...connectedApplyDeps,
+    merge: (existing) => existing,
+    validate: () => null,
+    restore: async (baseline) => {
+      set({ routingRules: baseline.rules, ruleSets: baseline.ruleSets });
+      await storeHelper.saveRoutingRules(baseline.rules);
+      await storeHelper.saveRuleSets(baseline.ruleSets);
+    },
+    report: reportApplyOutcome('Routing changes'),
+  });
+  const snapshot = (): RoutingSnapshot => ({ rules: get().routingRules, ruleSets: get().ruleSets });
+  const scheduleApply = (baseline: RoutingSnapshot) => {
+    if (connectedApplyDeps.isConnected()) getApplier().schedule(baseline);
+  };
+
+  return {
   routingRules: [],
   ruleSets: [],
   showAddRule: false,
@@ -66,39 +92,49 @@ export const useRoutingStore = create<RoutingState>((set, get) => ({
       ? routingRules.map((r) => r.id === editingRule.id ? { ...ruleForm, id: editingRule.id } : r)
       : [...routingRules, { ...ruleForm, id: uid() }];
 
+    const before = snapshot();
     set({ routingRules: updated, showAddRule: false, editingRule: null });
     await storeHelper.saveRoutingRules(updated);
+    scheduleApply(before);
     set({ ruleForm: { type: 'geoip', value: '', outbound: 'direct', invert: false, notes: '' } });
   },
 
   deleteRoutingRule: async (id) => {
+    const before = snapshot();
     const updated = get().routingRules.filter((r) => r.id !== id);
     set({ routingRules: updated });
     await storeHelper.saveRoutingRules(updated);
+    scheduleApply(before);
   },
 
   toggleRoutingRuleEnabled: async (id, enabled) => {
+    const before = snapshot();
     const updated = get().routingRules.map((r) =>
       r.id === id ? { ...r, enabled } : r
     );
     set({ routingRules: updated });
     await storeHelper.saveRoutingRules(updated);
+    scheduleApply(before);
   },
 
   saveRuleSet: async () => {
     const { ruleSetForm, ruleSets } = get();
     if (!ruleSetForm.tag.trim()) return;
 
+    const before = snapshot();
     const updated = [...ruleSets, { ...ruleSetForm, id: uid() }];
     set({ ruleSets: updated, showAddRuleSet: false });
     await storeHelper.saveRuleSets(updated);
+    scheduleApply(before);
     set({ ruleSetForm: { tag: '', type: 'remote', format: 'binary', url: '', updateInterval: '1d' } });
   },
 
   deleteRuleSet: async (id) => {
+    const before = snapshot();
     const updated = get().ruleSets.filter((r) => r.id !== id);
     set({ ruleSets: updated });
     await storeHelper.saveRuleSets(updated);
+    scheduleApply(before);
   },
 
   updateRuleSet: async (rs) => {
@@ -115,4 +151,5 @@ export const useRoutingStore = create<RoutingState>((set, get) => ({
       set({ updatingRuleSet: null });
     }
   }
-}));
+  };
+});

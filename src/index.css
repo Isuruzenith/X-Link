@@ -95,13 +95,13 @@
   --status-info-glow:   oklch(0.588 0.195 256.8 / 15%);
 
   /* CHART MONOCHROME VARIABLES */
-  --chart-download:       var(--foreground);
-  --chart-upload:         var(--muted-foreground);
-  --chart-down-stroke:    var(--foreground);
+  --chart-download:       oklch(0.145 0 0);
+  --chart-upload:         oklch(0.556 0 0);
+  --chart-down-stroke:    oklch(0.145 0 0);
   --chart-down-glow:      oklch(0 0 0 / 20%);
   --chart-down-fill-0:    oklch(0 0 0 / 8%);
   --chart-down-fill-1:    oklch(0 0 0 / 0%);
-  --chart-up-stroke:      var(--muted-foreground);
+  --chart-up-stroke:      oklch(0.556 0 0);
   --chart-up-glow:        oklch(0.556 0 0 / 12%);
   --chart-up-fill-0:      oklch(0.556 0 0 / 4%);
   --chart-up-fill-1:      oklch(0.556 0 0 / 0%);
@@ -1109,13 +1109,13 @@ body {
   --status-info:        oklch(0.72 0.17 256.8);
   --status-info-dim:    oklch(0.72 0.17 256.8 / 10%);
   --status-info-glow:   oklch(0.72 0.17 256.8 / 20%);
-  --chart-download:       var(--foreground);
-  --chart-upload:         var(--muted-foreground);
-  --chart-down-stroke:    var(--foreground);
+  --chart-download:       oklch(0.985 0 0);
+  --chart-upload:         oklch(0.708 0 0);
+  --chart-down-stroke:    oklch(0.985 0 0);
   --chart-down-glow:      oklch(1 0 0 / 35%);
   --chart-down-fill-0:    oklch(1 0 0 / 15%);
   --chart-down-fill-1:    oklch(1 0 0 / 0%);
-  --chart-up-stroke:      var(--muted-foreground);
+  --chart-up-stroke:      oklch(0.708 0 0);
   --chart-up-glow:        oklch(0.708 0 0 / 20%);
   --chart-up-fill-0:      oklch(0.708 0 0 / 8%);
   --chart-up-fill-1:      oklch(0.708 0 0 / 0%);

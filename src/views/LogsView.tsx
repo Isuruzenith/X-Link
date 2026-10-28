@@ -1,22 +1,117 @@
-import { useRef, useEffect, useState, useDeferredValue } from 'react';
+import React, { useEffect, useState, useDeferredValue, useMemo } from 'react';
 import { Terminal, Copy, Trash2, Search } from 'lucide-react';
+import { List, useListRef, type RowComponentProps } from 'react-window';
 import { ViewShell } from '../components/ViewShell';
-import { useLogStore } from '../stores/logStore';
+import { useLogStore, type LogEntry } from '../stores/logStore';
 import { useToastStore } from '../stores/toastStore';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { FormInput, SegmentedControl } from '@/components/form';
 
+const LOG_ROW_HEIGHT = 28;
+
+function getLevelLabel(type: string): string {
+  if (type === 'error') return 'ERR';
+  if (type === 'warn')  return 'WARN';
+  if (type === 'system') return 'SYS';
+  return 'INFO';
+}
+
+// Syntax highlighting for log tags like [DNS], [TUN], etc.
+// Off-screen rows are not rendered by react-window, so highlighting is only evaluated for visible rows.
+function renderHighlightedText(text: string) {
+  const regex = /(\[[^\]]+\])/g;
+  const parts = text.split(regex);
+  return parts.map((part, idx) => {
+    if (part.startsWith('[') && part.endsWith(']')) {
+      const tagText = part.slice(1, -1);
+      const lowerTag = tagText.toLowerCase();
+
+      let classes = 'text-foreground/75 bg-muted border-border/40';
+
+      if (lowerTag.includes('warn')) {
+        classes = 'text-amber-700 bg-amber-50/50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900/50';
+      } else if (lowerTag.includes('err') || lowerTag.includes('fail')) {
+        classes = 'text-destructive bg-destructive/10 border-destructive/20';
+      }
+
+      return (
+        <span
+          key={idx}
+          className={`inline-block px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider border mr-1.5 leading-none ${classes}`}
+        >
+          {tagText}
+        </span>
+      );
+    }
+    return <span key={idx}>{part}</span>;
+  });
+}
+
+interface LogRowProps {
+  items: LogEntry[];
+}
+
+function LogRow({
+  index,
+  style,
+  items,
+}: RowComponentProps<LogRowProps>): React.ReactElement | null {
+  const log = items[index];
+  if (!log) return null;
+
+  return (
+    <div
+      style={style}
+      className="flex items-center px-2 py-0.5 rounded hover:bg-muted/30 transition-colors font-mono text-[11.5px] font-normal text-foreground/90 select-text"
+    >
+      {/* Timestamp */}
+      <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal w-12 sm:w-14 truncate" title={log.timestamp}>
+        {log.timestamp}
+      </span>
+
+      {/* Level label */}
+      <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
+        log.type === 'error' ? 'text-destructive font-black' :
+        log.type === 'warn'  ? 'text-amber-600 dark:text-amber-500' :
+        log.type === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-foreground/70'
+      }`}>
+        {getLevelLabel(log.type)}
+      </span>
+
+      {/* Log content */}
+      <span
+        className={`flex-1 truncate font-normal text-[11px] ${
+          log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
+        }`}
+        title={log.text}
+      >
+        {renderHighlightedText(log.text)}
+      </span>
+    </div>
+  );
+}
+
 export function LogsView() {
   const { logs, autoScroll, setAutoScroll, clearLogs, copyLogs } = useLogStore();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useListRef(null);
   const [filterText, setFilterText] = useState('');
   const deferredFilterText = useDeferredValue(filterText);
   const [levelFilter, setLevelFilter] = useState<'all' | 'info' | 'warn' | 'error' | 'system'>('all');
 
-  const handleScroll = () => {
-    const container = containerRef.current;
+  const filtered = useMemo(() => {
+    return logs.filter((l) => {
+      if (levelFilter !== 'all' && l.type !== levelFilter) return false;
+      if (deferredFilterText && !l.text.toLowerCase().includes(deferredFilterText.toLowerCase())) return false;
+      return true;
+    });
+  }, [logs, levelFilter, deferredFilterText]);
+
+  const rowProps = useMemo<LogRowProps>(() => ({ items: filtered }), [filtered]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
     if (!container) return;
 
     // Check if user is within 40px of bottom
@@ -29,60 +124,29 @@ export function LogsView() {
   };
 
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    if (!autoScroll || filtered.length === 0) return;
 
-    if (autoScroll) {
-      container.scrollTop = container.scrollHeight;
-    }
-  }, [logs, autoScroll]);
+    const scrollToBottom = () => {
+      const el = listRef.current?.element;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        listRef.current?.scrollToRow({
+          index: filtered.length - 1,
+          align: 'end',
+          behavior: 'auto',
+        });
+      }
+    };
 
-  const filtered = logs.filter((l) => {
-    if (levelFilter !== 'all' && l.type !== levelFilter) return false;
-    if (deferredFilterText && !l.text.toLowerCase().includes(deferredFilterText.toLowerCase())) return false;
-    return true;
-  });
+    scrollToBottom();
+    const raf = requestAnimationFrame(scrollToBottom);
+    return () => cancelAnimationFrame(raf);
+  }, [filtered.length, autoScroll, listRef]);
 
   const handleCopy = async () => {
     await copyLogs();
     useToastStore.getState().addToast('success', 'All logs copied to clipboard.', 'Logs Copied');
-  };
-
-  // Syntax highlighting for log tags like [DNS], [TUN], etc.
-  const renderHighlightedText = (text: string) => {
-    const regex = /(\[[^\]]+\])/g;
-    const parts = text.split(regex);
-    return parts.map((part, idx) => {
-      if (part.startsWith('[') && part.endsWith(']')) {
-        const tagText = part.slice(1, -1);
-        const lowerTag = tagText.toLowerCase();
-        
-        let classes = 'text-foreground/75 bg-muted border-border/40';
-        
-        if (lowerTag.includes('warn')) {
-          classes = 'text-amber-700 bg-amber-50/50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900/50';
-        } else if (lowerTag.includes('err') || lowerTag.includes('fail')) {
-          classes = 'text-destructive bg-destructive/10 border-destructive/20';
-        }
-        
-        return (
-          <span
-            key={idx}
-            className={`inline-block px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider border mr-1.5 leading-none ${classes}`}
-          >
-            {tagText}
-          </span>
-        );
-      }
-      return <span key={idx}>{part}</span>;
-    });
-  };
-
-  const getLevelLabel = (type: string) => {
-    if (type === 'error') return 'ERR';
-    if (type === 'warn')  return 'WARN';
-    if (type === 'system') return 'SYS';
-    return 'INFO';
   };
 
   return (
@@ -119,7 +183,7 @@ export function LogsView() {
               onChange={setFilterText}
             />
           </div>
-          
+
           <SegmentedControl
             value={levelFilter}
             onChange={(val) => setLevelFilter(val as 'all' | 'info' | 'warn' | 'error' | 'system')}
@@ -131,7 +195,7 @@ export function LogsView() {
               { label: 'System', value: 'system' }
             ]}
           />
-          
+
           <span className="text-xs font-semibold text-muted-foreground ml-auto hidden sm:inline">
             Showing {filtered.length} of {logs.length} entries
           </span>
@@ -139,47 +203,27 @@ export function LogsView() {
 
         {/* Terminal block */}
         <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
-          <div
-            ref={containerRef}
-            onScroll={handleScroll}
-            className="flex-1 w-full min-h-0 overflow-y-auto p-4 font-mono text-[11.5px] leading-relaxed"
-          >
-            {filtered.length > 0 ? (
-              filtered.map((log, i) => (
-                <div
-                  key={i}
-                  className="flex items-start py-0.5 px-1.5 rounded mb-0.5 hover:bg-muted/30 transition-colors font-normal text-foreground/90"
-                >
-                  {/* Timestamp */}
-                  <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal w-10 sm:w-14 truncate" title={log.timestamp}>
-                    {log.timestamp}
-                  </span>
- 
-                  <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
-                    log.type === 'error' ? 'text-destructive font-black' :
-                    log.type === 'warn'  ? 'text-amber-600 dark:text-amber-500' :
-                    log.type === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-foreground/70'
-                  }`}>
-                    {getLevelLabel(log.type)}
-                  </span>
- 
-                  {/* Log content */}
-                  <span className={`flex-1 whitespace-pre-wrap break-all font-normal text-[11px] ${
-                    log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
-                  }`}>
-                    {renderHighlightedText(log.text)}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none animate-in fade-in duration-200">
-                <Terminal className="size-9 opacity-60 stroke-[1.2]" />
-                <span className="text-xs font-bold text-foreground">
-                  {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
-                </span>
-              </div>
-            )}
-          </div>
+          {filtered.length > 0 ? (
+            <div className="flex-1 w-full min-h-0 p-2 font-mono text-[11.5px]">
+              <List
+                listRef={listRef}
+                rowCount={filtered.length}
+                rowHeight={LOG_ROW_HEIGHT}
+                rowComponent={LogRow}
+                rowProps={rowProps}
+                overscanCount={6}
+                onScroll={handleScroll}
+                style={{ height: '100%', width: '100%' }}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none animate-in fade-in duration-200">
+              <Terminal className="size-9 opacity-60 stroke-[1.2]" />
+              <span className="text-xs font-bold text-foreground">
+                {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
+              </span>
+            </div>
+          )}
         </Card>
       </div>
     </ViewShell>

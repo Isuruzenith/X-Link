@@ -9,8 +9,6 @@ pub const HEALTH_CHECK_TIMEOUT_SECS: u64 = 10;
 
 // === Sidecar Lifecycle ===
 pub const STARTUP_WAIT_MS: u64 = 1500;
-pub const SOCKET_RELEASE_DELAY_WINDOWS_MS: u64 = 600;
-pub const SOCKET_RELEASE_DELAY_OTHER_MS: u64 = 300;
 pub const STALE_PROCESS_KILL_DELAY_MS: u64 = 200;
 pub const SHUTDOWN_GRACE_PERIOD_MS: u64 = 600;
 

@@ -2,6 +2,7 @@ import { Plus, Trash2, Edit3, X, Database, Filter, GitFork, Download, Info } fro
 import { ViewShell } from '../components/ViewShell';
 import { useRoutingStore } from '../stores/routingStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useConnectionStore } from '../stores/connectionStore';
 import type { RoutingRuleType, OutboundAction } from '../utils/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -49,6 +50,7 @@ export function RoutingView() {
   } = useRoutingStore();
 
   const { settings, updateSettings } = useSettingsStore();
+  const isConnected = useConnectionStore((state) => state.connectionStatus === 'connected');
 
   return (
     <ViewShell
@@ -69,6 +71,11 @@ export function RoutingView() {
       }
     >
       <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
+        {isConnected && (
+          <div className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
+            Routing changes are saved and applied with a validated restart of the running proxy; if the restart fails the previous rules are restored.
+          </div>
+        )}
         {/* Global + Rule Sets row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
           {/* Global Settings */}

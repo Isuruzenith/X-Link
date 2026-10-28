@@ -1,12 +1,16 @@
 import { create } from 'zustand';
 import { storeHelper, type Settings } from '../utils/store';
 import { invoke } from '@tauri-apps/api/core';
+import { classifySetting, validateSettingsForApply } from '../utils/applyPolicy';
+import { useConnectionStore } from './connectionStore';
+import { connectedApplyDeps, createApplier, reportApplyOutcome } from '../utils/connectedApply';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
 
 interface SettingsState {
   settings: Settings;
   conflictingPorts: number[];
+  portStatuses: Record<number, 'free' | 'own' | 'external' | 'unknown'>;
   isElevated: boolean;
   singboxVersion: string;
   appVersion: string;
@@ -16,12 +20,35 @@ interface SettingsState {
   initSettings: () => Promise<void>;
   updateSettings: (updates: Partial<Settings>) => Promise<void>;
   setConflictingPorts: (ports: number[]) => void;
+  setPortStatuses: (statuses: Record<number, 'free' | 'own' | 'external' | 'unknown'>) => void;
   checkElevated: () => Promise<boolean>;
   fetchVersions: () => Promise<void>;
   setTheme: (theme: ThemeMode) => void;
 }
 
-export const useSettingsStore = create<SettingsState>((set, get) => ({
+export const useSettingsStore = create<SettingsState>((set, get) => {
+  // Connected restart-class edits are applied through a validated cold restart
+  // with rollback of the persisted previous values (see utils/applyPolicy.ts).
+  // Built lazily: the connection/profile stores import this module (import cycle).
+  let applierInstance: ReturnType<typeof createApplier<Partial<Settings>>> | null = null;
+  const getApplier = () => applierInstance ??= createApplier<Partial<Settings>>({
+    ...connectedApplyDeps,
+    merge: (existing, incoming) => ({ ...incoming, ...existing }),
+    validate: () => validateSettingsForApply(get().settings),
+    restore: async (baseline) => {
+      set({ settings: { ...get().settings, ...baseline } });
+      // The Settings UI mirrors listener ports in the connection store.
+      const ports: { httpPort?: number; socksPort?: number; mixedPort?: number } = {};
+      if (baseline.httpPort !== undefined) ports.httpPort = baseline.httpPort;
+      if (baseline.socksPort !== undefined) ports.socksPort = baseline.socksPort;
+      if (baseline.mixedPort !== undefined) ports.mixedPort = baseline.mixedPort;
+      if (Object.keys(ports).length > 0) useConnectionStore.getState().setPorts(ports);
+      await storeHelper.saveSettings(baseline);
+    },
+    report: reportApplyOutcome('Settings'),
+  });
+
+  return {
   settings: {
     proxyMode: 'tun',
     closeToTray: true,
@@ -47,6 +74,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     apiPort: 9090,
     apiSecret: '',
     apiCors: true,
+    geoLookupEnabled: false,
     primaryDns: 'https://1.1.1.1/dns-query',
     fallbackDns: 'https://8.8.8.8/dns-query',
     directDns: '',
@@ -62,6 +90,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     multiplex: false,
   },
   conflictingPorts: [],
+  portStatuses: {},
   isElevated: false,
   singboxVersion: 'Unknown',
   appVersion: '0.6.0',
@@ -84,6 +113,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ settings: next });
     await storeHelper.saveSettings(updates);
 
+    // Connected: restart-class keys cold-restart (validated, rolled back on failure);
+    // proxyMode is a next-connect preference and app-only keys need no restart.
+    const restartKeys = (Object.keys(updates) as (keyof Settings)[]).filter(
+      (key) => updates[key] !== undefined && classifySetting(key) === 'restart' && current[key] !== updates[key],
+    );
+    if (restartKeys.length > 0 && connectedApplyDeps.isConnected()) {
+      const baseline: Partial<Settings> = {};
+      for (const key of restartKeys) (baseline as Record<string, unknown>)[key] = current[key];
+      getApplier().schedule(baseline);
+    }
+
     // Apply auto-start and admin elevation configurations via Tauri commands
     if (updates.proxyMode !== undefined) {
       if (updates.proxyMode === 'tun' && get().isElevated) {
@@ -98,6 +138,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setConflictingPorts: (ports) => set({ conflictingPorts: ports }),
+  setPortStatuses: (statuses) => set({ portStatuses: statuses }),
 
   checkElevated: async () => {
     try {
@@ -140,4 +181,5 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       document.documentElement.classList.remove('dark');
     }
   },
-}));
+  };
+});

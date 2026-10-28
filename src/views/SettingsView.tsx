@@ -2,12 +2,13 @@ import React from 'react';
 import {
   Settings as SettingsIcon, Network, Eye, Dna, Code2,
   Info, AlertTriangle, CheckCircle2, ExternalLink, Sun, Moon, Monitor,
-  RefreshCw
+  RefreshCw, Copy
 } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
+import { useProfileStore } from '../stores/profileStore';
 import type { Settings, DnsMode } from '../utils/store';
 import xLinkLogo from '../assets/X-Link-logo.png';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,20 +22,23 @@ export function SettingsView() {
   const {
     settings,
     conflictingPorts,
+    portStatuses,
     isElevated,
     appVersion,
     theme,
     updateSettings,
     setTheme,
   } = useSettingsStore();
-
+  const clearNodeGeoCache = useProfileStore((state) => state.clearNodeGeoCache);
   const {
+    connectionStatus,
     isConnected,
     httpPort,
     socksPort,
     mixedPort,
     setPorts,
   } = useConnectionStore();
+  const connectedConfigChange = connectionStatus === 'connected';
 
   const [settingsTab, setSettingsTab] = React.useState<SettingsSection>('general');
 
@@ -79,7 +83,7 @@ export function SettingsView() {
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Proxy Mode</CardTitle>
-                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
+                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Next connect</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy)."
                       checked={settings.proxyMode === 'tun'}
@@ -94,6 +98,7 @@ export function SettingsView() {
                         updateSettings({ proxyMode: v ? 'tun' : 'system' });
                       }}
                     />
+                    {connectedConfigChange && <p className="text-[10px] text-amber-500">Proxy mode is a saved preference; the running session keeps its current mode until you reconnect.</p>}
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
@@ -104,6 +109,15 @@ export function SettingsView() {
                     <FormSwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => updateSettings({ closeToTray: v })} />
                     <FormSwitchRow title="Launch on System Login" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
                     <FormSwitchRow title="LAN Hotspot Sharing" desc="Bind to 0.0.0.0 for LAN device sharing" checked={settings.wifiSharing} onChange={(v) => updateSettings({ wifiSharing: v })} />
+                    <FormSwitchRow
+                      title="Node Geolocation Lookup"
+                      desc="Share public node IPs with freeipapi.com to resolve country flags (disabled by default; hostnames and credentials are never shared)"
+                      checked={settings.geoLookupEnabled}
+                      onChange={(enabled) => {
+                        updateSettings({ geoLookupEnabled: enabled });
+                        if (!enabled) clearNodeGeoCache();
+                      }}
+                    />
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
@@ -147,13 +161,14 @@ export function SettingsView() {
                       ].map(({ label, key, val, set }) => {
                         const hasConflict = conflictingPorts.includes(val);
                         const isInvalid = val < 1 || val > 65535;
+                        const isUnchecked = !isInvalid && !hasConflict && (portStatuses[val] === undefined || portStatuses[val] === 'unknown');
                         const hasError = hasConflict || isInvalid;
                         return (
                           <div key={key} className="flex flex-col gap-1">
                             <div className="flex justify-between items-center px-0.5">
                               <label className="text-[9.5px] font-bold text-muted-foreground uppercase">{label}</label>
-                              <span className={`text-[9px] font-bold ${hasError ? 'text-destructive' : 'text-foreground/60'}`}>
-                                {isInvalid ? '● Invalid' : hasConflict ? '● Conflict' : '● OK'}
+                              <span className={`text-[9px] font-bold ${hasError ? 'text-destructive' : isUnchecked ? 'text-amber-500' : 'text-foreground/60'}`}>
+                                {isInvalid ? '● Invalid' : hasConflict ? '● Conflict' : portStatuses[val] === 'own' ? '● X-Link' : portStatuses[val] === 'free' ? '● Free' : '● Unchecked'}
                               </span>
                             </div>
                             <FormInput
@@ -173,8 +188,8 @@ export function SettingsView() {
                     <div className="flex flex-col gap-1">
                       <div className="flex justify-between items-center px-0.5">
                         <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Mixed Inbound Port (Recommended)</label>
-                        <span className={`text-[9px] font-bold ${conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535 ? 'text-destructive' : 'text-foreground/60'}`}>
-                          {mixedPort < 1 || mixedPort > 65535 ? '● Invalid' : conflictingPorts.includes(mixedPort) ? '● Conflict' : '● OK'}
+                        <span className={`text-[9px] font-bold ${conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535 ? 'text-destructive' : (portStatuses[mixedPort] === undefined || portStatuses[mixedPort] === 'unknown') ? 'text-amber-500' : 'text-foreground/60'}`}>
+                          {mixedPort < 1 || mixedPort > 65535 ? '● Invalid' : conflictingPorts.includes(mixedPort) ? '● Conflict' : portStatuses[mixedPort] === 'own' ? '● X-Link' : portStatuses[mixedPort] === 'free' ? '● Free' : '● Unchecked'}
                         </span>
                       </div>
                       <FormInput
@@ -187,7 +202,8 @@ export function SettingsView() {
                       />
                     </div>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/80 mt-1">Port changes take effect on next connection restart.</p>
+                  <p className="text-[10px] text-muted-foreground/80 mt-1">Port changes restart the connection when connected.</p>
+                  {connectedConfigChange && <p className="text-[10px] text-amber-500">Port and listener changes are applied with a validated restart while connected; on failure the previous values are restored.</p>}
                 </Card>
               </div>
 
@@ -251,7 +267,7 @@ export function SettingsView() {
               </Card>
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
                 <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
-                <span>TUN mode captures ALL system traffic. Combined with Auto Route + Strict Route, it prevents DNS leaks.</span>
+                <span>TUN mode captures ALL system traffic. Combined with Auto Route + Strict Route, it prevents DNS leaks. While connected, TUN interface changes are applied with a validated restart that keeps the current effective mode; on failure the previous values are restored.</span>
               </div>
             </div>
           )}
@@ -279,6 +295,7 @@ export function SettingsView() {
                   </div>
                 </div>
               </Card>
+              {connectedConfigChange && <p className="text-[10px] text-amber-500">Traffic sniffing changes are applied with a validated restart while connected; on failure the previous values are restored.</p>}
             </div>
           )}
 
@@ -373,7 +390,7 @@ export function SettingsView() {
 
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
                 <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
-                <span>DNS settings only take effect in TUN mode and apply on the next connection.</span>
+                <span>While connected, DNS changes are applied with a validated restart; on failure the previous values are restored.</span>
               </div>
             </div>
           )}
@@ -428,17 +445,44 @@ export function SettingsView() {
                   <FormSwitchRow title="Allow CORS (Cross-Origin)" desc="Allow web-based controllers (Yacd) to connect from browser"
                     checked={settings.apiCors} onChange={(v) => updateSettings({ apiCors: v })} />
                   {settings.apiEnabled && isConnected && (
-                    <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center gap-2">
-                      <CheckCircle2 className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="leading-normal">
-                        API active at <code className="font-mono text-[10.5px] bg-background border border-border px-1 py-0.5 rounded text-foreground">
-                          http://127.0.0.1:{settings.apiPort}
-                        </code>
-                        {' — open in '}
-                        <a href={`http://yacd.haishan.me/?hostname=127.0.0.1&port=${settings.apiPort}&secret=${settings.apiSecret}`} target="_blank" rel="noreferrer" className="text-foreground font-semibold underline underline-offset-2">
-                          Yacd UI <ExternalLink className="size-3 inline-block ml-0.5" />
-                        </a>
-                      </span>
+                    <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="size-3.5 text-muted-foreground shrink-0" />
+                        <span className="leading-normal">
+                          API active at <code className="font-mono text-[10.5px] bg-background border border-border px-1 py-0.5 rounded text-foreground">
+                            http://127.0.0.1:{settings.apiPort}
+                          </code>
+                          {' — open in '}
+                          <a
+                            href={`https://yacd.haishan.me/?hostname=127.0.0.1&port=${settings.apiPort}`}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="text-foreground font-semibold underline underline-offset-2 inline-flex items-center gap-0.5"
+                          >
+                            Yacd UI <ExternalLink className="size-3 inline-block" />
+                          </a>
+                        </span>
+                      </div>
+                      {settings.apiSecret && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs font-semibold gap-1.5 shrink-0"
+                          title="Copy API secret token to clipboard for dashboard login"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(settings.apiSecret);
+                              useToastStore.getState().addToast('success', 'API secret copied to clipboard for dashboard login.', 'Secret Copied');
+                            } catch {
+                              useToastStore.getState().addToast('error', 'Failed to copy secret to clipboard.', 'Copy Failed');
+                            }
+                          }}
+                        >
+                          <Copy className="size-3" />
+                          Copy Token
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>

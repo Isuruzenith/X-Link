@@ -29,6 +29,7 @@ pub fn run() {
             commands::system::get_app_version,
             commands::system::show_window,
             commands::system::check_port_conflict,
+            commands::system::check_port_status,
             commands::system::set_autostart,
             commands::system::check_tun_support,
             commands::system::request_elevation,
@@ -43,6 +44,7 @@ pub fn run() {
             commands::proxy::reload_active_config,
             commands::proxy::switch_node_hot,
             commands::config::import_config,
+            commands::config::refresh_subscription,
             commands::config::get_active_outbound,
             commands::config::get_config_outbounds,
             commands::config::update_node,
@@ -50,6 +52,7 @@ pub fn run() {
             commands::config::switch_profile,
             commands::config::get_profile_outbounds,
             commands::config::update_rule_set,
+            commands::geo::lookup_node_geo,
             commands::latency::test_node_latency,
             commands::latency::test_all_nodes
         ])

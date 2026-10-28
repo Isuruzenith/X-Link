@@ -41,6 +41,7 @@ pub struct UserSettings {
     pub api_port: u16,
     pub api_secret: String,
     pub api_cors: bool,
+    pub geo_lookup_enabled: bool,
     pub primary_dns: String,
     pub fallback_dns: String,
     pub direct_dns: String,
@@ -83,6 +84,7 @@ impl Default for UserSettings {
             api_port: 9090,
             api_secret: "".to_string(),
             api_cors: true,
+            geo_lookup_enabled: false,
             primary_dns: "https://1.1.1.1/dns-query".to_string(),
             fallback_dns: "https://8.8.8.8/dns-query".to_string(),
             direct_dns: "".to_string(),
@@ -107,6 +109,8 @@ pub struct ProxyState {
     pub active_session_id: Mutex<Option<String>>,
     /// Connection status
     pub connection_status: Mutex<ConnectionStatus>,
+    /// Effective mode of the current session, which may differ from saved settings.
+    pub effective_proxy_mode: Mutex<Option<String>>,
     /// Rust-side log ring buffer
     pub log_buffer: Mutex<VecDeque<String>>,
     /// Cached User Settings
@@ -129,6 +133,7 @@ impl ProxyState {
             child_process: Mutex::new(None),
             active_session_id: Mutex::new(None),
             connection_status: Mutex::new(ConnectionStatus::Disconnected),
+            effective_proxy_mode: Mutex::new(None),
             log_buffer: Mutex::new(VecDeque::with_capacity(LOG_BUFFER_RUST_MAX)),
             settings: Mutex::new(UserSettings::default()),
             upload_bytes: Mutex::new(0),
@@ -225,6 +230,9 @@ impl ProxyState {
                         if let Some(v) = val.get("apiCors").and_then(|v| v.as_bool()) {
                             default_s.api_cors = v;
                         }
+                        if let Some(v) = val.get("geoLookupEnabled").and_then(|v| v.as_bool()) {
+                            default_s.geo_lookup_enabled = v;
+                        }
                         if let Some(v) = val.get("primaryDns").and_then(|v| v.as_str()) {
                             default_s.primary_dns = v.to_string();
                         }
@@ -297,6 +305,11 @@ impl ProxyState {
     pub fn set_status(&self, app: &tauri::AppHandle, status: ConnectionStatus) {
         if let Ok(mut g) = self.connection_status.lock() {
             *g = status;
+        }
+        if status == ConnectionStatus::Disconnected {
+            if let Ok(mut mode) = self.effective_proxy_mode.lock() {
+                *mode = None;
+            }
         }
         let status_str = match status {
             ConnectionStatus::Disconnected => "disconnected",

@@ -67,6 +67,7 @@ pub struct ProxyStateSerialized {
     pub socks_port: u16,
     pub mixed_port: u16,
     pub tun_enabled: bool,
+    pub effective_proxy_mode: Option<String>,
     pub uptime: u64,
 }
 
@@ -351,8 +352,13 @@ pub fn get_proxy_status(
     };
 
     let settings = state.get_settings();
-    let tun_enabled =
-        status == crate::state::ConnectionStatus::Connected && settings.proxy_mode == "tun";
+    let effective_proxy_mode = state
+        .effective_proxy_mode
+        .lock()
+        .map_err(|e| format!("state_lock_poisoned: {}", e))?
+        .clone();
+    let tun_enabled = status == crate::state::ConnectionStatus::Connected
+        && effective_proxy_mode.as_deref() == Some("tun");
 
     Ok(ProxyStateSerialized {
         status,
@@ -360,6 +366,7 @@ pub fn get_proxy_status(
         socks_port: settings.socks_port,
         mixed_port: settings.mixed_port,
         tun_enabled,
+        effective_proxy_mode,
         uptime,
     })
 }
@@ -580,25 +587,35 @@ pub async fn switch_node_hot(
     state: tauri::State<'_, crate::state::ProxyState>,
     tag: String,
 ) -> Result<(), String> {
-    // Update the tracked selected tag
-    if let Ok(mut lock) = state.selected_outbound_tag.lock() {
-        *lock = Some(tag.clone());
-    }
-
     let settings = state.get_settings();
+    let mode_override = state
+        .effective_proxy_mode
+        .lock()
+        .ok()
+        .and_then(|mode| mode.clone());
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
     let api_enabled = settings.api_enabled;
 
     if state.get_status() == crate::state::ConnectionStatus::Connected && api_enabled {
-        let (config_path, _, _, _) =
-            match prepare_and_patch_config(&app, &state, Some(&tag), None).await {
-                Ok(res) => res,
-                Err(e) => {
-                    state.push_log(format!("[System] Config patch failed: {}", e));
-                    return try_reload_proxy_config(&app, &state, Some(tag)).await;
+        let (config_path, _, _, _) = match prepare_and_patch_config(
+            &app,
+            &state,
+            Some(&tag),
+            mode_override.as_deref(),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                state.push_log(format!("[System] Config patch failed: {}", e));
+                try_reload_proxy_config(&app, &state, Some(tag.clone())).await?;
+                if let Ok(mut lock) = state.selected_outbound_tag.lock() {
+                    *lock = Some(tag);
                 }
-            };
+                return Ok(());
+            }
+        };
 
         // Try hot-reloading the configuration first so the running sing-box gets the updated active.json
         if let Err(e) = hot_reload_via_api(&config_path, api_port, &api_secret).await {
@@ -606,12 +623,19 @@ pub async fn switch_node_hot(
                 "[System] API config reload failed ({}), falling back to full reload.",
                 e
             ));
-            return try_reload_proxy_config(&app, &state, Some(tag)).await;
+            try_reload_proxy_config(&app, &state, Some(tag.clone())).await?;
+            if let Ok(mut lock) = state.selected_outbound_tag.lock() {
+                *lock = Some(tag);
+            }
+            return Ok(());
         }
 
         // Try switching the selector group
         match switch_selector_node_via_api(&tag, api_port, &api_secret).await {
             Ok(_) => {
+                if let Ok(mut lock) = state.selected_outbound_tag.lock() {
+                    *lock = Some(tag.clone());
+                }
                 state.push_log(format!("[System] Hot-switched selector to node: {}", tag));
                 return Ok(());
             }
@@ -624,33 +648,54 @@ pub async fn switch_node_hot(
         }
     }
 
-    try_reload_proxy_config(&app, &state, Some(tag)).await
+    try_reload_proxy_config(&app, &state, Some(tag.clone())).await?;
+    if let Ok(mut lock) = state.selected_outbound_tag.lock() {
+        *lock = Some(tag);
+    }
+    Ok(())
 }
 
 pub fn try_reload_proxy_config<'a>(
     app: &'a tauri::AppHandle,
-    _state: &'a crate::state::ProxyState,
+    state: &'a crate::state::ProxyState,
     selected_outbound_tag: Option<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    let mode_override = state
+        .effective_proxy_mode
+        .lock()
+        .ok()
+        .and_then(|mode| mode.clone());
+    try_reload_proxy_config_with_mode(app, selected_outbound_tag, mode_override)
+}
+
+pub fn try_reload_proxy_config_with_mode<'a>(
+    app: &'a tauri::AppHandle,
+    selected_outbound_tag: Option<String>,
+    mode_override: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
     let app_handle = app.clone();
     let state_handle = app.state::<crate::state::ProxyState>();
     let tag = selected_outbound_tag;
 
     Box::pin(async move {
-        let _ = prepare_and_patch_config(&app_handle, &state_handle, tag.as_deref(), None).await?;
+        let _ = prepare_and_patch_config(
+            &app_handle,
+            &state_handle,
+            tag.as_deref(),
+            mode_override.as_deref(),
+        )
+        .await?;
 
         // Stop the proxy
-        let _ = toggle_proxy(app_handle.clone(), state_handle.clone(), false, None).await;
+        toggle_proxy(app_handle.clone(), state_handle.clone(), false, None, None).await?;
 
         // Give it a brief moment to shut down gracefully
         tokio::time::sleep(std::time::Duration::from_millis(SHUTDOWN_GRACE_PERIOD_MS)).await;
 
         // Start the proxy
-        let res = toggle_proxy(app_handle, state_handle, true, tag).await;
-        match res {
-            Ok(_) => Ok(()),
-            Err(e) => Err(e),
-        }
+        toggle_proxy(app_handle, state_handle, true, tag, mode_override)
+            .await
+            .map(|_| ())
     })
 }
 
@@ -669,41 +714,35 @@ pub async fn toggle_proxy(
     state: State<'_, crate::state::ProxyState>,
     start: bool,
     selected_outbound_tag: Option<String>,
+    mode_override: Option<String>,
 ) -> Result<String, String> {
     let _guard = get_toggle_lock().lock().await;
+    if let Some(ref mode) = mode_override {
+        if mode != "system" && mode != "tun" {
+            return Err("Invalid proxy mode override".to_string());
+        }
+    }
 
     // ── STOP PATH ────────────────────────────────────────────────────────────
     if !start {
-        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
         {
             let mut process_lock = state
                 .child_process
                 .lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
             if let Some(child) = process_lock.take() {
-                let _ = child.kill();
+                child
+                    .kill()
+                    .map_err(|e| format!("Failed to stop owned proxy process: {}", e))?;
             }
         }
 
-        // Forcefully kill any sing-box processes system-wide to guarantee clean state
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/IM", "sing-box.exe", "/T"])
-                .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                .output();
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = std::process::Command::new("pkill")
-                .arg("-f")
-                .arg("sing-box")
-                .output();
-        }
+        // Only the child owned by this X-Link session may be terminated.
+        // An unrelated sing-box process must never be killed by image name.
 
-        // Clear system proxy
-        let _ = crate::os::disable_system_proxy();
+        // Clear system proxy before reporting a successful stop.
+        crate::os::disable_system_proxy()?;
+        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
 
         // Clear global state
         if let Ok(mut session_lock) = state.active_session_id.lock() {
@@ -787,33 +826,8 @@ pub async fn toggle_proxy(
 
     state.set_status(&app, crate::state::ConnectionStatus::Connecting);
     crate::tray::update_tray(&app);
-    // Forcefully kill any existing sing-box processes system-wide before starting
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "sing-box.exe", "/T"])
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .output();
-        // Brief delay to let sockets fully release
-        tokio::time::sleep(std::time::Duration::from_millis(
-            SOCKET_RELEASE_DELAY_WINDOWS_MS,
-        ))
-        .await;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = std::process::Command::new("pkill")
-            .arg("-f")
-            .arg("sing-box")
-            .output();
-        tokio::time::sleep(std::time::Duration::from_millis(
-            SOCKET_RELEASE_DELAY_OTHER_MS,
-        ))
-        .await;
-    }
-
-    // Clean up any stale state in state variable
+    // Clean up a previously tracked child only; a port owned by another
+    // application must be reported as a conflict, not forcibly cleared.
     let mut killed_stale = false;
     {
         let mut process_lock = state
@@ -821,7 +835,13 @@ pub async fn toggle_proxy(
             .lock()
             .map_err(|e| format!("state_lock_poisoned: {}", e))?;
         if let Some(child) = process_lock.take() {
-            let _ = child.kill();
+            if let Err(error) = child.kill() {
+                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                return Err(format!(
+                    "Failed to stop stale owned proxy process: {}",
+                    error
+                ));
+            }
             killed_stale = true;
         }
     }
@@ -839,7 +859,7 @@ pub async fn toggle_proxy(
         &app,
         &state,
         selected_outbound_tag.as_deref(),
-        None,
+        mode_override.as_deref(),
     )
     .await
     {
@@ -1117,6 +1137,9 @@ pub async fn toggle_proxy(
     }
 
     // Set connection global states
+    if let Ok(mut mode) = state.effective_proxy_mode.lock() {
+        *mode = Some(current_mode.clone());
+    }
     state.set_status(&app, crate::state::ConnectionStatus::Connected);
     *CONNECTION_START_TIME.lock().unwrap() = Some(std::time::Instant::now());
 

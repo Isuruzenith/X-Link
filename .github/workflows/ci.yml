@@ -60,6 +60,9 @@ jobs:
       - name: Frontend Type Check
         run: npm run build
 
+      - name: Frontend Tests
+        run: npm test
+
       - name: Rust Toolchain Setup
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:

@@ -25,17 +25,52 @@ pub async fn get_singbox_version(
         .await
         .map_err(|e| format!("Failed to run sing-box: {}", e))?;
 
-    if output.status.success() {
-        let version_str = String::from_utf8_lossy(&output.stdout).into_owned();
-        // Cache the result
-        if let Ok(mut guard) = state.singbox_version.lock() {
-            *guard = Some(version_str.clone());
-        }
-        Ok(version_str)
-    } else {
-        let err_str = String::from_utf8_lossy(&output.stderr).into_owned();
-        Err(format!("sing-box version failed: {}", err_str))
+    let version_str =
+        parse_singbox_version_output(output.status.success(), &output.stdout, &output.stderr)?;
+
+    // Cache the result
+    if let Ok(mut guard) = state.singbox_version.lock() {
+        *guard = Some(version_str.clone());
     }
+    Ok(version_str)
+}
+
+/// Parses the output and exit status of `sing-box version`.
+pub fn parse_singbox_version_output(
+    status_success: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<String, String> {
+    if !status_success {
+        let err_str = String::from_utf8_lossy(stderr).trim().to_string();
+        return if err_str.is_empty() {
+            Err("sing-box version failed with non-zero exit status".to_string())
+        } else {
+            Err(format!("sing-box version failed: {}", err_str))
+        };
+    }
+
+    let out_str = String::from_utf8_lossy(stdout).trim().to_string();
+    if out_str.is_empty() {
+        return Err("sing-box version output is empty".to_string());
+    }
+
+    Ok(out_str)
+}
+
+/// Extracts semantic version number from sing-box version output (e.g. "1.13.14").
+#[allow(dead_code)]
+pub fn extract_singbox_version_number(version_output: &str) -> Option<String> {
+    for line in version_output.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("sing-box version ") {
+            let ver = rest.split_whitespace().next().unwrap_or("").trim();
+            if !ver.is_empty() {
+                return Some(ver.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -56,15 +91,208 @@ pub fn show_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn check_port_conflict(ports: Vec<u16>) -> Result<Option<u16>, String> {
-    for port in ports {
-        // Attempt to bind to 127.0.0.1 on the specified port to check if it's already bound
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
-            return Ok(Some(port));
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortStatus {
+    port: u16,
+    ownership: &'static str,
+}
+
+fn classify_port_ownership(
+    bound: bool,
+    active: bool,
+    owner_pid: Option<u32>,
+    child_pid: Option<u32>,
+) -> &'static str {
+    if !bound {
+        "free"
+    } else if owner_pid.is_some() && owner_pid == child_pid && active {
+        "own"
+    } else if owner_pid.is_some() {
+        "external"
+    } else {
+        "unknown"
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn socket_listener_owners(port: u16, family: u32, tcp: bool) -> Option<Vec<u32>> {
+    use windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCPROW_OWNER_PID,
+        MIB_UDP6ROW_OWNER_PID, MIB_UDPROW_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER,
+        UDP_TABLE_OWNER_PID,
+    };
+    use windows::Win32::Networking::WinSock::AF_INET;
+
+    let mut size = 0u32;
+    // SAFETY: A null buffer with size 0 requests the required table size.
+    let result = unsafe {
+        if tcp {
+            GetExtendedTcpTable(
+                None,
+                &mut size,
+                false,
+                family,
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        } else {
+            GetExtendedUdpTable(None, &mut size, false, family, UDP_TABLE_OWNER_PID, 0)
+        }
+    };
+    if result != ERROR_INSUFFICIENT_BUFFER.0 || !(4..=8 * 1024 * 1024).contains(&size) {
+        return None;
+    }
+
+    let mut buffer = vec![0u32; (size as usize).div_ceil(4)];
+    // SAFETY: The allocation is at least `size` bytes and aligned for the table header.
+    let result = unsafe {
+        if tcp {
+            GetExtendedTcpTable(
+                Some(buffer.as_mut_ptr().cast()),
+                &mut size,
+                false,
+                family,
+                TCP_TABLE_OWNER_PID_LISTENER,
+                0,
+            )
+        } else {
+            GetExtendedUdpTable(
+                Some(buffer.as_mut_ptr().cast()),
+                &mut size,
+                false,
+                family,
+                UDP_TABLE_OWNER_PID,
+                0,
+            )
+        }
+    };
+    if result != 0 || size < 4 || size as usize > buffer.len() * 4 {
+        return None;
+    }
+
+    let bytes = size as usize;
+    let count = buffer[0] as usize;
+    let row_size = match (tcp, family == AF_INET.0 as u32) {
+        (true, true) => std::mem::size_of::<MIB_TCPROW_OWNER_PID>(),
+        (true, false) => std::mem::size_of::<MIB_TCP6ROW_OWNER_PID>(),
+        (false, true) => std::mem::size_of::<MIB_UDPROW_OWNER_PID>(),
+        (false, false) => std::mem::size_of::<MIB_UDP6ROW_OWNER_PID>(),
+    };
+    if count > (bytes - 4) / row_size {
+        return None;
+    }
+
+    let base = buffer.as_ptr().cast::<u8>();
+    let mut owners = Vec::new();
+    for index in 0..count {
+        // SAFETY: The checked count and row size keep every read within the buffer.
+        let ptr = unsafe { base.add(4 + index * row_size) };
+        let (local_port, pid) = match (tcp, family == AF_INET.0 as u32) {
+            (true, true) => {
+                let row = unsafe { std::ptr::read_unaligned(ptr.cast::<MIB_TCPROW_OWNER_PID>()) };
+                (row.dwLocalPort, row.dwOwningPid)
+            }
+            (true, false) => {
+                let row = unsafe { std::ptr::read_unaligned(ptr.cast::<MIB_TCP6ROW_OWNER_PID>()) };
+                (row.dwLocalPort, row.dwOwningPid)
+            }
+            (false, true) => {
+                let row = unsafe { std::ptr::read_unaligned(ptr.cast::<MIB_UDPROW_OWNER_PID>()) };
+                (row.dwLocalPort, row.dwOwningPid)
+            }
+            (false, false) => {
+                let row = unsafe { std::ptr::read_unaligned(ptr.cast::<MIB_UDP6ROW_OWNER_PID>()) };
+                (row.dwLocalPort, row.dwOwningPid)
+            }
+        };
+        if u16::from_be(local_port as u16) == port {
+            owners.push(pid);
         }
     }
-    Ok(None)
+    Some(owners)
+}
+
+#[cfg(target_os = "windows")]
+fn listener_owner(port: u16) -> Option<u32> {
+    use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+    let mut owners = Vec::new();
+    for tcp in [true, false] {
+        owners.extend(socket_listener_owners(port, AF_INET.0 as u32, tcp)?);
+        owners.extend(socket_listener_owners(port, AF_INET6.0 as u32, tcp)?);
+    }
+    if owners.is_empty() || owners.iter().any(|pid| *pid != owners[0]) {
+        None
+    } else {
+        Some(owners[0])
+    }
+}
+
+fn port_is_bound(port: u16) -> bool {
+    use std::net::{TcpListener, UdpSocket};
+
+    // Probe both wildcard and loopback binds: operating systems can permit a wildcard
+    // bind to coexist with a listener bound only to a specific local address.
+    let tcp_v4_loopback = TcpListener::bind(("127.0.0.1", port)).is_err();
+    let tcp_v4_wildcard = TcpListener::bind(("0.0.0.0", port)).is_err();
+    let tcp_v6_loopback = TcpListener::bind(("[::1]", port)).is_err();
+    let tcp_v6_wildcard = TcpListener::bind(("[::]", port)).is_err();
+    let udp_v4_loopback = UdpSocket::bind(("127.0.0.1", port)).is_err();
+    let udp_v4_wildcard = UdpSocket::bind(("0.0.0.0", port)).is_err();
+    let udp_v6_loopback = UdpSocket::bind(("[::1]", port)).is_err();
+    let udp_v6_wildcard = UdpSocket::bind(("[::]", port)).is_err();
+    tcp_v4_loopback
+        | tcp_v4_wildcard
+        | tcp_v6_loopback
+        | tcp_v6_wildcard
+        | udp_v4_loopback
+        | udp_v4_wildcard
+        | udp_v6_loopback
+        | udp_v6_wildcard
+}
+
+#[tauri::command]
+pub fn check_port_status(
+    state: tauri::State<'_, ProxyState>,
+    ports: Vec<u16>,
+) -> Result<Vec<PortStatus>, String> {
+    let settings = state.get_settings();
+    let running = state.get_status() == crate::state::ConnectionStatus::Connected;
+    let active_ports = if settings.use_separate_ports {
+        vec![settings.http_port, settings.socks_port]
+    } else {
+        vec![settings.mixed_port]
+    };
+    let child_pid = state
+        .child_process
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|child| child.pid()));
+    Ok(ports
+        .into_iter()
+        .map(|port| {
+            let bound = port_is_bound(port);
+            #[cfg(target_os = "windows")]
+            let owner = if bound { listener_owner(port) } else { None };
+            #[cfg(not(target_os = "windows"))]
+            let owner = None;
+            PortStatus {
+                port,
+                ownership: classify_port_ownership(
+                    bound,
+                    running && active_ports.contains(&port),
+                    owner,
+                    child_pid,
+                ),
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn check_port_conflict(ports: Vec<u16>) -> Result<Option<u16>, String> {
+    Ok(ports.into_iter().find(|port| port_is_bound(*port)))
 }
 
 #[tauri::command]
@@ -408,9 +636,97 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
-    fn smoke_test_singbox_version() {
-        // Simple assertion just to verify test suite functions
-        assert_eq!(2 + 2, 4);
+    fn port_ownership_distinguishes_free_owned_external_and_unknown() {
+        assert_eq!(classify_port_ownership(false, false, None, None), "free");
+        assert_eq!(
+            classify_port_ownership(true, true, Some(42), Some(42)),
+            "own"
+        );
+        assert_eq!(
+            classify_port_ownership(true, true, Some(84), Some(42)),
+            "external"
+        );
+        assert_eq!(
+            classify_port_ownership(true, true, None, Some(42)),
+            "unknown"
+        );
+        assert_eq!(
+            classify_port_ownership(true, false, Some(84), None),
+            "external"
+        );
+    }
+
+    #[test]
+    fn port_is_bound_detects_tcp_and_udp_listeners() {
+        use std::net::{TcpListener, UdpSocket};
+
+        let tcp = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        assert!(port_is_bound(tcp.local_addr().unwrap().port()));
+        drop(tcp);
+
+        let udp = UdpSocket::bind(("127.0.0.1", 0)).unwrap();
+        assert!(port_is_bound(udp.local_addr().unwrap().port()));
+        drop(udp);
+    }
+
+    #[test]
+    fn test_parse_singbox_version_output_valid() {
+        let sample_output =
+            b"sing-box version 1.13.14\n\nEnvironment: go1.26.4 windows/amd64\nTags: with_gvisor\n";
+        let parsed = parse_singbox_version_output(true, sample_output, b"")
+            .expect("should parse valid version output");
+        assert!(parsed.contains("sing-box version 1.13.14"));
+
+        let version_num = extract_singbox_version_number(&parsed);
+        assert_eq!(version_num.as_deref(), Some("1.13.14"));
+    }
+
+    #[test]
+    fn test_parse_singbox_version_output_process_failure_with_stderr() {
+        let stderr = b"fatal: permission denied";
+        let err = parse_singbox_version_output(false, b"", stderr).unwrap_err();
+        assert_eq!(err, "sing-box version failed: fatal: permission denied");
+    }
+
+    #[test]
+    fn test_parse_singbox_version_output_process_failure_empty_stderr() {
+        let err = parse_singbox_version_output(false, b"", b"").unwrap_err();
+        assert_eq!(err, "sing-box version failed with non-zero exit status");
+    }
+
+    #[test]
+    fn test_parse_singbox_version_output_empty_stdout() {
+        let err = parse_singbox_version_output(true, b"   \n\t  ", b"").unwrap_err();
+        assert_eq!(err, "sing-box version output is empty");
+    }
+
+    #[test]
+    fn test_extract_singbox_version_number_various_formats() {
+        assert_eq!(
+            extract_singbox_version_number("sing-box version 1.14.0-rc.1\n"),
+            Some("1.14.0-rc.1".to_string())
+        );
+        assert_eq!(
+            extract_singbox_version_number("   sing-box version 1.12.0   "),
+            Some("1.12.0".to_string())
+        );
+        assert_eq!(extract_singbox_version_number("some random text"), None);
+        assert_eq!(extract_singbox_version_number("sing-box version"), None);
+        assert_eq!(extract_singbox_version_number(""), None);
+    }
+
+    #[test]
+    #[ignore = "requires installed sing-box sidecar binary"]
+    fn test_live_singbox_binary_version() {
+        let mut cmd =
+            std::process::Command::new("src-tauri/binaries/sing-box-x86_64-pc-windows-msvc.exe");
+        let output = cmd.arg("version").output().expect("binary should run");
+        let ver =
+            parse_singbox_version_output(output.status.success(), &output.stdout, &output.stderr)
+                .expect("binary should produce valid version string");
+        assert!(ver.contains("sing-box version"));
     }
 }
