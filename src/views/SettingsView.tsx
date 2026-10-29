@@ -134,7 +134,7 @@ export function SettingsView() {
                         { value: 'dark', label: 'Dark', icon: 'dark_mode' },
                         { value: 'system', label: 'System', icon: 'desktop_windows' },
                       ]}
-                      className="w-full justify-stretch"
+                      className="appearance-segments"
                     />
                   </Card>
                 </div>
@@ -204,15 +204,15 @@ export function SettingsView() {
                 </Card>
               </div>
 
-              <Card className="flex items-center gap-3.5 p-3.5 px-4 bg-card border-border shadow-sm shrink-0">
-                <img src={xLinkLogo} alt="X-Link" className="size-10 rounded-lg shrink-0" />
-                <div className="flex flex-col">
-                  <h4 className="text-xs font-bold text-foreground">X-Link</h4>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+              <Card className="settings-version-card">
+                <img src={xLinkLogo} alt="X-Link" />
+                <div className="version-copy">
+                  <h4>X-Link</h4>
+                  <p>
                     Empowered by sing-box
                   </p>
                 </div>
-                <div className="ml-auto">
+                <div className="version-badge">
                   <Badge variant="outline" className="h-5 px-2.5 text-[10px] font-semibold border-border bg-muted/30">v{appVersion}</Badge>
                 </div>
               </Card>
@@ -307,16 +307,66 @@ export function SettingsView() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="flex flex-col gap-1.5">
                     <FormInput label="Primary DNS (via proxy)" value={settings.primaryDns} onChange={(v) => updateSettings({ primaryDns: v })} placeholder="https://1.1.1.1/dns-query" mono />
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {[
+                        { label: 'Cloudflare DoH', val: 'https://1.1.1.1/dns-query' },
+                        { label: 'Google DoH', val: 'https://dns.google/dns-query' },
+                        { label: 'Cloudflare DoT', val: 'tls://1.1.1.1:853' },
+                        { label: 'AdGuard DoQ', val: 'quic://dns.adguard-dns.com:853' },
+                      ].map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          className="text-[9.5px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                          onClick={() => updateSettings({ primaryDns: item.val })}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <FormInput label="Fallback DNS (via proxy)" value={settings.fallbackDns} onChange={(v) => updateSettings({ fallbackDns: v })} placeholder="https://8.8.8.8/dns-query" mono />
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {[
+                        { label: 'Google DoH', val: 'https://dns.google/dns-query' },
+                        { label: 'Quad9 DoH', val: 'https://dns.quad9.net/dns-query' },
+                        { label: 'Google DoT', val: 'tls://8.8.8.8:853' },
+                        { label: 'Cloudflare UDP', val: '1.1.1.1:53' },
+                      ].map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          className="text-[9.5px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                          onClick={() => updateSettings({ fallbackDns: item.val })}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <FormInput label="Direct DNS (local/bypass)" value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="Auto (System DNS)" mono />
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {[
+                        { label: 'System (Auto)', val: '' },
+                        { label: 'Cloudflare', val: '1.1.1.1:53' },
+                        { label: 'Google', val: '8.8.8.8:53' },
+                      ].map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          className="text-[9.5px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                          onClick={() => updateSettings({ directDns: item.val })}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground/80">
-                  Used for resolving domains. The direct DNS server is used to resolve direct/bypassed connections.
+                  Supports DoH (<code>https://</code>), DoT (<code>tls://</code>), DoQ (<code>quic://</code>), TCP (<code>tcp://</code>), and Traditional UDP (<code>ip:port</code>).
                 </p>
               </Card>
 
@@ -398,27 +448,26 @@ export function SettingsView() {
                 <FormSwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
                   checked={settings.apiEnabled} onChange={(v) => updateSettings({ apiEnabled: v })} />
                 <div className={`flex flex-col gap-4 ${!settings.apiEnabled ? 'opacity-50' : ''}`}>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    <FormInput
-                      label="API Port"
-                      type="number"
-                      mono
-                      className="h-8"
-                      style={{ borderColor: (settings.apiPort < 1 || settings.apiPort > 65535) ? 'var(--destructive)' : undefined }}
-                      value={settings.apiPort}
-                      disabled={!settings.apiEnabled}
-                      onChange={(v) => updateSettings({ apiPort: parseInt(v) || 9090 })}
-                    />
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex gap-2 items-center">
-                        <div className="flex-1 min-w-0">
-                          <FormInput label="API secret token" value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" disabled={!settings.apiEnabled} mono />
-                        </div>
+                  <div className="settings-api-row">
+                    <div className="settings-api-port">
+                      <FormInput
+                        label="API Port"
+                        type="number"
+                        mono
+                        style={{ borderColor: (settings.apiPort < 1 || settings.apiPort > 65535) ? 'var(--destructive)' : undefined }}
+                        value={settings.apiPort}
+                        disabled={!settings.apiEnabled}
+                        onChange={(v) => updateSettings({ apiPort: parseInt(v) || 9090 })}
+                      />
+                    </div>
+                    <div className="settings-api-secret">
+                      <div className="settings-api-secret-action">
+                        <FormInput label="API secret token" value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" disabled={!settings.apiEnabled} mono />
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="ghost"
                           size="icon"
-                          className="size-8 shrink-0"
+                          className="settings-api-generate"
                           title="Generate new random API Secret Token"
                           disabled={!settings.apiEnabled}
                           onClick={() => {

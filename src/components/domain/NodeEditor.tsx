@@ -15,6 +15,8 @@ const PROTOCOL_LABELS: Record<string, string> = {
   shadowsocks: 'Shadowsocks',
   hysteria2: 'Hysteria2',
   tuic: 'TUIC v5',
+  wireguard: 'WireGuard',
+  ssh: 'SSH',
   socks: 'SOCKS5',
   http: 'HTTP',
 };
@@ -143,8 +145,8 @@ export function NodeEditor() {
 
   if (!isOpen) return null;
 
-  const isSpecial = ['socks', 'http'].includes(store.editProtocol);
-  const noTransport = ['socks', 'http', 'hysteria2', 'tuic'].includes(store.editProtocol);
+  const isSpecial = ['socks', 'http', 'wireguard', 'ssh'].includes(store.editProtocol);
+  const noTransport = ['socks', 'http', 'hysteria2', 'tuic', 'wireguard', 'ssh'].includes(store.editProtocol);
 
   return (
     <>
@@ -210,6 +212,8 @@ export function NodeEditor() {
                       { value: 'shadowsocks', label: 'Shadowsocks' },
                       { value: 'hysteria2', label: 'Hysteria2' },
                       { value: 'tuic', label: 'TUIC v5' },
+                      { value: 'wireguard', label: 'WireGuard' },
+                      { value: 'ssh', label: 'SSH' },
                       { value: 'socks', label: 'SOCKS5' },
                       { value: 'http', label: 'HTTP Proxy' },
                     ]}
@@ -423,6 +427,106 @@ export function NodeEditor() {
                   </div>
                 </SubCard>
               )}
+
+              {store.editProtocol === 'wireguard' && (
+                <SubCard title="WireGuard Interface & Peer">
+                  <div className="flex flex-col gap-1.5">
+                    <ToggleInput
+                      label="Private key (Interface)"
+                      value={store.editWgPrivateKey}
+                      onChange={(v) => store.setField('editWgPrivateKey', v)}
+                      placeholder="Base64 private key"
+                      mono
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Inp
+                      label="Local interface address"
+                      value={store.editWgAddress}
+                      onChange={(v) => store.setField('editWgAddress', v)}
+                      placeholder="10.0.0.2/32, fd00::2/128"
+                      mono
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Inp
+                      label="Peer public key"
+                      value={store.editWgPeerPublicKey}
+                      onChange={(v) => store.setField('editWgPeerPublicKey', v)}
+                      placeholder="Base64 public key"
+                      mono
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <ToggleInput
+                      label="Pre-shared key (Optional)"
+                      value={store.editWgPsk}
+                      onChange={(v) => store.setField('editWgPsk', v)}
+                      placeholder="Optional PSK"
+                      mono
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <Inp
+                        label="MTU"
+                        type="number"
+                        value={String(store.editWgMtu)}
+                        onChange={(v) => store.setField('editWgMtu', Number(v) || 1420)}
+                        mono
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Inp
+                        label="Reserved bytes (e.g. [0,0,0])"
+                        value={store.editWgReserved}
+                        onChange={(v) => store.setField('editWgReserved', v)}
+                        placeholder="[0,0,0]"
+                        mono
+                      />
+                    </div>
+                  </div>
+                </SubCard>
+              )}
+
+              {store.editProtocol === 'ssh' && (
+                <SubCard title="SSH Credentials">
+                  <div className="flex flex-col gap-1.5">
+                    <Inp
+                      label="SSH username"
+                      value={store.editSshUser}
+                      onChange={(v) => store.setField('editSshUser', v)}
+                      placeholder="root"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <ToggleInput
+                      label="SSH password (Optional if using Key)"
+                      value={store.editSshPassword}
+                      onChange={(v) => store.setField('editSshPassword', v)}
+                      placeholder="Password"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <ToggleInput
+                      label="Private key or path (Optional if using Password)"
+                      value={store.editSshPrivateKey}
+                      onChange={(v) => store.setField('editSshPrivateKey', v)}
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY----- or C:\id_ed25519"
+                      mono
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Inp
+                      label="Host key / fingerprint (Optional)"
+                      value={store.editSshHostKey}
+                      onChange={(v) => store.setField('editSshHostKey', v)}
+                      placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5..."
+                      mono
+                    />
+                  </div>
+                </SubCard>
+              )}
             </>
           )}
 
@@ -440,6 +544,7 @@ export function NodeEditor() {
                     { value: 'grpc', label: 'gRPC' },
                     { value: 'http', label: 'HTTP/2' },
                     { value: 'httpupgrade', label: 'HTTP Upgrade' },
+                    { value: 'quic', label: 'QUIC' },
                   ]}
                 />
               </div>

@@ -174,3 +174,17 @@ describe('node geolocation consent', () => {
     expect(useProfileStore.getState().nodeGeoCache['8.8.4.4']).toMatchObject({ countryCode: 'gb' });
   });
 });
+
+describe('profile auto-update interval', () => {
+  it('updates autoUpdateInterval and persists profile list', async () => {
+    await useProfileStore.getState().setProfileAutoUpdateInterval('first', 360);
+
+    const first = useProfileStore.getState().profiles.find((p) => p.id === 'first');
+    expect(first?.autoUpdateInterval).toBe(360);
+    expect(storeHelper.saveProfiles).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'first', autoUpdateInterval: 360 }),
+      ])
+    );
+  });
+});

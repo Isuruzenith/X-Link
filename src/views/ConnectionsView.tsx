@@ -176,7 +176,11 @@ const ConnectionRow = memo(({
 });
 ConnectionRow.displayName = 'ConnectionRow';
 
-export function ConnectionsView() {
+interface ConnectionsViewProps {
+  onNavigateToTab?: (tab: 'dashboard') => void;
+}
+
+export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
   const { isConnected } = useConnectionStore();
   const [connections, setConnections] = useState<ConnectionEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -363,10 +367,12 @@ export function ConnectionsView() {
               placeholder="Host, IP or rule…"
               value={searchQuery}
               onChange={setSearchQuery}
+              disabled={!isConnected}
             />
           </div>
           
           <SegmentedControl
+            disabled={!isConnected}
             value={filterType}
             onChange={(val) => setFilterType(val as 'all' | 'proxy' | 'direct')}
             options={[
@@ -444,6 +450,11 @@ export function ConnectionsView() {
                 </span>
                 {isConnected && searchQuery && (
                   <span className="text-[10px]">Try modifying your filter query.</span>
+                )}
+                {!isConnected && onNavigateToTab && (
+                  <Button variant="outline" onClick={() => onNavigateToTab('dashboard')}>
+                    <Icon name="speed" size={16} /> Go to Dashboard
+                  </Button>
                 )}
               </div>
             )}

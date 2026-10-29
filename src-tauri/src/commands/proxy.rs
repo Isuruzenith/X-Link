@@ -69,6 +69,160 @@ pub struct ProxyStateSerialized {
     pub tun_enabled: bool,
     pub effective_proxy_mode: Option<String>,
     pub uptime: u64,
+    pub core_pid: Option<u32>,
+    pub memory_bytes: u64,
+    pub cpu_percent: f32,
+}
+
+#[cfg(target_os = "windows")]
+pub fn get_process_metrics(pid: u32) -> (u64, f32) {
+    #[repr(C)]
+    struct PROCESS_MEMORY_COUNTERS {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    extern "system" {
+        fn K32GetProcessMemoryInfo(
+            h_process: isize,
+            ppsmem_counters: *mut PROCESS_MEMORY_COUNTERS,
+            cb: u32,
+        ) -> i32;
+        fn OpenProcess(
+            dw_desired_access: u32,
+            b_inherit_handle: i32,
+            dw_process_id: u32,
+        ) -> isize;
+        fn CloseHandle(h_object: isize) -> i32;
+        fn GetProcessTimes(
+            h_process: isize,
+            lp_creation_time: *mut u64,
+            lp_exit_time: *mut u64,
+            lp_kernel_time: *mut u64,
+            lp_user_time: *mut u64,
+        ) -> i32;
+    }
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid) };
+    let handle = if handle == 0 {
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) }
+    } else {
+        handle
+    };
+
+    if handle == 0 {
+        return (0, 0.0);
+    }
+
+    let mut mem_counters = PROCESS_MEMORY_COUNTERS {
+        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        page_fault_count: 0,
+        peak_working_set_size: 0,
+        working_set_size: 0,
+        quota_peak_paged_pool_usage: 0,
+        quota_paged_pool_usage: 0,
+        quota_peak_non_paged_pool_usage: 0,
+        quota_non_paged_pool_usage: 0,
+        pagefile_usage: 0,
+        peak_pagefile_usage: 0,
+    };
+
+    let mem_ok = unsafe {
+        K32GetProcessMemoryInfo(
+            handle,
+            &mut mem_counters,
+            mem_counters.cb,
+        )
+    };
+
+    let memory_bytes = if mem_ok != 0 {
+        mem_counters.working_set_size as u64
+    } else {
+        0
+    };
+
+    let mut creation_time = 0u64;
+    let mut exit_time = 0u64;
+    let mut kernel_time = 0u64;
+    let mut user_time = 0u64;
+
+    let times_ok = unsafe {
+        GetProcessTimes(
+            handle,
+            &mut creation_time,
+            &mut exit_time,
+            &mut kernel_time,
+            &mut user_time,
+        )
+    };
+    unsafe { CloseHandle(handle) };
+
+    let cpu_percent = if times_ok != 0 {
+        let total_proc_time_100ns = kernel_time.saturating_add(user_time);
+        static LAST_CPU: std::sync::Mutex<Option<(u32, std::time::Instant, u64)>> =
+            std::sync::Mutex::new(None);
+        let now = std::time::Instant::now();
+        let mut guard = LAST_CPU.lock().unwrap();
+        if let Some((prev_pid, prev_instant, prev_proc_time)) = *guard {
+            if prev_pid == pid && now > prev_instant && total_proc_time_100ns >= prev_proc_time {
+                let delta_proc_100ns = total_proc_time_100ns - prev_proc_time;
+                let elapsed_100ns = (now.duration_since(prev_instant).as_nanos() / 100) as u64;
+                *guard = Some((pid, now, total_proc_time_100ns));
+                if elapsed_100ns > 0 {
+                    let num_cpus = std::thread::available_parallelism()
+                        .map(|n| n.get())
+                        .unwrap_or(1) as f64;
+                    let pct = ((delta_proc_100ns as f64) / (elapsed_100ns as f64) / num_cpus) * 100.0;
+                    (pct as f32).clamp(0.0, 100.0)
+                } else {
+                    0.0
+                }
+            } else {
+                *guard = Some((pid, now, total_proc_time_100ns));
+                0.0
+            }
+        } else {
+            *guard = Some((pid, now, total_proc_time_100ns));
+            0.0
+        }
+    } else {
+        0.0
+    };
+
+    (memory_bytes, cpu_percent)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_process_metrics(_pid: u32) -> (u64, f32) {
+    #[cfg(target_os = "linux")]
+    {
+        let status_path = format!("/proc/{}/status", _pid);
+        if let Ok(content) = std::fs::read_to_string(status_path) {
+            for line in content.lines() {
+                if line.starts_with("VmRSS:") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Ok(kb) = parts[1].parse::<u64>() {
+                            return (kb * 1024, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (0, 0.0)
 }
 
 // Global variable to keep track of connection start time
@@ -128,7 +282,6 @@ fn spawn_singbox_sidecar(
                     let _ = app_for_logs.emit("sing-box-log", text);
                 }
                 CommandEvent::Terminated(payload) => {
-                    let _ = app_for_logs.emit("sing-box-terminated", payload.code);
                     let mut guard = term_tx.lock().await;
                     if let Some(tx) = guard.take() {
                         let _ = tx.send(payload.code);
@@ -142,6 +295,7 @@ fn spawn_singbox_sidecar(
                         };
 
                     if is_active {
+                        let _ = app_for_logs.emit("sing-box-terminated", payload.code);
                         state_for_logs.set_status(
                             &app_for_logs,
                             crate::state::ConnectionStatus::Disconnected,
@@ -213,6 +367,21 @@ mod startup_tests {
         assert_eq!(mode_for_tun_support("tun", false), "system");
         assert_eq!(mode_for_tun_support("tun", true), "tun");
         assert_eq!(mode_for_tun_support("system", false), "system");
+    }
+
+    #[test]
+    fn test_get_process_metrics_self() {
+        let current_pid = std::process::id();
+        let (mem, cpu) = super::get_process_metrics(current_pid);
+        #[cfg(target_os = "windows")]
+        {
+            assert!(mem > 0, "Current process memory should be > 0 bytes, got {}", mem);
+            assert!(cpu >= 0.0 && cpu <= 100.0, "CPU percent should be 0-100%, got {}", cpu);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (mem, cpu);
+        }
     }
 }
 
@@ -397,6 +566,18 @@ pub fn get_proxy_status(
     let tun_enabled = status == crate::state::ConnectionStatus::Connected
         && effective_proxy_mode.as_deref() == Some("tun");
 
+    let core_pid = state
+        .child_process
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|child| child.pid()));
+
+    let (memory_bytes, cpu_percent) = if let Some(pid) = core_pid {
+        get_process_metrics(pid)
+    } else {
+        (0, 0.0)
+    };
+
     Ok(ProxyStateSerialized {
         status,
         http_port: settings.http_port,
@@ -405,6 +586,9 @@ pub fn get_proxy_status(
         tun_enabled,
         effective_proxy_mode,
         uptime,
+        core_pid,
+        memory_bytes,
+        cpu_percent,
     })
 }
 

@@ -79,6 +79,11 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
 }
 
 #[tauri::command]
+pub fn is_minimized_launch() -> bool {
+    std::env::args().any(|arg| arg == "--minimized")
+}
+
+#[tauri::command]
 pub fn show_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window

@@ -20,6 +20,9 @@ interface ConnectionState {
   downloadSpeed: number;
   activeConnections: number;
   speedHistory: { up: number; down: number }[];
+  corePid: number | null;
+  memoryBytes: number;
+  cpuPercent: number;
 
   // Actions
   setPorts: (ports: { httpPort?: number; socksPort?: number; mixedPort?: number }) => void;
@@ -27,6 +30,7 @@ interface ConnectionState {
   setEffectiveProxyMode: (mode: 'tun' | 'system' | null) => void;
   setIsConnected: (connected: boolean) => void;
   setUptime: (time: number) => void;
+  setCoreMetrics: (metrics: { corePid: number | null; memoryBytes: number; cpuPercent: number }) => void;
   updateTrafficStats: (stats: {
     uploadBytes: number;
     downloadBytes: number;
@@ -53,12 +57,16 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   downloadSpeed: 0,
   activeConnections: 0,
   speedHistory: [],
+  corePid: null,
+  memoryBytes: 0,
+  cpuPercent: 0,
 
   setPorts: (ports) => set((state) => ({ ...state, ...ports })),
-  setConnectionStatus: (status) => set({ connectionStatus: status, ...(status === 'disconnected' ? { effectiveProxyMode: null } : {}) }),
+  setConnectionStatus: (status) => set({ connectionStatus: status, ...(status === 'disconnected' ? { effectiveProxyMode: null, corePid: null, memoryBytes: 0, cpuPercent: 0 } : {}) }),
   setEffectiveProxyMode: (mode) => set({ effectiveProxyMode: mode }),
   setIsConnected: (connected) => set({ isConnected: connected }),
   setUptime: (time) => set({ uptime: time }),
+  setCoreMetrics: (metrics) => set({ corePid: metrics.corePid, memoryBytes: metrics.memoryBytes, cpuPercent: metrics.cpuPercent }),
 
   updateTrafficStats: (stats) => set((state) => ({
     ...state,

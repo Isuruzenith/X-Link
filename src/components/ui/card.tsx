@@ -11,7 +11,7 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "material-card flex flex-col overflow-hidden rounded-[20px] bg-[var(--md-card)] text-[var(--md-sys-color-on-surface)] transition-shadow",
+        "material-card",
         className
       )}
       {...props}
@@ -24,7 +24,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "material-card-header flex flex-row items-center justify-between gap-3 p-5 pb-3 shrink-0",
+        "material-card-header",
         className
       )}
       {...props}

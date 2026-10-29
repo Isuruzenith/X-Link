@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
+import { createElement } from 'react';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Button } from './button';
+import { Icon } from './icon';
+
+function OtherChild({ name }: { name: string }) {
+  return <span>{name}</span>;
+}
 
 describe('Material button adapter', () => {
   it('preserves submit behavior for the profile import form', () => {
@@ -27,5 +33,33 @@ describe('Material button adapter', () => {
     const action = container.querySelector('md-icon-button')!;
     expect(action.getAttribute('aria-label')).toBe('Delete profile');
     expect(action.getAttribute('type')).toBe('button');
+  });
+
+  it('slots Icon and md-icon children without slotting other elements', () => {
+    const { container } = render(
+      <Button variant="outline">
+        <Icon name="upload_file" />
+        {createElement('md-icon', null, 'paste')}
+        <OtherChild name="file" />
+        Choose file
+      </Button>,
+    );
+    expect(container.querySelectorAll('md-icon[slot="icon"]')).toHaveLength(2);
+    expect(container.querySelector('span')?.hasAttribute('slot')).toBe(false);
+  });
+
+  it('slots elements explicitly marked as button icons', () => {
+    const { container } = render(<Button><span data-icon="true">Icon</span> Paste clipboard</Button>);
+    expect(container.querySelector('span')?.getAttribute('slot')).toBe('icon');
+  });
+
+  it('preserves an explicitly chosen slot', () => {
+    const { container } = render(<Button><Icon name="arrow_forward" slot="trailing-icon" /> Next</Button>);
+    expect(container.querySelector('md-icon')?.getAttribute('slot')).toBe('trailing-icon');
+  });
+
+  it('keeps the default slot on icon-only buttons', () => {
+    const { container } = render(<Button size="icon" title="Close"><Icon name="close" /></Button>);
+    expect(container.querySelector('md-icon')?.hasAttribute('slot')).toBe(false);
   });
 });

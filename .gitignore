@@ -49,3 +49,6 @@ src-tauri/binaries/
 
 # Landing page assets (explicitly committed for GitHub Pages)
 !docs/
+.playwright-mcp/*
+dogfood-output/*
+.hermes/*

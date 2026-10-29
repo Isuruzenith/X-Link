@@ -41,14 +41,18 @@ pub fn run() {
     #[cfg(target_os = "windows")]
     wait_for_elevation_handoff();
 
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-        }))
+    let builder = tauri::Builder::default();
+
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
@@ -57,6 +61,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_singbox_version,
             commands::system::get_app_version,
+            commands::system::is_minimized_launch,
             commands::system::show_window,
             commands::system::check_port_conflict,
             commands::system::check_port_status,
@@ -82,6 +87,7 @@ pub fn run() {
             commands::config::switch_profile,
             commands::config::get_profile_outbounds,
             commands::config::update_rule_set,
+            commands::config::run_subscription_auto_updates,
             commands::geo::lookup_node_geo,
             commands::latency::test_node_latency,
             commands::latency::test_all_nodes
@@ -97,6 +103,19 @@ pub fn run() {
                     if crate::os::is_elevated() && settings.proxy_mode == "tun" {
                         let _ = crate::commands::system::set_runas_admin(true);
                     }
+                }
+            });
+
+            // Start subscription auto-update background scheduler
+            let handle_for_scheduler = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    let _ = crate::commands::config::run_subscription_auto_updates(
+                        handle_for_scheduler.clone(),
+                    )
+                    .await;
                 }
             });
 

@@ -49,9 +49,19 @@ interface NodeEditorState {
   editHttpUser: string;
   editHttpPassword: string;
   editHttpTls: boolean;
+  editWgPrivateKey: string;
+  editWgAddress: string;
+  editWgPeerPublicKey: string;
+  editWgPsk: string;
+  editWgMtu: number;
+  editWgReserved: string;
+  editSshUser: string;
+  editSshPassword: string;
+  editSshPrivateKey: string;
+  editSshHostKey: string;
 
   // Actions
-  openEditor: (node: ProxyNode) => void;
+  openEditor: (node?: ProxyNode | null) => void;
   closeEditor: () => void;
   setSection: (section: 'basic' | 'transport' | 'tls') => void;
   setField: (field: keyof Omit<NodeEditorState, 'isOpen' | 'isSaving' | 'saveError' | 'section' | 'openEditor' | 'closeEditor' | 'setSection' | 'setField' | 'saveEditor'>, value: unknown) => void;
@@ -102,16 +112,90 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
   editHttpUser: '',
   editHttpPassword: '',
   editHttpTls: false,
+  editWgPrivateKey: '',
+  editWgAddress: '10.0.0.2/32',
+  editWgPeerPublicKey: '',
+  editWgPsk: '',
+  editWgMtu: 1420,
+  editWgReserved: '',
+  editSshUser: 'root',
+  editSshPassword: '',
+  editSshPrivateKey: '',
+  editSshHostKey: '',
 
   openEditor: (node) => {
+    if (!node) {
+      const nodeCount = useProfileStore.getState().nodes.length;
+      set({
+        isOpen: true,
+        saveError: null,
+        section: 'basic',
+        editTag: `Server ${nodeCount + 1}`,
+        editAddress: '',
+        editPort: 443,
+        editProtocol: 'vless',
+        editUuid: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : '',
+        editFlow: '',
+        editPassword: '',
+        editMethod: 'aes-256-gcm',
+        editHy2Auth: '',
+        editHy2UpBw: '100 mbps',
+        editHy2DownBw: '200 mbps',
+        editHy2ObfsType: '',
+        editHy2ObfsPassword: '',
+        editTuicUuid: '',
+        editTuicPassword: '',
+        editTuicCongestion: 'bbr',
+        editTuicUdpMode: 'native',
+        editSocksUser: '',
+        editSocksPassword: '',
+        editSocksVersion: 5,
+        editSocksUdpOverTcp: false,
+        editHttpUser: '',
+        editHttpPassword: '',
+        editHttpTls: false,
+        editNetwork: 'tcp',
+        editPath: '',
+        editHost: '',
+        editServiceName: '',
+        editTlsEnabled: false,
+        editAllowInsecure: false,
+        editServerName: '',
+        editAlpn: 'http/1.1',
+        editRealityEnabled: false,
+        editFingerprint: 'chrome',
+        editPublicKey: '',
+        editShortId: '',
+        editWgPrivateKey: '',
+        editWgAddress: '10.0.0.2/32',
+        editWgPeerPublicKey: '',
+        editWgPsk: '',
+        editWgMtu: 1420,
+        editWgReserved: '',
+        editSshUser: 'root',
+        editSshPassword: '',
+        editSshPrivateKey: '',
+        editSshHostKey: '',
+      });
+      return;
+    }
+
     const t = node.transport?.type || node.network || 'tcp';
+    const peer = node.peers && node.peers.length > 0 ? node.peers[0] : null;
+    const peerServer = peer?.server || node.server || '';
+    const peerPort = peer?.server_port || node.server_port || (node.type === 'wireguard' ? 51820 : node.type === 'ssh' ? 22 : 443);
+    const peerPub = peer?.public_key || (node.peer_public_key as string) || '';
+    const peerPsk = peer?.pre_shared_key || (node.pre_shared_key as string) || '';
+    const reservedArr = peer?.reserved || (node.reserved as number[]) || [];
+    const localAddrArr = (node.local_address as string[]) || (node.address as string[]) || [];
+
     set({
       isOpen: true,
       saveError: null,
       section: 'basic',
       editTag: node.tag || '',
-      editAddress: node.server || '',
-      editPort: node.server_port || 443,
+      editAddress: peerServer,
+      editPort: peerPort,
       editProtocol: node.type || 'vless',
       editUuid: node.uuid || node.id || '',
       editFlow: node.flow || '',
@@ -133,9 +217,19 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
       editHttpUser: node.username || '',
       editHttpPassword: node.password || '',
       editHttpTls: !!node.tls?.enabled,
+      editWgPrivateKey: (node.private_key as string) || '',
+      editWgAddress: localAddrArr.length > 0 ? localAddrArr.join(', ') : '10.0.0.2/32',
+      editWgPeerPublicKey: peerPub,
+      editWgPsk: peerPsk,
+      editWgMtu: (node.mtu as number) || 1420,
+      editWgReserved: reservedArr.length > 0 ? JSON.stringify(reservedArr) : '',
+      editSshUser: (node.user as string) || 'root',
+      editSshPassword: node.password || '',
+      editSshPrivateKey: (node.private_key as string) || (node.private_key_path as string) || '',
+      editSshHostKey: Array.isArray(node.host_key) ? node.host_key.join('\n') : (typeof node.host_key === 'string' ? node.host_key : ''),
       editNetwork: ['ws', 'grpc', 'quic', 'http', 'httpupgrade'].includes(t) ? t : 'tcp',
       editPath: node.transport?.path || '',
-      editHost: node.transport?.headers?.Host || '',
+      editHost: node.transport?.host || node.transport?.headers?.Host || node.transport?.headers?.host || '',
       editServiceName: node.transport?.service_name || '',
       editTlsEnabled: !!node.tls?.enabled,
       editAllowInsecure: !!node.tls?.insecure,
@@ -170,9 +264,9 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
     try {
       const outbound: Partial<ProxyNode> = { type: state.editProtocol, tag: state.editTag.trim() };
 
-      if (['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'socks', 'http'].includes(state.editProtocol)) {
+      if (['vless', 'vmess', 'trojan', 'shadowsocks', 'hysteria2', 'tuic', 'socks', 'http', 'ssh'].includes(state.editProtocol)) {
         outbound.server = state.editAddress.trim();
-        outbound.server_port = Number(state.editPort) || 443;
+        outbound.server_port = Number(state.editPort) || (state.editProtocol === 'ssh' ? 22 : 443);
       }
 
       if (state.editProtocol === 'vless' || state.editProtocol === 'vmess') {
@@ -218,10 +312,51 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
           outbound.password = state.editHttpPassword;
         }
         if (state.editHttpTls) outbound.tls = { enabled: true };
+      } else if (state.editProtocol === 'wireguard') {
+        if (!state.editWgPrivateKey.trim()) {
+          set({ saveError: 'WireGuard private key is required.', isSaving: false });
+          return;
+        }
+        if (!state.editWgPeerPublicKey.trim()) {
+          set({ saveError: 'Peer public key is required.', isSaving: false });
+          return;
+        }
+        let parsedReserved: number[] | undefined;
+        if (state.editWgReserved.trim()) {
+          try {
+            parsedReserved = JSON.parse(state.editWgReserved.trim());
+          } catch {
+            set({ saveError: 'Reserved bytes must be a valid JSON array, e.g. [0,0,0]', isSaving: false });
+            return;
+          }
+        }
+        outbound.server = state.editAddress.trim();
+        outbound.server_port = Number(state.editPort) || 51820;
+        outbound.private_key = state.editWgPrivateKey.trim();
+        outbound.peer_public_key = state.editWgPeerPublicKey.trim();
+        outbound.local_address = state.editWgAddress.split(',').map((s) => s.trim()).filter(Boolean);
+        outbound.pre_shared_key = state.editWgPsk.trim() || undefined;
+        outbound.mtu = Number(state.editWgMtu) || 1420;
+        outbound.reserved = parsedReserved;
+      } else if (state.editProtocol === 'ssh') {
+        if (!state.editSshUser.trim()) {
+          set({ saveError: 'SSH username is required.', isSaving: false });
+          return;
+        }
+        outbound.user = state.editSshUser.trim();
+        if (state.editSshPassword.trim()) {
+          outbound.password = state.editSshPassword.trim();
+        }
+        if (state.editSshPrivateKey.trim()) {
+          outbound.private_key = state.editSshPrivateKey.trim();
+        }
+        if (state.editSshHostKey.trim()) {
+          outbound.host_key = state.editSshHostKey.split('\n').map((s) => s.trim()).filter(Boolean);
+        }
       }
 
       const needTls = state.editTlsEnabled || ['hysteria2', 'tuic'].includes(state.editProtocol);
-      if (needTls && !['socks', 'http', 'shadowsocks'].includes(state.editProtocol)) {
+      if (needTls && !['socks', 'http', 'shadowsocks', 'wireguard', 'ssh'].includes(state.editProtocol)) {
         const tls: NonNullable<ProxyNode['tls']> = { enabled: true };
         if (state.editServerName.trim()) tls.server_name = state.editServerName.trim();
         if (state.editAllowInsecure) tls.insecure = true;
@@ -237,10 +372,13 @@ export const useNodeEditorStore = create<NodeEditorState>((set, get) => ({
         outbound.tls = tls;
       }
 
-      if (state.editNetwork && state.editNetwork !== 'tcp' && !['socks', 'http', 'hysteria2', 'tuic'].includes(state.editProtocol)) {
+      if (state.editNetwork && state.editNetwork !== 'tcp' && !['socks', 'http', 'hysteria2', 'tuic', 'wireguard', 'ssh'].includes(state.editProtocol)) {
         const transport: NonNullable<ProxyNode['transport']> = { type: state.editNetwork };
         if (state.editPath.trim()) transport.path = state.editPath.trim();
-        if (state.editHost.trim()) transport.headers = { Host: state.editHost.trim() };
+        if (state.editHost.trim()) {
+          if (state.editNetwork === 'httpupgrade') transport.host = state.editHost.trim();
+          else transport.headers = { Host: state.editHost.trim() };
+        }
         if (state.editServiceName.trim()) transport.service_name = state.editServiceName.trim();
         outbound.transport = transport;
       }

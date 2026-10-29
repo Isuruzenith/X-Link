@@ -29,7 +29,8 @@ interface DashboardViewProps {
 export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
   const {
     connectionStatus, effectiveProxyMode, uptime, uploadBytes, downloadBytes,
-    uploadSpeed, downloadSpeed, activeConnections, speedHistory, toggleConnect, requestElevation,
+    uploadSpeed, downloadSpeed, activeConnections, speedHistory, corePid, memoryBytes, cpuPercent,
+    toggleConnect, requestElevation,
   } = useConnectionStore();
   const { settings, isElevated } = useSettingsStore();
   const activeProfile = useProfileStore((s) => s.activeProfile)();
@@ -118,6 +119,11 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
           <div className="dashboard-detail"><Icon name="arrow_upward" aria-hidden="true" size={20} /><span>Uploaded</span><strong>{formatBytes(uploadBytes)}</strong></div>
           <div className="dashboard-detail"><Icon name="schedule" aria-hidden="true" size={20} /><span>Uptime</span><strong>{connected ? formatUptime(uptime) : '—'}</strong></div>
           <button type="button" className="dashboard-detail detail-link" onClick={() => onNavigateToTab?.('connections')}><Icon name="router" aria-hidden="true" size={20} /><span>Connections</span><strong>{activeConnections} active</strong></button>
+          <div className="dashboard-detail" title={connected && corePid ? `sing-box PID: ${corePid}` : undefined}>
+            <Icon name="memory" aria-hidden="true" size={20} />
+            <span>Core</span>
+            <strong>{connected ? `${formatBytes(memoryBytes)} · ${cpuPercent.toFixed(1)}%` : 'Inactive'}</strong>
+          </div>
         </section>
 
         <section className="dashboard-inbounds" aria-label="Inbound listeners">

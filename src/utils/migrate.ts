@@ -1,5 +1,6 @@
 import { Store } from '@tauri-apps/plugin-store';
 import type { RoutingRule } from './store';
+import { isTauriEnvironment } from './tauri';
 
 export const CONFIG_SCHEMA_VERSION = 2;
 
@@ -20,6 +21,7 @@ async function migrateV1toV2(routingStore: Store): Promise<void> {
 }
 
 export async function migrateStores(): Promise<void> {
+  if (!isTauriEnvironment()) return;
   try {
     const store = await getSettingsStore();
     const v = await store.get<number>('_schemaVersion') ?? 1;

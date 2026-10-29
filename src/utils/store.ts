@@ -1,4 +1,4 @@
-import { Store } from '@tauri-apps/plugin-store';
+import { loadAppStore } from './tauri';
 import { safeRandomUUID } from './uuid';
 
 // ── LEGACY ACTIVE CONFIG (kept for migration) ───────────────────────────────
@@ -24,6 +24,7 @@ export interface Profile {
   nodeCount: number;
   groupId?: string;
   selectedNodeTag: string | null;
+  autoUpdateInterval?: number; // Minutes: 0 (disabled), 60 (1h), 360 (6h), 720 (12h), 1440 (24h)
 }
 
 // ── ROUTING ───────────────────────────────────────────────────────────────────
@@ -101,9 +102,30 @@ export interface ProxyNode {
   transport?: {
     type?: string;
     path?: string;
+    host?: string;
     headers?: Record<string, string>;
     service_name?: string;
   };
+  // WireGuard
+  private_key?: string;
+  peer_public_key?: string;
+  pre_shared_key?: string;
+  reserved?: number[];
+  mtu?: number;
+  local_address?: string[];
+  peers?: Array<{
+    server: string;
+    server_port: number;
+    public_key: string;
+    pre_shared_key?: string;
+    reserved?: number[];
+    allowed_ips?: string[];
+  }>;
+  // SSH
+  user?: string;
+  host_key?: string[];
+  host_key_algorithms?: string[];
+  private_key_path?: string;
   [key: string]: unknown;
 }
 
@@ -229,25 +251,25 @@ const DEFAULT_ROUTING_RULES: RoutingRule[] = [
 const DEFAULT_RULE_SETS: RuleSet[] = [];
 
 // ── STORE INSTANCES ───────────────────────────────────────────────────────────
-let settingsStore: Store | null = null;
-let profilesStore: Store | null = null;
-let routingStore: Store | null = null;
-let statsStore: Store | null = null;
+let settingsStore: Awaited<ReturnType<typeof loadAppStore>> | null = null;
+let profilesStore: Awaited<ReturnType<typeof loadAppStore>> | null = null;
+let routingStore: Awaited<ReturnType<typeof loadAppStore>> | null = null;
+let statsStore: Awaited<ReturnType<typeof loadAppStore>> | null = null;
 
-async function getSettingsStore(): Promise<Store> {
-  if (!settingsStore) settingsStore = await Store.load('settings.json');
+async function getSettingsStore() {
+  if (!settingsStore) settingsStore = await loadAppStore('settings.json');
   return settingsStore;
 }
-async function getProfilesStore(): Promise<Store> {
-  if (!profilesStore) profilesStore = await Store.load('profiles.json');
+async function getProfilesStore() {
+  if (!profilesStore) profilesStore = await loadAppStore('profiles.json');
   return profilesStore;
 }
-async function getRoutingStore(): Promise<Store> {
-  if (!routingStore) routingStore = await Store.load('routing.json');
+async function getRoutingStore() {
+  if (!routingStore) routingStore = await loadAppStore('routing.json');
   return routingStore;
 }
-async function getStatsStore(): Promise<Store> {
-  if (!statsStore) statsStore = await Store.load('stats.json');
+async function getStatsStore() {
+  if (!statsStore) statsStore = await loadAppStore('stats.json');
   return statsStore;
 }
 

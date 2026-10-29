@@ -186,6 +186,7 @@ pub fn generate_singbox_config(
 
     // Create the outbounds array
     let mut final_outbounds = Vec::new();
+    let mut endpoints = Vec::new();
 
     // Fallback if no outbounds imported yet
     if node_tags.is_empty() {
@@ -209,6 +210,79 @@ pub fn generate_singbox_config(
 
     // Push the parsed node outbounds
     for node in outbounds {
+        if node.outbound_type == "wireguard" {
+            let address = if let Some(addr) = node.fields.get("address").or_else(|| node.fields.get("local_address")) {
+                if addr.is_array() {
+                    addr.clone()
+                } else if let Some(s) = addr.as_str() {
+                    serde_json::json!([s])
+                } else {
+                    serde_json::json!(["10.0.0.2/32"])
+                }
+            } else {
+                serde_json::json!(["10.0.0.2/32"])
+            };
+
+            let private_key = node.fields.get("private_key")
+                .or_else(|| node.fields.get("secret_key"))
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let server_address = node.fields.get("server")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let server_port = node.fields.get("server_port")
+                .and_then(|p| p.as_u64())
+                .unwrap_or(51820) as u16;
+
+            let peer_public_key = node.fields.get("peer_public_key")
+                .or_else(|| node.fields.get("public_key"))
+                .and_then(|k| k.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let allowed_ips = if let Some(ips) = node.fields.get("allowed_ips") {
+                if ips.is_array() {
+                    ips.clone()
+                } else if let Some(s) = ips.as_str() {
+                    serde_json::json!([s])
+                } else {
+                    serde_json::json!(["0.0.0.0/0", "::/0"])
+                }
+            } else {
+                serde_json::json!(["0.0.0.0/0", "::/0"])
+            };
+
+            let mut peer_obj = serde_json::json!({
+                "address": server_address,
+                "port": server_port,
+                "public_key": peer_public_key,
+                "allowed_ips": allowed_ips
+            });
+
+            if let Some(reserved) = node.fields.get("reserved") {
+                peer_obj["reserved"] = reserved.clone();
+            }
+
+            let mut endpoint_obj = serde_json::json!({
+                "type": "wireguard",
+                "tag": node.tag.clone(),
+                "address": address,
+                "private_key": private_key,
+                "peers": [peer_obj]
+            });
+
+            if let Some(mtu) = node.fields.get("mtu").and_then(|m| m.as_u64()) {
+                endpoint_obj["mtu"] = serde_json::json!(mtu);
+            }
+
+            endpoints.push(endpoint_obj);
+            continue;
+        }
+
         let mut obj = serde_json::to_value(&node)
             .map_err(|e| format!("Failed to serialize node: {}", e))?
             .as_object()
@@ -246,13 +320,37 @@ pub fn generate_singbox_config(
             }
         }
 
-        // Self-heal & Prioritize: If transport type is "ws" (WebSocket), force ALPN to http/1.1.
-        // WebSockets over HTTP/2 (RFC 8441) is unsupported by most standard VLESS/VMess proxy servers (Nginx/Xray),
-        // causing immediate EOF/reset errors when sing-box attempts it.
-        if let Some(transport) = obj.get("transport").and_then(|t| t.as_object()) {
-            if transport.get("type").and_then(|t| t.as_str()) == Some("ws") {
-                if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                    tls.insert("alpn".to_string(), serde_json::json!(["http/1.1"]));
+        // WebSocket and HTTPUpgrade handshakes require HTTP/1.1; normalize imported
+        // HTTPUpgrade Host headers so existing profiles generate the correct request host.
+        let transport_type = obj
+            .get("transport")
+            .and_then(|t| t.get("type"))
+            .and_then(|t| t.as_str())
+            .map(str::to_string);
+        if matches!(transport_type.as_deref(), Some("ws" | "httpupgrade")) {
+            if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
+                tls.insert("alpn".to_string(), serde_json::json!(["http/1.1"]));
+            }
+        }
+        if transport_type.as_deref() == Some("httpupgrade") {
+            if let Some(transport) = obj.get_mut("transport").and_then(|t| t.as_object_mut()) {
+                let host = transport
+                    .get_mut("headers")
+                    .and_then(|headers| headers.as_object_mut())
+                    .and_then(|headers| {
+                        let host = headers.remove("Host").or_else(|| headers.remove("host"));
+                        headers.remove("host");
+                        host
+                    });
+                if let Some(host) = host {
+                    transport.entry("host".to_string()).or_insert(host);
+                }
+                if transport
+                    .get("headers")
+                    .and_then(|h| h.as_object())
+                    .is_some_and(|h| h.is_empty())
+                {
+                    transport.remove("headers");
                 }
             }
         }
@@ -515,7 +613,7 @@ pub fn generate_singbox_config(
     };
 
     // Construct the complete sing-box configuration
-    let config = serde_json::json!({
+    let mut config = serde_json::json!({
         "log": {
             "level": "info",
             "timestamp": true
@@ -525,6 +623,10 @@ pub fn generate_singbox_config(
         "outbounds": final_outbounds,
         "route": route_section
     });
+
+    if !endpoints.is_empty() {
+        config["endpoints"] = serde_json::Value::Array(endpoints);
+    }
 
     serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to generate pretty JSON config: {}", e))
@@ -656,6 +758,108 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_singbox_config_httpupgrade_host_and_alpn() {
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("server".to_string(), serde_json::json!("proxy.example"));
+        fields.insert("server_port".to_string(), serde_json::json!(443));
+        fields.insert(
+            "uuid".to_string(),
+            serde_json::json!("00000000-0000-0000-0000-000000000000"),
+        );
+        fields.insert(
+            "tls".to_string(),
+            serde_json::json!({
+                "enabled": true,
+                "server_name": "tls.example",
+                "alpn": ["h2", "http/1.1"]
+            }),
+        );
+        fields.insert(
+            "transport".to_string(),
+            serde_json::json!({
+                "type": "httpupgrade",
+                "path": "/azure",
+                "headers": { "Host": "cdn.example", "X-Custom": "value" }
+            }),
+        );
+
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "vless".to_string(),
+            tag: "HTTPUpgrade Node".to_string(),
+            fields,
+        }];
+        let config_str = generate_singbox_config(
+            7892,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &TunSettings::default(),
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let node = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["tag"] == "HTTPUpgrade Node")
+            .unwrap();
+        assert_eq!(node["tls"]["alpn"], serde_json::json!(["http/1.1"]));
+        assert!(node["tls"].get("insecure").is_none());
+        assert_eq!(node["transport"]["host"], "cdn.example");
+        assert_eq!(node["transport"]["headers"]["X-Custom"], "value");
+        assert!(node["transport"]["headers"].get("Host").is_none());
+    }
+
+    #[test]
+    fn test_generate_singbox_config_httpupgrade_preserves_explicit_host() {
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("server".to_string(), serde_json::json!("proxy.example"));
+        fields.insert("server_port".to_string(), serde_json::json!(443));
+        fields.insert("tls".to_string(), serde_json::json!({ "enabled": true }));
+        fields.insert(
+            "transport".to_string(),
+            serde_json::json!({
+                "type": "httpupgrade",
+                "host": "explicit.example",
+                "headers": { "Host": "legacy.example" }
+            }),
+        );
+        let outbounds = vec![super::super::adapters::SingBoxOutbound {
+            outbound_type: "vless".to_string(),
+            tag: "HTTPUpgrade Node".to_string(),
+            fields,
+        }];
+        let config_str = generate_singbox_config(
+            7892,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &TunSettings::default(),
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let node = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["tag"] == "HTTPUpgrade Node")
+            .unwrap();
+        assert_eq!(node["transport"]["host"], "explicit.example");
+        assert!(node["transport"].get("headers").is_none());
+        assert_eq!(node["tls"]["alpn"], serde_json::json!(["http/1.1"]));
+    }
+
+    #[test]
     fn test_generate_singbox_config_with_rule_sets() {
         let outbounds = vec![super::super::adapters::SingBoxOutbound {
             outbound_type: "direct".to_string(),
@@ -766,5 +970,94 @@ mod tests {
             vless_outbound["tcp_keep_alive_interval"].as_str().unwrap(),
             "15s"
         );
+    }
+
+    #[test]
+    fn test_generate_singbox_config_wireguard_endpoint_and_ssh() {
+        let mut wg_fields = std::collections::HashMap::new();
+        wg_fields.insert("server".to_string(), serde_json::json!("1.2.3.4"));
+        wg_fields.insert("server_port".to_string(), serde_json::json!(51820));
+        wg_fields.insert("private_key".to_string(), serde_json::json!("privkey=="));
+        wg_fields.insert("peer_public_key".to_string(), serde_json::json!("pubkey=="));
+        wg_fields.insert("address".to_string(), serde_json::json!(["10.0.0.2/32"]));
+
+        let mut ssh_fields = std::collections::HashMap::new();
+        ssh_fields.insert("server".to_string(), serde_json::json!("5.6.7.8"));
+        ssh_fields.insert("server_port".to_string(), serde_json::json!(22));
+        ssh_fields.insert("user".to_string(), serde_json::json!("root"));
+        ssh_fields.insert("password".to_string(), serde_json::json!("pass123"));
+
+        let outbounds = vec![
+            super::super::adapters::SingBoxOutbound {
+                outbound_type: "wireguard".to_string(),
+                tag: "wg-node".to_string(),
+                fields: wg_fields,
+            },
+            super::super::adapters::SingBoxOutbound {
+                outbound_type: "ssh".to_string(),
+                tag: "ssh-node".to_string(),
+                fields: ssh_fields,
+            },
+        ];
+
+        let tun = TunSettings::default();
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+
+        // 1. Selector outbound must include both wg-node and ssh-node
+        let selector = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["type"].as_str() == Some("selector"))
+            .unwrap();
+        let selector_outbounds = selector["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(selector_outbounds.contains(&"wg-node"));
+        assert!(selector_outbounds.contains(&"ssh-node"));
+
+        // 2. WireGuard must NOT be in outbounds
+        let wg_in_outbounds = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["type"].as_str() == Some("wireguard"));
+        assert!(!wg_in_outbounds);
+
+        // 3. WireGuard must be in endpoints
+        let endpoints = config["endpoints"].as_array().expect("Endpoints must exist");
+        assert_eq!(endpoints.len(), 1);
+        let ep = &endpoints[0];
+        assert_eq!(ep["type"].as_str().unwrap(), "wireguard");
+        assert_eq!(ep["tag"].as_str().unwrap(), "wg-node");
+        assert_eq!(ep["address"][0].as_str().unwrap(), "10.0.0.2/32");
+        assert_eq!(ep["peers"][0]["address"].as_str().unwrap(), "1.2.3.4");
+
+        // 4. SSH must be in outbounds
+        let ssh_in_outbounds = config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["tag"].as_str() == Some("ssh-node"))
+            .expect("SSH outbound must exist");
+        assert_eq!(ssh_in_outbounds["type"].as_str().unwrap(), "ssh");
+        assert_eq!(ssh_in_outbounds["server"].as_str().unwrap(), "5.6.7.8");
     }
 }

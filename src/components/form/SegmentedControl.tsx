@@ -14,16 +14,17 @@ interface SegmentedControlProps<T extends string> {
   onChange: (val: T) => void;
   options: SegmentOption<T>[];
   className?: string;
+  disabled?: boolean;
 }
 
-export function SegmentedControl<T extends string>({ value, onChange, options, className }: SegmentedControlProps<T>) {
+export function SegmentedControl<T extends string>({ value, onChange, options, className, disabled = false }: SegmentedControlProps<T>) {
   return (
-    <div className={cn("material-segments flex items-center bg-muted/60 p-1 rounded-2xl shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}>
+    <div className={cn('material-segments', className)}>
       {options.map((opt) => {
         const iconElement = typeof opt.icon === 'string'
-          ? <Icon name={opt.icon} size={14} className="shrink-0" />
+          ? <Icon name={opt.icon} size={14} />
           : opt.icon
-            ? React.createElement(opt.icon, { className: 'size-3 shrink-0' })
+            ? React.createElement(opt.icon, { className: 'material-segment-icon' })
             : null;
         const isActive = value === opt.value;
         return (
@@ -31,6 +32,7 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
+            disabled={disabled}
             variant="ghost"
             aria-pressed={isActive}
             className={cn('material-segment', isActive && 'is-active')}

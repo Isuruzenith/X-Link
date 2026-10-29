@@ -102,12 +102,16 @@ fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Va
                 transport.insert("path".to_string(), Value::String(path.to_string()));
             }
             if let Some(host) = query_params.get("host") {
-                let mut headers = HashMap::new();
-                headers.insert("Host".to_string(), Value::String(host.to_string()));
-                transport.insert(
-                    "headers".to_string(),
-                    Value::Object(headers.into_iter().collect()),
-                );
+                if transport_type == "httpupgrade" {
+                    transport.insert("host".to_string(), Value::String(host.to_string()));
+                } else {
+                    let mut headers = HashMap::new();
+                    headers.insert("Host".to_string(), Value::String(host.to_string()));
+                    transport.insert(
+                        "headers".to_string(),
+                        Value::Object(headers.into_iter().collect()),
+                    );
+                }
             }
         }
         "grpc" => {
@@ -640,6 +644,18 @@ mod tests {
             headers.get("Host").unwrap().as_str().unwrap(),
             "azure.ezgateway.net"
         );
+    }
+
+    #[test]
+    fn test_adapt_httpupgrade_host_field() {
+        let uri = "vless://00000000-0000-0000-0000-000000000000@proxy.example:443?type=httpupgrade&host=cdn.example&path=%2Fazure&security=tls&sni=tls.example&alpn=h2%2Chttp%2F1.1#Test";
+        let nodes = adapt(uri.as_bytes()).unwrap();
+        let transport = &nodes[0].fields["transport"];
+        assert_eq!(transport["type"], "httpupgrade");
+        assert_eq!(transport["host"], "cdn.example");
+        assert_eq!(transport["path"], "/azure");
+        assert!(transport.get("headers").is_none());
+        assert_eq!(nodes[0].fields["tls"]["server_name"], "tls.example");
     }
 
     #[test]

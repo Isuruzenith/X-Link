@@ -80,7 +80,7 @@ export function RoutingView() {
         <div className="routing-overview">
           {/* Global Settings */}
           <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
-            <CardHeader className="p-0 flex flex-row items-center gap-2 space-y-0 pb-1">
+            <CardHeader className="routing-card-header">
               <Icon name="alt_route" size={16} className="text-muted-foreground" />
               <CardTitle className="text-xs font-bold text-foreground">Global Routing</CardTitle>
             </CardHeader>
@@ -108,7 +108,7 @@ export function RoutingView() {
 
           {/* Rule Sets */}
           <Card className="routing-rule-sets p-4 bg-card flex flex-col min-w-0">
-            <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
+            <CardHeader className="routing-card-header routing-card-header-spaced">
               <div className="flex items-center gap-2">
                 <Icon name="database" size={16} className="text-muted-foreground" />
                 <CardTitle className="text-xs font-bold text-foreground">Rule Sets</CardTitle>
@@ -244,7 +244,7 @@ export function RoutingView() {
 
         {/* Rules Table */}
         <Card className="routing-rules-panel p-4 bg-card border-border shadow-sm flex flex-col min-w-0">
-          <CardHeader className="p-0 pb-3 flex flex-row items-center gap-2 space-y-0 shrink-0">
+          <CardHeader className="routing-card-header routing-card-header-spaced">
             <Icon name="filter_list" size={16} className="text-muted-foreground" />
             <CardTitle className="text-xs font-bold text-foreground">Routing Rules</CardTitle>
             <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
@@ -287,13 +287,36 @@ export function RoutingView() {
                         ]}
                       />
                     ) : (
-                      <FormInput
-                        label="Rule value"
-                        value={ruleForm.value}
-                        onChange={(v) => setRuleForm({ value: v })}
-                        placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
-                        mono
-                      />
+                      <>
+                        <FormInput
+                          label="Rule value"
+                          value={ruleForm.value}
+                          onChange={(v) => setRuleForm({ value: v })}
+                          placeholder={
+                            ruleForm.type === 'geoip' ? 'cn, private…' :
+                            ruleForm.type === 'geosite' ? 'cn, geolocation-!cn, google…' :
+                            ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' :
+                            ruleForm.type === 'process_name' ? 'e.g. chrome.exe, telegram.exe' :
+                            'e.g. google.com'
+                          }
+                          mono
+                        />
+                        {ruleForm.type === 'process_name' && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {['chrome.exe', 'telegram.exe', 'discord.exe', 'steam.exe', 'spotify.exe', 'code.exe', 'git.exe'].map((app) => (
+                              <button
+                                key={app}
+                                type="button"
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                                onClick={() => setRuleForm({ value: app })}
+                                title={`Set ${app}`}
+                              >
+                                +{app}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { Icon } from './icon';
 
 type ButtonProps = React.ComponentProps<'button'> & {
   variant?: 'default' | 'outline' | 'secondary' | 'ghost' | 'destructive' | 'link';
@@ -21,6 +22,17 @@ function Button({
 }: ButtonProps) {
   const iconOnly = size.startsWith('icon');
   const tag = iconOnly ? 'md-icon-button' : TAGS[variant];
+  const slottedChildren = iconOnly ? children : React.Children.map(children, (child) => {
+    if (React.isValidElement(child) && (
+      child.type === Icon || child.type === 'md-icon' ||
+      (child.props as Record<string, unknown>)['data-icon'] === 'true' ||
+      (child.props as Record<string, unknown>)['data-icon'] === true
+    )) {
+      const icon = child as React.ReactElement<{ slot?: string }>;
+      return React.cloneElement(icon, { slot: icon.props.slot ?? 'icon' });
+    }
+    return child;
+  });
   // React 19 serialises boolean values on custom elements as "" for true, which is
   // not a valid ARIA token, so stringify state attributes explicitly.
   const aria = Object.fromEntries(
@@ -53,7 +65,7 @@ function Button({
       }
       props.onClick?.(e);
     },
-  }, children);
+  }, slottedChildren);
 }
 
 export { Button };

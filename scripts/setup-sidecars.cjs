@@ -175,4 +175,15 @@ async function setup() {
   }
 }
 
+function cleanupStaleProcesses() {
+  if (process.platform === 'win32') {
+    try {
+      execSync('powershell -NoProfile -Command "try { $p = Get-Process xlink -ErrorAction Stop; $p | Where-Object { $_.Path -match \'target[\\\\/]debug\' } | Stop-Process -Force } catch {}; exit 0"', { stdio: 'ignore' });
+    } catch {
+      // Ignore if no running processes
+    }
+  }
+}
+
+cleanupStaleProcesses();
 setup().then(() => console.log('[Sidecar Setup] Setup complete!'));

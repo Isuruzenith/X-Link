@@ -67,6 +67,7 @@ interface ProfileState {
   updateNodesList: (newNodes: ProxyNode[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
   refreshSubscription: (profileId: string) => Promise<void>;
+  setProfileAutoUpdateInterval: (profileId: string, intervalMinutes: number) => Promise<void>;
   fetchNodeGeo: (server: string, tag: string) => Promise<void>;
   clearNodeGeoCache: () => void;
 }
@@ -647,5 +648,21 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     } finally {
       set({ refreshingProfileId: null });
     }
+  },
+
+  setProfileAutoUpdateInterval: async (profileId: string, intervalMinutes: number) => {
+    const { profiles } = get();
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) return;
+    const updatedProfiles = profiles.map((p) =>
+      p.id === profileId ? { ...p, autoUpdateInterval: intervalMinutes } : p
+    );
+    await storeHelper.saveProfiles(updatedProfiles);
+    set({ profiles: updatedProfiles });
+    const label = intervalMinutes === 0
+      ? 'disabled'
+      : `set to every ${intervalMinutes >= 60 ? `${intervalMinutes / 60}h` : `${intervalMinutes}m`}`;
+    useLogStore.getState().pushSystemLog(`Auto-update for profile "${profile.name}" ${label}.`);
+    useToastStore.getState().addToast('info', `Auto-update ${label} for "${profile.name}".`, 'Auto-update Updated');
   },
 }));

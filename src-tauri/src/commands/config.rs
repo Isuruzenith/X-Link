@@ -4,7 +4,9 @@ use crate::config::generator::generate_singbox_config;
 use crate::config::validator::validate_singbox_config;
 use std::path::PathBuf;
 use std::time::SystemTime;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
+
+static SUBSCRIPTION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Metadata returned to the frontend when importing a profile.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -459,6 +461,7 @@ pub async fn refresh_subscription(
     app: tauri::AppHandle,
     profile_id: String,
 ) -> Result<ProfileMeta, String> {
+    let _lock = SUBSCRIPTION_LOCK.lock().await;
     // 1. Check whether the target profile is active and whether a live restart is required.
     let active_id = get_active_profile_id(&app)?;
     let is_active = active_id.as_deref() == Some(&profile_id);
@@ -673,6 +676,115 @@ pub async fn refresh_subscription(
     })
 }
 
+/// Evaluates a profiles JSON structure and returns list of (profile_id, profile_name) due for auto-update.
+pub fn find_due_subscription_profiles(
+    profiles_json: &serde_json::Value,
+    now_ms: u64,
+) -> Vec<(String, String)> {
+    let profiles = match profiles_json.get("profiles").and_then(|p| p.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+
+    let mut due = Vec::new();
+    for p in profiles {
+        let p_type = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if p_type != "subscription" {
+            continue;
+        }
+        let sub_url = p
+            .get("subscriptionUrl")
+            .and_then(|u| u.as_str())
+            .unwrap_or("");
+        if sub_url.trim().is_empty() {
+            continue;
+        }
+        let interval_mins = p
+            .get("autoUpdateInterval")
+            .and_then(|i| i.as_u64())
+            .unwrap_or(0);
+        if interval_mins == 0 {
+            continue;
+        }
+        let last_updated = p.get("lastUpdated").and_then(|i| i.as_u64()).unwrap_or(0);
+        let interval_ms = interval_mins.saturating_mul(60 * 1000);
+        if now_ms.saturating_sub(last_updated) >= interval_ms {
+            let id = p
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = p
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or("Subscription")
+                .to_string();
+            if !id.is_empty() {
+                due.push((id, name));
+            }
+        }
+    }
+    due
+}
+
+/// Background task helper to evaluate and refresh all subscription profiles due for auto-update.
+#[tauri::command]
+pub async fn run_subscription_auto_updates(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let mut profiles_path = match app.path().app_data_dir() {
+        Ok(p) => p,
+        Err(_) => return Ok(Vec::new()),
+    };
+    profiles_path.push("profiles.json");
+    if !profiles_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = match std::fs::read_to_string(&profiles_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let profiles_json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let now_ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let due_profiles = find_due_subscription_profiles(&profiles_json, now_ms);
+    let mut refreshed = Vec::new();
+
+    for (profile_id, profile_name) in due_profiles {
+        match refresh_subscription(app.clone(), profile_id.clone()).await {
+            Ok(meta) => {
+                let _ = app.emit(
+                    "subscription-auto-updated",
+                    serde_json::json!({
+                        "profileId": profile_id,
+                        "profileName": meta.name,
+                        "nodeCount": meta.node_count
+                    }),
+                );
+                refreshed.push(profile_id);
+            }
+            Err(err) => {
+                let _ = app.emit(
+                    "subscription-update-error",
+                    serde_json::json!({
+                        "profileId": profile_id,
+                        "profileName": profile_name,
+                        "error": err
+                    }),
+                );
+            }
+        }
+    }
+
+    Ok(refreshed)
+}
+
 #[cfg(test)]
 mod transaction_tests {
     use super::*;
@@ -700,6 +812,105 @@ mod transaction_tests {
         assert_eq!(std::fs::read(&first).unwrap(), b"new-first");
         assert_eq!(std::fs::read(&second).unwrap(), b"new-second");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_find_due_subscription_profiles() {
+        let now_ms = 1_000_000_000_000u64;
+        let one_hour_ago = now_ms - (61 * 60 * 1000);
+        let half_hour_ago = now_ms - (30 * 60 * 1000);
+
+        let data = serde_json::json!({
+            "profiles": [
+                {
+                    "id": "p1",
+                    "name": "Due Profile",
+                    "type": "subscription",
+                    "subscriptionUrl": "https://example.com/sub1",
+                    "autoUpdateInterval": 60,
+                    "lastUpdated": one_hour_ago
+                },
+                {
+                    "id": "p2",
+                    "name": "Not Due Yet",
+                    "type": "subscription",
+                    "subscriptionUrl": "https://example.com/sub2",
+                    "autoUpdateInterval": 60,
+                    "lastUpdated": half_hour_ago
+                },
+                {
+                    "id": "p3",
+                    "name": "Disabled Auto Update",
+                    "type": "subscription",
+                    "subscriptionUrl": "https://example.com/sub3",
+                    "autoUpdateInterval": 0,
+                    "lastUpdated": one_hour_ago
+                },
+                {
+                    "id": "p4",
+                    "name": "Manual Profile",
+                    "type": "manual",
+                    "autoUpdateInterval": 60,
+                    "lastUpdated": one_hour_ago
+                },
+                {
+                    "id": "p5",
+                    "name": "Empty URL Profile",
+                    "type": "subscription",
+                    "subscriptionUrl": "",
+                    "autoUpdateInterval": 60,
+                    "lastUpdated": one_hour_ago
+                }
+            ]
+        });
+
+        let due = find_due_subscription_profiles(&data, now_ms);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].0, "p1");
+        assert_eq!(due[0].1, "Due Profile");
+    }
+
+    #[test]
+    fn test_convert_wireguard_outbound_to_endpoint_and_extract() {
+        let wg_outbound = serde_json::json!({
+            "type": "wireguard",
+            "tag": "wg-test",
+            "server": "1.2.3.4",
+            "server_port": 51820,
+            "private_key": "privkey123",
+            "peer_public_key": "pubkey456",
+            "local_address": ["10.0.0.2/32"],
+            "pre_shared_key": "psk789",
+            "mtu": 1420
+        });
+
+        let ep = convert_wireguard_outbound_to_endpoint(&wg_outbound);
+        assert_eq!(ep["type"], "wireguard");
+        assert_eq!(ep["tag"], "wg-test");
+        assert_eq!(ep["private_key"], "privkey123");
+        assert_eq!(ep["address"][0], "10.0.0.2/32");
+        assert_eq!(ep["peers"][0]["address"], "1.2.3.4");
+        assert_eq!(ep["peers"][0]["port"], 51820);
+        assert_eq!(ep["peers"][0]["public_key"], "pubkey456");
+
+        let config = serde_json::json!({
+            "outbounds": [
+                { "type": "selector", "tag": "proxy", "outbounds": ["vless-1", "wg-test"] },
+                { "type": "vless", "tag": "vless-1", "server": "example.com", "server_port": 443 },
+                { "type": "direct", "tag": "direct" }
+            ],
+            "endpoints": [
+                ep
+            ]
+        });
+
+        let extracted = extract_nodes_from_config(&config);
+        assert_eq!(extracted.len(), 2);
+        assert_eq!(extracted[0]["tag"], "vless-1");
+        assert_eq!(extracted[1]["tag"], "wg-test");
+        assert_eq!(extracted[1]["type"], "wireguard");
+        assert_eq!(extracted[1]["server"], "1.2.3.4");
+        assert_eq!(extracted[1]["server_port"], 51820);
     }
 
     #[test]
@@ -1055,7 +1266,7 @@ mod transaction_tests {
     }
 }
 
-/// Returns the customizable proxy outbounds (i.e. not selector/direct/block/dns)
+/// Returns the customizable proxy outbounds and endpoints (i.e. not selector/direct/block/dns)
 /// from the active config, for display as selectable server "nodes" in the UI.
 #[tauri::command]
 pub fn get_config_outbounds(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
@@ -1069,23 +1280,134 @@ pub fn get_config_outbounds(app: tauri::AppHandle) -> Result<Vec<serde_json::Val
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
-    let outbounds = config
-        .get("outbounds")
-        .and_then(|o| o.as_array())
-        .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
+    Ok(extract_nodes_from_config(&config))
+}
 
+/// Converts a WireGuard outbound node into a sing-box 1.13.14 endpoint object.
+pub fn convert_wireguard_outbound_to_endpoint(node: &serde_json::Value) -> serde_json::Value {
+    let tag = node
+        .get("tag")
+        .and_then(|t| t.as_str())
+        .unwrap_or("wireguard")
+        .to_string();
+    let address = if let Some(addr) = node.get("address").or_else(|| node.get("local_address")) {
+        if addr.is_array() {
+            addr.clone()
+        } else if let Some(s) = addr.as_str() {
+            serde_json::json!([s])
+        } else {
+            serde_json::json!(["10.0.0.2/32"])
+        }
+    } else {
+        serde_json::json!(["10.0.0.2/32"])
+    };
+
+    let private_key = node
+        .get("private_key")
+        .or_else(|| node.get("secret_key"))
+        .and_then(|k| k.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let server_address = node
+        .get("server")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let server_port = node
+        .get("server_port")
+        .and_then(|p| p.as_u64())
+        .unwrap_or(51820) as u16;
+
+    let peer_public_key = node
+        .get("peer_public_key")
+        .or_else(|| node.get("public_key"))
+        .and_then(|k| k.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let allowed_ips = if let Some(ips) = node.get("allowed_ips") {
+        if ips.is_array() {
+            ips.clone()
+        } else if let Some(s) = ips.as_str() {
+            serde_json::json!([s])
+        } else {
+            serde_json::json!(["0.0.0.0/0", "::/0"])
+        }
+    } else {
+        serde_json::json!(["0.0.0.0/0", "::/0"])
+    };
+
+    let mut peer_obj = serde_json::json!({
+        "address": server_address,
+        "port": server_port,
+        "public_key": peer_public_key,
+        "allowed_ips": allowed_ips
+    });
+
+    if let Some(reserved) = node.get("reserved") {
+        peer_obj["reserved"] = reserved.clone();
+    }
+
+    let mut endpoint_obj = serde_json::json!({
+        "type": "wireguard",
+        "tag": tag,
+        "address": address,
+        "private_key": private_key,
+        "peers": [peer_obj]
+    });
+
+    if let Some(mtu) = node.get("mtu").and_then(|m| m.as_u64()) {
+        endpoint_obj["mtu"] = serde_json::json!(mtu);
+    }
+
+    endpoint_obj
+}
+
+/// Extracts all selectable proxy nodes from config (both outbounds and endpoints).
+pub fn extract_nodes_from_config(config: &serde_json::Value) -> Vec<serde_json::Value> {
     let mut nodes = Vec::new();
-    for outbound in outbounds {
-        let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector"
-            && outbound_type != "direct"
-            && outbound_type != "block"
-            && outbound_type != "dns"
-        {
-            nodes.push(outbound.clone());
+    if let Some(outbounds) = config.get("outbounds").and_then(|o| o.as_array()) {
+        for outbound in outbounds {
+            let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if outbound_type != "selector"
+                && outbound_type != "direct"
+                && outbound_type != "block"
+                && outbound_type != "dns"
+            {
+                nodes.push(outbound.clone());
+            }
         }
     }
-    Ok(nodes)
+    if let Some(endpoints) = config.get("endpoints").and_then(|e| e.as_array()) {
+        for ep in endpoints {
+            let ep_type = ep.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if ep_type == "wireguard" {
+                let mut node = ep.clone();
+                if let Some(peer) = ep
+                    .get("peers")
+                    .and_then(|p| p.as_array())
+                    .and_then(|p| p.first())
+                {
+                    if let Some(addr) = peer.get("address") {
+                        node["server"] = addr.clone();
+                    }
+                    if let Some(port) = peer.get("port") {
+                        node["server_port"] = port.clone();
+                    }
+                    if let Some(pk) = peer.get("public_key") {
+                        node["peer_public_key"] = pk.clone();
+                    }
+                    if let Some(ips) = peer.get("allowed_ips") {
+                        node["allowed_ips"] = ips.clone();
+                    }
+                }
+                nodes.push(node);
+            }
+        }
+    }
+    nodes
 }
 
 /// Returns the outbound the "proxy" selector currently defaults to (i.e. the
@@ -1103,34 +1425,26 @@ pub fn get_active_outbound(app: tauri::AppHandle) -> Result<serde_json::Value, S
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
-    let outbounds = config
-        .get("outbounds")
-        .and_then(|o| o.as_array())
-        .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
+    let all_nodes = extract_nodes_from_config(&config);
 
-    if let Some(selector) = outbounds
-        .iter()
-        .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))
-    {
-        if let Some(default_tag) = selector.get("default").and_then(|d| d.as_str()) {
-            if let Some(found) = outbounds
-                .iter()
-                .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag))
-            {
-                return Ok(found.clone());
+    if let Some(outbounds) = config.get("outbounds").and_then(|o| o.as_array()) {
+        if let Some(selector) = outbounds
+            .iter()
+            .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))
+        {
+            if let Some(default_tag) = selector.get("default").and_then(|d| d.as_str()) {
+                if let Some(found) = all_nodes
+                    .iter()
+                    .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag))
+                {
+                    return Ok(found.clone());
+                }
             }
         }
     }
 
-    for outbound in outbounds {
-        let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector"
-            && outbound_type != "direct"
-            && outbound_type != "block"
-            && outbound_type != "dns"
-        {
-            return Ok(outbound.clone());
-        }
+    if let Some(first) = all_nodes.first() {
+        return Ok(first.clone());
     }
 
     Err("No primary proxy outbound found in configuration".to_string())
@@ -1154,8 +1468,8 @@ pub fn get_selected_outbound_tag(app: &tauri::AppHandle) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Edits an existing node's connection parameters in-place (used by the node
-/// editor). If connected, validates and cold-restarts sing-box with the updated config.
+/// Edits an existing node's connection parameters in-place or adds a new node.
+/// If connected, validates and cold-restarts sing-box with the updated config.
 #[tauri::command]
 pub async fn update_node(
     app: tauri::AppHandle,
@@ -1171,78 +1485,114 @@ pub async fn update_node(
     let mut config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
+    let is_wireguard = new_outbound.get("type").and_then(|t| t.as_str()) == Some("wireguard");
     let target_tag = new_outbound
         .get("tag")
         .and_then(|t| t.as_str())
-        .map(|s| s.to_string());
-    let mut target_idx = None;
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Tag name is required for node".to_string())?;
+
     let mut old_tag: Option<String> = None;
+    let mut target_outbound_idx = None;
+    let mut target_endpoint_idx = None;
 
-    {
-        let outbounds = config
-            .get_mut("outbounds")
-            .and_then(|o| o.as_array_mut())
-            .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
-
-        // Prefer an exact tag match
+    // Search outbounds for exact tag match
+    if let Some(outbounds) = config.get("outbounds").and_then(|o| o.as_array()) {
         for (idx, outbound) in outbounds.iter().enumerate() {
             let t = outbound.get("type").and_then(|v| v.as_str()).unwrap_or("");
             if t == "selector" || t == "direct" || t == "block" || t == "dns" {
                 continue;
             }
-            let tag = outbound.get("tag").and_then(|v| v.as_str());
-            if target_tag.as_deref() == tag {
-                target_idx = Some(idx);
-                old_tag = tag.map(|s| s.to_string());
-                break;
-            }
-        }
-
-        // Fall back to the first customizable outbound (single-node configs)
-        if target_idx.is_none() {
-            for (idx, outbound) in outbounds.iter().enumerate() {
-                let t = outbound.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if t != "selector" && t != "direct" && t != "block" && t != "dns" {
-                    target_idx = Some(idx);
-                    old_tag = outbound
-                        .get("tag")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+            if let Some(tag) = outbound.get("tag").and_then(|v| v.as_str()) {
+                if tag == target_tag {
+                    target_outbound_idx = Some(idx);
+                    old_tag = Some(tag.to_string());
                     break;
                 }
             }
         }
     }
 
-    let target_idx =
-        target_idx.ok_or_else(|| "No matching outbound found to update".to_string())?;
-
-    {
-        let outbounds = config
-            .get_mut("outbounds")
-            .and_then(|o| o.as_array_mut())
-            .unwrap();
-        outbounds[target_idx] = new_outbound.clone();
+    // Search endpoints for exact tag match
+    if target_outbound_idx.is_none() {
+        if let Some(endpoints) = config.get("endpoints").and_then(|e| e.as_array()) {
+            for (idx, ep) in endpoints.iter().enumerate() {
+                if let Some(tag) = ep.get("tag").and_then(|v| v.as_str()) {
+                    if tag == target_tag {
+                        target_endpoint_idx = Some(idx);
+                        old_tag = Some(tag.to_string());
+                        break;
+                    }
+                }
+            }
+        }
     }
 
-    // If the tag changed, keep the selector's outbound list / default in sync
-    if let (Some(old), Some(new)) = (old_tag, new_outbound.get("tag").and_then(|t| t.as_str())) {
-        if old != new {
+    if is_wireguard {
+        let ep_val = convert_wireguard_outbound_to_endpoint(&new_outbound);
+        // If it previously lived in outbounds, remove from outbounds
+        if let Some(out_idx) = target_outbound_idx {
             if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
-                for outbound in outbounds.iter_mut() {
-                    if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
-                        if let Some(list) =
-                            outbound.get_mut("outbounds").and_then(|o| o.as_array_mut())
-                        {
+                outbounds.remove(out_idx);
+            }
+        }
+        // Insert or update in endpoints
+        if let Some(ep_idx) = target_endpoint_idx {
+            let endpoints = config
+                .get_mut("endpoints")
+                .and_then(|e| e.as_array_mut())
+                .unwrap();
+            endpoints[ep_idx] = ep_val;
+        } else {
+            if config.get("endpoints").is_none() {
+                config["endpoints"] = serde_json::Value::Array(Vec::new());
+            }
+            if let Some(arr) = config.get_mut("endpoints").and_then(|e| e.as_array_mut()) {
+                arr.push(ep_val);
+            }
+        }
+    } else {
+        // If it previously lived in endpoints, remove from endpoints
+        if let Some(ep_idx) = target_endpoint_idx {
+            if let Some(endpoints) = config.get_mut("endpoints").and_then(|e| e.as_array_mut()) {
+                endpoints.remove(ep_idx);
+            }
+        }
+        // Insert or update in outbounds
+        if let Some(out_idx) = target_outbound_idx {
+            let outbounds = config
+                .get_mut("outbounds")
+                .and_then(|o| o.as_array_mut())
+                .unwrap();
+            outbounds[out_idx] = new_outbound.clone();
+        } else {
+            // New node addition to outbounds
+            let outbounds = config
+                .get_mut("outbounds")
+                .and_then(|o| o.as_array_mut())
+                .ok_or_else(|| "No outbounds array found in configuration".to_string())?;
+            outbounds.push(new_outbound.clone());
+        }
+    }
+
+    // Ensure target_tag is in selector.outbounds
+    if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+        for outbound in outbounds.iter_mut() {
+            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+                if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                    if let Some(ref old) = old_tag {
+                        if old != &target_tag {
                             for item in list.iter_mut() {
                                 if item.as_str() == Some(old.as_str()) {
-                                    *item = serde_json::Value::String(new.to_string());
+                                    *item = serde_json::Value::String(target_tag.clone());
                                 }
                             }
                         }
-                        if outbound.get("default").and_then(|d| d.as_str()) == Some(old.as_str()) {
-                            outbound["default"] = serde_json::Value::String(new.to_string());
-                        }
+                    }
+                    if !list.iter().any(|v| v.as_str() == Some(&target_tag)) {
+                        let list_len = list.len();
+                        list.retain(|v| v.as_str() != Some("direct") || list_len <= 1);
+                        list.push(serde_json::Value::String(target_tag.clone()));
                     }
                 }
             }
@@ -1266,6 +1616,36 @@ pub async fn update_node(
         let profile_path = get_profile_config_path(&app, profile_id)?;
         if profile_path.exists() {
             files.push((profile_path, pretty_config.as_bytes().to_vec()));
+        }
+
+        // Update profiles.json nodeCount
+        let mut profiles_path = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        profiles_path.push("profiles.json");
+        if profiles_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&profiles_path) {
+                if let Ok(mut p_json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let total_nodes = extract_nodes_from_config(&config).len() as u32;
+                    if let Some(arr) = p_json.get_mut("profiles").and_then(|p| p.as_array_mut()) {
+                        if let Some(target) = arr
+                            .iter_mut()
+                            .find(|p| p.get("id").and_then(|i| i.as_str()) == Some(profile_id))
+                        {
+                            target["nodeCount"] = serde_json::Value::Number(total_nodes.into());
+                            let now_ms = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            target["lastUpdated"] = serde_json::Value::Number(now_ms.into());
+                            if let Ok(serialized) = serde_json::to_vec_pretty(&p_json) {
+                                files.push((profiles_path, serialized));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1507,23 +1887,7 @@ pub fn get_profile_outbounds(
     let config: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse profile config: {}", e))?;
 
-    let outbounds = config
-        .get("outbounds")
-        .and_then(|o| o.as_array())
-        .ok_or_else(|| "No outbounds array found in profile config".to_string())?;
-
-    let mut nodes = Vec::new();
-    for outbound in outbounds {
-        let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if outbound_type != "selector"
-            && outbound_type != "direct"
-            && outbound_type != "block"
-            && outbound_type != "dns"
-        {
-            nodes.push(outbound.clone());
-        }
-    }
-    Ok(nodes)
+    Ok(extract_nodes_from_config(&config))
 }
 
 pub fn get_active_profile_id(app: &tauri::AppHandle) -> Result<Option<String>, String> {
@@ -1566,31 +1930,10 @@ pub async fn update_rule_set(
     let tag = &rule_set.tag;
     let format = &rule_set.format;
 
-    // 2. Fetch the file from the URL
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("Failed to build http client: {}", e))?;
-
-    let response = client
-        .get(&url)
-        .header("User-Agent", "xlink-client")
-        .send()
+    // 2. Fetch the file securely using SSRF-safe bounded fetcher
+    let bytes = crate::config::subscription::fetch_subscription_content(&url)
         .await
         .map_err(|e| format!("Failed to download rule set: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Server returned status error: {}",
-            response.status()
-        ));
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response bytes: {}", e))?;
 
     // 3. Save it to app_data_dir/rule_set/<tag>.<extension>
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

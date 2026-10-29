@@ -13,6 +13,8 @@ const NodeEditor = lazy(() => import('./components/domain/NodeEditor').then((mod
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { migrateStores } from './utils/migrate';
+import { isTauriEnvironment } from './utils/tauri';
+import { storeHelper } from './utils/store';
 
 import { useSettingsStore } from './stores/settingsStore';
 import { useConnectionStore } from './stores/connectionStore';
@@ -20,10 +22,12 @@ import { useProfileStore } from './stores/profileStore';
 import { useRoutingStore } from './stores/routingStore';
 import { useLogStore } from './stores/logStore';
 import { useStatsStore } from './stores/statsStore';
+import { useToastStore } from './stores/toastStore';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const hasAutoConnected = useRef(false);
+  const hasPushedStartupLogs = useRef(false);
   const prevUploadRef = useRef(0);
   const prevDownloadRef = useRef(0);
   const connectionCountedRef = useRef(false);
@@ -40,6 +44,7 @@ export default function App() {
     setConnectionStatus,
     setEffectiveProxyMode,
     setUptime,
+    setCoreMetrics,
     updateTrafficStats,
     resetTrafficStats,
     setPorts,
@@ -51,8 +56,17 @@ export default function App() {
   // ── INITIALIZATION ─────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
-      // Show the window immediately for a faster perceived startup speed
-      invoke('show_window').catch(() => {});
+      // Show the window immediately for a faster perceived startup speed unless started with --minimized
+      if (isTauriEnvironment()) {
+        try {
+          const isMinimized = await invoke<boolean>('is_minimized_launch');
+          if (!isMinimized) {
+            invoke('show_window').catch(() => {});
+          }
+        } catch {
+          invoke('show_window').catch(() => {});
+        }
+      }
 
       // Run schema migration before any store reads
       await migrateStores();
@@ -118,8 +132,13 @@ export default function App() {
       }
     })();
 
-    pushSystemLog('X-Link Core initialized.');
-    pushSystemLog('Ready to establish proxy tunnels.');
+    if (!hasPushedStartupLogs.current) {
+      hasPushedStartupLogs.current = true;
+      pushSystemLog('X-Link Core initialized.');
+      pushSystemLog('Ready to establish proxy tunnels.');
+    }
+
+    if (!isTauriEnvironment()) return;
 
     // Listen to sing-box logs emitted by Rust backend
     const unlistenLog = listen<string>('sing-box-log', (e) => {
@@ -178,6 +197,25 @@ export default function App() {
       }
     });
 
+    const unlistenSubUpdated = listen<{ profileId: string; profileName: string; nodeCount: number }>('subscription-auto-updated', async (event) => {
+      const { profileId, profileName, nodeCount } = event.payload;
+      pushSystemLog(`Subscription "${profileName}" automatically updated in background (${nodeCount} nodes).`);
+      useToastStore.getState().addToast('success', `"${profileName}" updated with ${nodeCount} nodes.`, 'Auto-Updated');
+      const updated = await storeHelper.reloadProfiles();
+      useProfileStore.setState({ profiles: updated });
+      const currentSelected = useProfileStore.getState().selectedProfileId;
+      const currentActive = useProfileStore.getState().activeProfileId;
+      if (currentSelected === profileId || currentActive === profileId) {
+        await useProfileStore.getState().refreshNodes(profileId);
+      }
+    });
+
+    const unlistenSubError = listen<{ profileId: string; profileName: string; error: string }>('subscription-update-error', (event) => {
+      const { profileName, error } = event.payload;
+      pushSystemLog(`Auto-update failed for "${profileName}": ${error}`);
+      useToastStore.getState().addToast('warning', `Auto-update failed for "${profileName}".`, 'Auto-Update Failed');
+    });
+
     // Fetch initial log buffer from Rust sidecar manager
     (async () => {
       try {
@@ -201,6 +239,8 @@ export default function App() {
       unlistenStatus.then((f) => f());
       unlistenSettings.then((f) => f());
       unlistenNode.then((f) => f());
+      unlistenSubUpdated.then((f) => f());
+      unlistenSubError.then((f) => f());
     };
   }, [checkElevated, fetchVersions, initProfiles, initRouting, initSettings, initStats, pushLog, pushSystemLog, refreshNodes, setConnectionStatus, setEffectiveProxyMode, setIsConnected, setPorts]);
 
@@ -226,6 +266,7 @@ export default function App() {
 
   // ── TRAFFIC & STATUS POLLING ───────────────────────────────────────────────
   useEffect(() => {
+    if (!isTauriEnvironment()) return;
     const poll = setInterval(async () => {
       try {
         const status = await invoke<{
@@ -236,13 +277,21 @@ export default function App() {
           tunEnabled: boolean;
           uptime: number;
           effectiveProxyMode: 'tun' | 'system' | null;
+          corePid?: number | null;
+          memoryBytes?: number;
+          cpuPercent?: number;
         }>('get_proxy_status');
-        
+
         const active = status.status === 'connected';
         setIsConnected(active);
         setConnectionStatus(status.status);
         setEffectiveProxyMode(status.effectiveProxyMode);
         setUptime(status.uptime);
+        setCoreMetrics({
+          corePid: status.corePid ?? null,
+          memoryBytes: status.memoryBytes ?? 0,
+          cpuPercent: status.cpuPercent ?? 0,
+        });
         
         if (active) {
           const stats = await invoke<{
@@ -316,7 +365,7 @@ export default function App() {
           {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
           {activeTab === 'profiles' && <ErrorBoundary fallbackTitle="Profiles Error"><ConfigView /></ErrorBoundary>}
           {activeTab === 'routing' && <ErrorBoundary fallbackTitle="Routing Error"><RoutingView /></ErrorBoundary>}
-          {activeTab === 'connections' && <ErrorBoundary fallbackTitle="Connections Monitor Error"><ConnectionsView /></ErrorBoundary>}
+          {activeTab === 'connections' && <ErrorBoundary fallbackTitle="Connections Monitor Error"><ConnectionsView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
           {activeTab === 'logs' && <ErrorBoundary fallbackTitle="Logs Error"><LogsView /></ErrorBoundary>}
           {activeTab === 'settings' && <ErrorBoundary fallbackTitle="Settings Error"><SettingsView /></ErrorBoundary>}
         </Suspense>

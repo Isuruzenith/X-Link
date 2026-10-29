@@ -1,6 +1,6 @@
 use tauri::{
     menu::{CheckMenuItemBuilder, Menu, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
-    tray::{TrayIcon, TrayIconBuilder},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, Wry,
 };
 
@@ -38,7 +38,11 @@ pub fn get_close_to_tray_setting(app: &AppHandle) -> bool {
             }
         }
     }
-    // Default to true for proxy apps
+    // Default to true for proxy apps in release mode, but false in debug mode
+    // so closing the dev window cleanly stops tauri dev without leaving orphaned tray processes.
+    #[cfg(debug_assertions)]
+    return false;
+    #[cfg(not(debug_assertions))]
     true
 }
 
@@ -468,6 +472,21 @@ pub fn create_tray(app: &AppHandle) -> Result<TrayIcon, String> {
                     });
                 }
                 _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
             }
         })
         .build(app)

@@ -24,6 +24,7 @@ export function ConfigView() {
     latencyResults, isTestingLatency, refreshingProfileId, activatingNodeTag, nodeGeoCache,
     setImportName, setImportContent, setImportError, pasteClipboard, pickFileAndImport, importConfig,
     selectNode, deleteProfile, testAllNodes, selectProfile, refreshSubscription,
+    setProfileAutoUpdateInterval,
   } = useProfileStore();
   const isConnected = useConnectionStore((state) => state.isConnected);
   const openEditor = useNodeEditorStore((state) => state.openEditor);
@@ -123,7 +124,7 @@ export function ConfigView() {
                     <span className="profile-item-icon">{profile.type === 'subscription' ? <Icon name="link" aria-hidden="true" /> : <Icon name="public" aria-hidden="true" />}</span>
                     <span className="profile-item-copy">
                       <strong title={profile.name}>{profile.name}</strong>
-                      <span>{profile.type} · {profile.nodeCount} nodes · {new Date(profile.lastUpdated).toLocaleDateString()}</span>
+                      <span>{profile.type} · {profile.nodeCount} nodes · {new Date(profile.lastUpdated).toLocaleDateString()}{profile.autoUpdateInterval ? ` · Auto: ${profile.autoUpdateInterval >= 60 ? `${profile.autoUpdateInterval / 60}h` : `${profile.autoUpdateInterval}m`}` : ''}</span>
                     </span>
                     {isActive && <span className="material-status">{isConnected ? 'Connected' : 'Active'}</span>}
                   </button>
@@ -160,9 +161,29 @@ export function ConfigView() {
             </div>
             {selectedProfile && <div className="material-section-actions">
               {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
-                <Button variant="outline" disabled={refreshingProfileId === selectedProfile.id}
-                  onClick={() => refreshSubscription(selectedProfile.id)}>
-                  <Icon name="refresh" className={refreshingProfileId === selectedProfile.id ? 'animate-spin' : ''} aria-hidden="true" /> Refresh
+                <>
+                  <select
+                    className="material-select-compact"
+                    value={selectedProfile.autoUpdateInterval || 0}
+                    onChange={(e) => void setProfileAutoUpdateInterval(selectedProfile.id, Number(e.target.value))}
+                    title="Auto-update interval"
+                    aria-label="Auto-update interval"
+                  >
+                    <option value={0}>Auto-update: Off</option>
+                    <option value={60}>Auto-update: 1h</option>
+                    <option value={360}>Auto-update: 6h</option>
+                    <option value={720}>Auto-update: 12h</option>
+                    <option value={1440}>Auto-update: 24h</option>
+                  </select>
+                  <Button variant="outline" disabled={refreshingProfileId === selectedProfile.id}
+                    onClick={() => refreshSubscription(selectedProfile.id)}>
+                    <Icon name="refresh" className={refreshingProfileId === selectedProfile.id ? 'animate-spin' : ''} aria-hidden="true" /> Refresh
+                  </Button>
+                </>
+              )}
+              {selectedProfile.id === activeProfileId && (
+                <Button variant="outline" onClick={() => openEditor(null)}>
+                  <Icon name="add" aria-hidden="true" /> Add node
                 </Button>
               )}
               <Button variant="outline" disabled={isTestingLatency || !nodes.length} onClick={testAllNodes}>
