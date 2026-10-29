@@ -179,14 +179,51 @@ async fn wait_for_startup_or_exit(
     }
 }
 
-async fn probe_via_mixed_proxy(mixed_port: u16) -> Result<(), String> {
-    let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{}", mixed_port))
-        .map_err(|e| format!("mixed probe setup failed: {}", e))?;
+fn health_check_port(settings: &crate::state::UserSettings) -> u16 {
+    if settings.use_separate_ports {
+        settings.http_port
+    } else {
+        settings.mixed_port
+    }
+}
+
+fn mode_for_tun_support(requested: &str, tun_supported: bool) -> &str {
+    if requested == "tun" && !tun_supported {
+        "system"
+    } else {
+        requested
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::{health_check_port, mode_for_tun_support};
+    use crate::state::UserSettings;
+
+    #[test]
+    fn health_checks_use_the_configured_http_listener() {
+        let mut settings = UserSettings::default();
+        assert_eq!(health_check_port(&settings), settings.mixed_port);
+        settings.use_separate_ports = true;
+        assert_eq!(health_check_port(&settings), settings.http_port);
+    }
+
+    #[test]
+    fn unsupported_tun_falls_back_without_changing_other_modes() {
+        assert_eq!(mode_for_tun_support("tun", false), "system");
+        assert_eq!(mode_for_tun_support("tun", true), "tun");
+        assert_eq!(mode_for_tun_support("system", false), "system");
+    }
+}
+
+async fn probe_via_http_proxy(port: u16) -> Result<(), String> {
+    let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{}", port))
+        .map_err(|e| format!("HTTP proxy probe setup failed: {}", e))?;
     let client = reqwest::Client::builder()
         .proxy(proxy)
         .timeout(std::time::Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("mixed probe setup failed: {}", e))?;
+        .map_err(|e| format!("HTTP proxy probe setup failed: {}", e))?;
 
     client
         .get(HEALTH_CHECK_URL)
@@ -194,13 +231,13 @@ async fn probe_via_mixed_proxy(mixed_port: u16) -> Result<(), String> {
         .await
         .map_err(|e| {
             format!(
-                "mixed probe failed: node/outbound/config did not carry HTTPS traffic ({})",
+                "HTTP proxy probe failed: node/outbound/config did not carry HTTPS traffic ({})",
                 e
             )
         })?
         .error_for_status()
         .map(|_| ())
-        .map_err(|e| format!("mixed probe failed: upstream returned {}", e))
+        .map_err(|e| format!("HTTP proxy probe failed: upstream returned {}", e))
 }
 
 async fn probe_via_tun_route() -> Result<(), String> {
@@ -225,8 +262,8 @@ async fn probe_via_tun_route() -> Result<(), String> {
         .map_err(|e| format!("TUN probe failed: upstream returned {}", e))
 }
 
-async fn run_startup_health_checks(mixed_port: u16, proxy_mode: &str) -> Result<(), String> {
-    probe_via_mixed_proxy(mixed_port).await?;
+async fn run_startup_health_checks(port: u16, proxy_mode: &str) -> Result<(), String> {
+    probe_via_http_proxy(port).await?;
     if proxy_mode == "tun" {
         probe_via_tun_route().await?;
     }
@@ -412,10 +449,15 @@ pub async fn prepare_and_patch_config(
     let wifi_sharing = settings.wifi_sharing;
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
-    let proxy_mode = match mode_override {
-        Some(m) => m.to_string(),
-        None => settings.proxy_mode.clone(),
-    };
+    let requested_mode = mode_override.unwrap_or(&settings.proxy_mode);
+    let tun_supported = crate::commands::system::check_tun_support(app.clone());
+    let proxy_mode = mode_for_tun_support(requested_mode, tun_supported).to_string();
+    if requested_mode == "tun" && proxy_mode == "system" {
+        state.push_log(
+            "[System] TUN privileges are unavailable. Using System Proxy for this session."
+                .to_string(),
+        );
+    }
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
     let config_path = crate::commands::config::get_active_config_path(app)?;
@@ -945,8 +987,8 @@ pub async fn toggle_proxy(
             continue;
         }
 
-        let mixed_port = state.get_settings().mixed_port;
-        match run_startup_health_checks(mixed_port, &current_mode).await {
+        let port = health_check_port(&state.get_settings());
+        match run_startup_health_checks(port, &current_mode).await {
             Ok(_) => {
                 state.push_log("[System] Connection verified successfully.".to_string());
                 connected_successfully = true;
@@ -991,33 +1033,41 @@ pub async fn toggle_proxy(
             // Switch mode dynamically
             current_mode = "system".to_string();
 
-            // Re-generate configuration for system proxy mode
-            let (retry_config_path, _, _, _) = prepare_and_patch_config(
-                &app,
-                &state,
-                selected_outbound_tag.as_deref(),
-                Some("system"),
-            )
-            .await?;
+            // The fallback has the same ownership and status rollback guarantees as a normal attempt.
+            let fallback_result: Result<(), String> = async {
+                let (retry_config_path, _, _, _) = prepare_and_patch_config(
+                    &app,
+                    &state,
+                    selected_outbound_tag.as_deref(),
+                    Some("system"),
+                )
+                .await?;
 
-            let session_id = uuid::Uuid::new_v4().to_string();
-            {
+                let session_id = uuid::Uuid::new_v4().to_string();
                 if let Ok(mut session_lock) = state.active_session_id.lock() {
                     *session_lock = Some(session_id.clone());
                 }
+
+                let mut term_rx =
+                    spawn_singbox_sidecar(&app, &state, &retry_config_path, &session_id)
+                        .map_err(|e| format!("System proxy fallback spawn failed: {}", e))?;
+                wait_for_startup_or_exit(&mut term_rx)
+                    .await
+                    .map_err(|e| format!("System proxy fallback process exited: {}", e))?;
+
+                let port = health_check_port(&state.get_settings());
+                run_startup_health_checks(port, &current_mode)
+                    .await
+                    .map_err(|e| format!("System proxy fallback health check failed: {}", e))
             }
+            .await;
 
-            let mut term_rx = spawn_singbox_sidecar(&app, &state, &retry_config_path, &session_id)
-                .map_err(|e| format!("System proxy fallback spawn failed: {}", e))?;
-
-            wait_for_startup_or_exit(&mut term_rx)
-                .await
-                .map_err(|e| format!("System proxy fallback process exited: {}", e))?;
-
-            let mixed_port = state.get_settings().mixed_port;
-            run_startup_health_checks(mixed_port, &current_mode)
-                .await
-                .map_err(|e| format!("System proxy fallback health check failed: {}", e))?;
+            if let Err(error) = fallback_result {
+                stop_startup_child(&app, &state);
+                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                crate::tray::update_tray(&app);
+                return Err(error);
+            }
 
             state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
         } else {
@@ -1127,8 +1177,8 @@ pub async fn toggle_proxy(
 
     // Enable system proxy if the final connection mode is 'system' (either by default or as a fallback)
     if current_mode == "system" {
-        let mixed_port = state.get_settings().mixed_port;
-        if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", mixed_port) {
+        let port = health_check_port(&state.get_settings());
+        if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", port) {
             crate::tray::perform_clean_cleanup(&app);
             state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
             crate::tray::update_tray(&app);

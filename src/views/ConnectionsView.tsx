@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useDeferredValue, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
-import { Network, Search, X, ShieldAlert, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Network, X, ShieldAlert, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
@@ -91,18 +91,17 @@ const ConnectionRow = memo(({
 
   return (
     <TableRow
-      className={`text-xs transition-colors border-b border-border/30 cursor-pointer ${
+      className={`text-xs transition-colors border-b border-border/30 ${
         isSelected ? 'bg-muted/60 hover:bg-muted/70' : 'hover:bg-muted/20'
       }`}
-      onClick={onSelect}
     >
       {/* Target Address */}
       <TableCell className="py-2.5 px-4 max-w-[280px] font-normal">
         <div className="flex flex-col gap-0.5">
-          <div className="font-bold text-foreground truncate" title={`${host}:${port}`}>
+          <button type="button" className="font-bold text-foreground truncate text-left max-w-full" title={`${host}:${port}`} onClick={onSelect} aria-pressed={isSelected}>
             {host}
             <span className="text-muted-foreground font-normal font-mono">:{port}</span>
-          </div>
+          </button>
           <div className="flex gap-1.5 items-center mt-0.5 select-none">
             <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-mono border-border bg-background/50 font-normal uppercase">
               {conn.metadata.network}
@@ -162,6 +161,7 @@ const ConnectionRow = memo(({
           size="icon"
           className="size-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
           onClick={() => onKill(conn.id, `${host}:${port}`)}
+          aria-label={`Close connection to ${host}:${port}`}
           title="Force close connection"
           disabled={isKilling}
         >
@@ -337,7 +337,7 @@ export function ConnectionsView() {
   return (
     <ViewShell
       title="Connections"
-      subtitle="Real-time network tunnels audit and packet statistics"
+      subtitle="See active destinations, routing decisions and transferred data"
       actions={
         <div className="flex items-center gap-2">
           {visibleConnections.length > 0 && (
@@ -353,15 +353,15 @@ export function ConnectionsView() {
         </div>
       }
     >
-      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
+      <div className="utility-view">
         
         {/* Controls row */}
-        <div className="flex items-center gap-3 shrink-0 select-none">
-          <div className="relative flex-1 min-w-[140px] max-w-[320px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground z-10" />
+        <div className="utility-toolbar select-none">
+          <div className="utility-search">
             <FormInput
-              className="pl-9 h-8"
-              placeholder="Filter by host, IP, rule..."
+              type="search"
+              label="Search connections"
+              placeholder="Host, IP or rule…"
               value={searchQuery}
               onChange={setSearchQuery}
             />
@@ -383,17 +383,18 @@ export function ConnectionsView() {
         </div>
  
         {/* Connections table panel */}
-        <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
-          <ScrollArea className="flex-1 w-full min-h-0">
+        <Card className="flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
+          <ScrollArea className="utility-table flex-1 w-full">
             {sorted.length > 0 ? (
               <Table>
+                <caption className="sr-only">Active connections, routes, speeds and transferred data</caption>
                 <TableHeader>
-                  <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[10.5px] uppercase font-bold tracking-wider text-muted-foreground select-none">
+                  <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[11px] font-semibold text-muted-foreground select-none">
                     <TableHead className="h-9 px-4">
-                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[120px] max-w-[400px] pr-2 cursor-pointer transition-colors", sortBy === 'host' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')}>
+                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[120px] pr-2 text-left", sortBy === 'host' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')} aria-label={`Sort by destination ${sortBy === 'host' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Destination</span>
                         <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </div>
+                      </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
                       <div className="resize-x overflow-hidden min-w-[150px] max-w-[400px] pr-2">
@@ -401,22 +402,22 @@ export function ConnectionsView() {
                       </div>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'speed' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')}>
-                        <span>Live Speed</span>
+                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'speed' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')} aria-label={`Sort by live speed ${sortBy === 'speed' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
+                        <span>Live speed</span>
                         <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </div>
+                      </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[100px] max-w-[250px] pr-2 cursor-pointer transition-colors", sortBy === 'bytes' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')}>
-                        <span>Total Data</span>
+                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'bytes' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')} aria-label={`Sort by total data ${sortBy === 'bytes' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
+                        <span>Total data</span>
                         <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </div>
+                      </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
-                      <div className={cn("flex items-center justify-between gap-1 resize-x overflow-hidden min-w-[90px] max-w-[200px] pr-2 cursor-pointer transition-colors", sortBy === 'time' ? 'text-foreground font-extrabold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')}>
+                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[90px] pr-2 text-left", sortBy === 'time' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')} aria-label={`Sort by uptime ${sortBy === 'time' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Uptime</span>
                         <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </div>
+                      </button>
                     </TableHead>
                     <TableHead className="h-9 px-4 w-14 text-center">
                       <div className="w-full text-center">Kill</div>

@@ -729,8 +729,10 @@ mod tests {
             fields: std::collections::HashMap::new(),
         }];
 
-        let mut tun = TunSettings::default();
-        tun.multiplex = true;
+        let tun = TunSettings {
+            multiplex: true,
+            ..TunSettings::default()
+        };
 
         let config_str = generate_singbox_config(
             7890,
@@ -755,7 +757,7 @@ mod tests {
             .expect("Should find VLESS outbound");
 
         let multiplex = &vless_outbound["multiplex"];
-        assert_eq!(multiplex["enabled"].as_bool().unwrap(), true);
+        assert!(multiplex["enabled"].as_bool().unwrap());
         assert_eq!(multiplex["protocol"].as_str().unwrap(), "smux");
         assert_eq!(multiplex["max_connections"].as_u64().unwrap(), 4);
 

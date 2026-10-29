@@ -52,33 +52,30 @@ export function SettingsView() {
 
   return (
     <ViewShell title="Settings" subtitle="Proxy mode, TUN, sniffing, DNS and API options">
-      <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-[10px] overflow-hidden h-full w-full min-h-0">
+      <div className="settings-layout">
         {/* Secondary nav */}
-        <div className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-x-visible shrink-0 pb-1 md:pb-0">
+        <nav className="settings-navigation" aria-label="Settings sections">
           {sideNavItems.map(([id, Icon, label]) => (
             <Button
               key={id}
               variant="ghost"
-              className={`h-8 justify-start gap-2 px-3 text-xs font-bold rounded ${
-                settingsTab === id
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-              }`}
+              className={`settings-nav-item ${settingsTab === id ? 'is-active' : ''}`}
+              aria-current={settingsTab === id ? 'page' : undefined}
               onClick={() => setSettingsTab(id)}
             >
               <Icon className="size-3.5 shrink-0" />
               <span>{label}</span>
             </Button>
           ))}
-        </div>
+        </nav>
 
         {/* Content */}
-        <div className="overflow-y-auto pr-1">
+        <div className="settings-content" id={`settings-${settingsTab}`} role="region" aria-label={`${sideNavItems.find(([id]) => id === settingsTab)?.[2]} settings`}>
 
           {/* ── GENERAL ── */}
           {settingsTab === 'general' && (
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <div className="flex flex-col gap-4">
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
@@ -153,8 +150,8 @@ export function SettingsView() {
                   </CardHeader>
                   <FormSwitchRow title="Use Separate HTTP & SOCKS5 Ports" desc="Bind separate HTTP and SOCKS5 protocol listeners"
                     checked={settings.useSeparatePorts} onChange={(v) => updateSettings({ useSeparatePorts: v })} />
-                  <div style={{ opacity: settings.useSeparatePorts ? 1 : 0.4, pointerEvents: settings.useSeparatePorts ? 'auto' : 'none' }}>
-                    <div className="grid grid-cols-2 gap-2.5">
+                  <div className={!settings.useSeparatePorts ? 'opacity-50' : undefined}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {[
                         { label: 'HTTP Proxy Port', key: 'httpPort' as keyof Settings, val: httpPort, set: (v: number) => setPorts({ httpPort: v }) },
                         { label: 'SOCKS5 Port', key: 'socksPort' as keyof Settings, val: socksPort, set: (v: number) => setPorts({ socksPort: v }) },
@@ -166,17 +163,19 @@ export function SettingsView() {
                         return (
                           <div key={key} className="flex flex-col gap-1">
                             <div className="flex justify-between items-center px-0.5">
-                              <label className="text-[9.5px] font-bold text-muted-foreground uppercase">{label}</label>
+                              <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
                               <span className={`text-[9px] font-bold ${hasError ? 'text-destructive' : isUnchecked ? 'text-amber-500' : 'text-foreground/60'}`}>
                                 {isInvalid ? '● Invalid' : hasConflict ? '● Conflict' : portStatuses[val] === 'own' ? '● X-Link' : portStatuses[val] === 'free' ? '● Free' : '● Unchecked'}
                               </span>
                             </div>
                             <FormInput
                               type="number"
+                              aria-label={label}
                               mono
                               className="h-8"
                               style={{ borderColor: hasError ? 'var(--destructive)' : undefined }}
                               value={val}
+                              disabled={!settings.useSeparatePorts}
                               onChange={(v) => { const numVal = parseInt(v) || 0; set(numVal); updateSettings({ [key]: numVal } as Partial<Settings>); }}
                             />
                           </div>
@@ -184,20 +183,22 @@ export function SettingsView() {
                       })}
                     </div>
                   </div>
-                  <div style={{ opacity: !settings.useSeparatePorts ? 1 : 0.4, pointerEvents: !settings.useSeparatePorts ? 'auto' : 'none' }} className="mt-1">
+                  <div className={`mt-1 ${settings.useSeparatePorts ? 'opacity-50' : ''}`}>
                     <div className="flex flex-col gap-1">
                       <div className="flex justify-between items-center px-0.5">
-                        <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Mixed Inbound Port (Recommended)</label>
+                        <span className="text-[11px] font-medium text-muted-foreground">Mixed inbound port (recommended)</span>
                         <span className={`text-[9px] font-bold ${conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535 ? 'text-destructive' : (portStatuses[mixedPort] === undefined || portStatuses[mixedPort] === 'unknown') ? 'text-amber-500' : 'text-foreground/60'}`}>
                           {mixedPort < 1 || mixedPort > 65535 ? '● Invalid' : conflictingPorts.includes(mixedPort) ? '● Conflict' : portStatuses[mixedPort] === 'own' ? '● X-Link' : portStatuses[mixedPort] === 'free' ? '● Free' : '● Unchecked'}
                         </span>
                       </div>
                       <FormInput
                         type="number"
+                        aria-label="Mixed inbound port"
                         mono
                         className="h-8"
                         style={{ borderColor: (conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535) ? 'var(--destructive)' : undefined }}
                         value={mixedPort}
+                        disabled={settings.useSeparatePorts}
                         onChange={(v) => { const numVal = parseInt(v) || 0; setPorts({ mixedPort: numVal }); updateSettings({ mixedPort: numVal }); }}
                       />
                     </div>
@@ -236,10 +237,10 @@ export function SettingsView() {
                   <CardTitle className="text-xs font-bold text-foreground">TUN Interface Configuration</CardTitle>
                   <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
-                <div className="grid grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">TUN Stack Implementation</label>
-                    <FormSelect value={settings.tunStack} onChange={(v) => updateSettings({ tunStack: v as Settings['tunStack'] })} options={[
+                    <FormSelect
+                      label="TUN stack implementation" value={settings.tunStack} onChange={(v) => updateSettings({ tunStack: v as Settings['tunStack'] })} options={[
                       { value: 'mixed', label: 'Mixed (gVisor TCP + system UDP)' },
                       { value: 'gvisor', label: 'gVisor (Full userspace)' },
                       { value: 'system', label: 'System (Kernel-level)' },
@@ -254,7 +255,7 @@ export function SettingsView() {
                     value={settings.tunMtu}
                     onChange={(v) => updateSettings({ tunMtu: parseInt(v) || 1400 })}
                   />
-                  <span className="text-[10px] text-muted-foreground/80">1400 recommended. Use 1500 for standard ethernet.</span>
+                  <span className="text-[10px] text-muted-foreground/80 sm:col-start-2">1400 recommended. Use 1500 for standard ethernet.</span>
                 </div>
                 {([
                   { key: 'tunAutoRoute', title: 'Auto Route', desc: 'Add routes to direct traffic into TUN interface' },
@@ -282,7 +283,7 @@ export function SettingsView() {
                 </CardHeader>
                 <FormSwitchRow title="Enable Traffic Sniffing" desc="Inspect connection metadata to extract domain names for routing"
                   checked={settings.sniffEnabled} onChange={(v) => updateSettings({ sniffEnabled: v })} />
-                <div style={{ opacity: settings.sniffEnabled ? 1 : 0.4, pointerEvents: settings.sniffEnabled ? 'auto' : 'none' }}>
+                <div className={!settings.sniffEnabled ? 'opacity-50' : undefined}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {([
                       { key: 'sniffHttp', title: 'HTTP Sniffing', desc: 'Extract hostname from HTTP Host header' },
@@ -290,7 +291,7 @@ export function SettingsView() {
                       { key: 'sniffQuic', title: 'QUIC/HTTP3 Sniffing', desc: 'Extract SNI from QUIC Initial packets' },
                       { key: 'sniffOverrideDestination', title: 'Override Destination', desc: 'Use sniffed domain to override target IP' },
                     ] as const).map(({ key, title, desc }) => (
-                      <FormSwitchRow key={key} title={title} desc={desc} checked={settings[key]} onChange={(v) => updateSettings({ [key]: v } as Partial<Settings>)} />
+                      <FormSwitchRow key={key} title={title} desc={desc} checked={settings[key]} disabled={!settings.sniffEnabled} onChange={(v) => updateSettings({ [key]: v } as Partial<Settings>)} />
                     ))}
                   </div>
                 </div>
@@ -309,16 +310,13 @@ export function SettingsView() {
                 </CardHeader>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Primary DNS (via proxy)</label>
-                    <FormInput value={settings.primaryDns} onChange={(v) => updateSettings({ primaryDns: v })} placeholder="https://1.1.1.1/dns-query" mono />
+                    <FormInput label="Primary DNS (via proxy)" value={settings.primaryDns} onChange={(v) => updateSettings({ primaryDns: v })} placeholder="https://1.1.1.1/dns-query" mono />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Fallback DNS (via proxy)</label>
-                    <FormInput value={settings.fallbackDns} onChange={(v) => updateSettings({ fallbackDns: v })} placeholder="https://8.8.8.8/dns-query" mono />
+                    <FormInput label="Fallback DNS (via proxy)" value={settings.fallbackDns} onChange={(v) => updateSettings({ fallbackDns: v })} placeholder="https://8.8.8.8/dns-query" mono />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Direct DNS (Local/Bypass)</label>
-                    <FormInput value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="Auto (System DNS)" mono />
+                    <FormInput label="Direct DNS (local/bypass)" value={settings.directDns} onChange={(v) => updateSettings({ directDns: v })} placeholder="Auto (System DNS)" mono />
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground/80">
@@ -333,8 +331,8 @@ export function SettingsView() {
                 </CardHeader>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">DNS Query Strategy</label>
-                    <FormSelect value={settings.dnsStrategy} onChange={(v) => updateSettings({ dnsStrategy: v as Settings['dnsStrategy'] })} options={[
+                    <FormSelect
+                      label="DNS query strategy" value={settings.dnsStrategy} onChange={(v) => updateSettings({ dnsStrategy: v as Settings['dnsStrategy'] })} options={[
                       { value: 'prefer_ipv4', label: 'Prefer IPv4 (Default)' },
                       { value: 'ipv4_only', label: 'IPv4 Only' },
                       { value: 'prefer_ipv6', label: 'Prefer IPv6' },
@@ -356,8 +354,8 @@ export function SettingsView() {
                   <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">DNS Mode</label>
-                  <FormSelect value={settings.dnsMode} onChange={(v) => updateSettings({ dnsMode: v as DnsMode })} options={[
+                  <FormSelect
+                    label="DNS mode" value={settings.dnsMode} onChange={(v) => updateSettings({ dnsMode: v as DnsMode })} options={[
                     { value: 'fakeip', label: 'FakeIP (recommended for TUN)' },
                     { value: 'normal', label: 'Normal (real IP resolution)' },
                   ]} />
@@ -365,15 +363,13 @@ export function SettingsView() {
                     FakeIP avoids leaking real destination IPs to the local resolver and speeds up routing decisions.
                   </span>
                 </div>
-                <div style={{ opacity: settings.dnsMode === 'fakeip' ? 1 : 0.4, pointerEvents: settings.dnsMode === 'fakeip' ? 'auto' : 'none' }}>
-                  <div className="grid grid-cols-2 gap-3.5">
+                <div className={settings.dnsMode !== 'fakeip' ? 'opacity-50' : undefined}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">FakeIP Range</label>
-                      <FormInput value={settings.fakeipRange} onChange={(v) => updateSettings({ fakeipRange: v })} placeholder="198.18.0.0/15" mono />
+                      <FormInput label="FakeIP range" value={settings.fakeipRange} onChange={(v) => updateSettings({ fakeipRange: v })} placeholder="198.18.0.0/15" disabled={settings.dnsMode !== 'fakeip'} mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">FakeIP Exclude Filter</label>
-                      <FormInput value={settings.fakeipFilter} onChange={(v) => updateSettings({ fakeipFilter: v })} placeholder="geosite:private" mono />
+                      <FormInput label="FakeIP exclude filter" value={settings.fakeipFilter} onChange={(v) => updateSettings({ fakeipFilter: v })} placeholder="geosite:private" disabled={settings.dnsMode !== 'fakeip'} mono />
                     </div>
                   </div>
                 </div>
@@ -405,7 +401,7 @@ export function SettingsView() {
                 </CardHeader>
                 <FormSwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
                   checked={settings.apiEnabled} onChange={(v) => updateSettings({ apiEnabled: v })} />
-                <div style={{ opacity: settings.apiEnabled ? 1 : 0.4, pointerEvents: settings.apiEnabled ? 'auto' : 'none' }} className="flex flex-col gap-4">
+                <div className={`flex flex-col gap-4 ${!settings.apiEnabled ? 'opacity-50' : ''}`}>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <FormInput
                       label="API Port"
@@ -414,13 +410,13 @@ export function SettingsView() {
                       className="h-8"
                       style={{ borderColor: (settings.apiPort < 1 || settings.apiPort > 65535) ? 'var(--destructive)' : undefined }}
                       value={settings.apiPort}
+                      disabled={!settings.apiEnabled}
                       onChange={(v) => updateSettings({ apiPort: parseInt(v) || 9090 })}
                     />
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">API Secret Token</label>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <FormInput value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" mono className="h-8" />
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1 min-w-0">
+                          <FormInput label="API secret token" value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" disabled={!settings.apiEnabled} mono />
                         </div>
                         <Button
                           type="button"
@@ -428,12 +424,14 @@ export function SettingsView() {
                           size="icon"
                           className="size-8 shrink-0"
                           title="Generate new random API Secret Token"
+                          disabled={!settings.apiEnabled}
                           onClick={() => {
                             const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-                            let secret = '';
-                            for (let i = 0; i < 16; i++) {
-                              secret += chars.charAt(Math.floor(Math.random() * chars.length));
-                            }
+                            const secret = Array.from({ length: 16 }, () => {
+                              const random = new Uint32Array(1);
+                              do { crypto.getRandomValues(random); } while (random[0] >= Math.floor(2 ** 32 / chars.length) * chars.length);
+                              return chars[random[0] % chars.length];
+                            }).join('');
                             updateSettings({ apiSecret: secret });
                           }}
                         >
@@ -443,7 +441,7 @@ export function SettingsView() {
                     </div>
                   </div>
                   <FormSwitchRow title="Allow CORS (Cross-Origin)" desc="Allow web-based controllers (Yacd) to connect from browser"
-                    checked={settings.apiCors} onChange={(v) => updateSettings({ apiCors: v })} />
+                    checked={settings.apiCors} disabled={!settings.apiEnabled} onChange={(v) => updateSettings({ apiCors: v })} />
                   {settings.apiEnabled && isConnected && (
                     <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">

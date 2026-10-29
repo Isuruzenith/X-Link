@@ -18,58 +18,49 @@ const PROTOCOL_LABELS: Record<string, string> = {
   http: 'HTTP',
 };
 
-const Inp = ({ value, onChange, placeholder, type = 'text', mono = false, className }: {
+const Inp = ({ value, onChange, placeholder, type = 'text', mono = false, label }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   type?: string;
   mono?: boolean;
-  className?: string;
+  label?: string;
 }) => (
-  <FormInput
-    type={type}
-    mono={mono}
-    className={`h-8 truncate ${className || ''}`}
-    value={value}
-    onChange={onChange}
-    placeholder={placeholder}
-  />
+  <FormInput type={type} mono={mono} label={label} value={value} onChange={onChange} placeholder={placeholder} />
 );
 
-const Sel = ({ value, onChange, options }: {
+const Sel = ({ value, onChange, options, label }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  label?: string;
 }) => (
-  <FormSelect
-    className="h-8"
-    value={value}
-    onChange={onChange}
-    options={options}
-  />
+  <FormSelect label={label} value={value} onChange={onChange} options={options} />
 );
 
-const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
+const Toggle = ({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
   <Switch
     checked={checked}
     onCheckedChange={onChange}
+    aria-label={label}
     className="shrink-0"
   />
 );
  
-const ToggleInput = ({ value, onChange, placeholder, mono = false }: {
+const ToggleInput = ({ value, onChange, placeholder, mono = false, label }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   mono?: boolean;
+  label?: string;
 }) => {
   const [show, setShow] = React.useState(false);
   return (
-    <div className="relative w-full flex items-center">
+    <div className="node-secret-field">
       <FormInput
-        type={show ? "text" : "password"}
+        type={show ? 'text' : 'password'}
         mono={mono}
-        className="h-8 pr-8 w-full truncate overflow-ellipsis"
+        label={label}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
@@ -78,8 +69,10 @@ const ToggleInput = ({ value, onChange, placeholder, mono = false }: {
         type="button"
         variant="ghost"
         size="icon"
-        className="absolute right-1 size-6 text-muted-foreground hover:text-foreground hover:bg-transparent rounded"
+        className="node-secret-toggle"
         onClick={() => setShow(!show)}
+        aria-label={`${show ? 'Hide' : 'Show'} ${label || placeholder || 'value'}`}
+        aria-pressed={show}
       >
         {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
       </Button>
@@ -88,9 +81,9 @@ const ToggleInput = ({ value, onChange, placeholder, mono = false }: {
 };
 
 const SubCard = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <Card className="p-4 bg-muted/20 border-border/60 shadow-none flex flex-col gap-3">
+  <Card className="node-editor-section p-4 bg-muted/20 flex flex-col gap-3">
     <CardHeader className="p-0 pb-1">
-      <CardTitle className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">{title}</CardTitle>
+      <CardTitle className="text-sm font-semibold text-foreground">{title}</CardTitle>
     </CardHeader>
     <CardContent className="p-0 flex flex-col gap-3">
       {children}
@@ -100,27 +93,66 @@ const SubCard = ({ title, children }: { title: string; children: React.ReactNode
 
 export function NodeEditor() {
   const store = useNodeEditorStore();
+  const { isOpen, saveError, closeEditor } = store;
   const errorRef = React.useRef<HTMLDivElement>(null);
- 
+  const drawerRef = React.useRef<HTMLDivElement>(null);
+  const wasOpen = React.useRef(false);
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+
   React.useEffect(() => {
-    if (store.saveError && errorRef.current) {
+    if (isOpen && !wasOpen.current) {
+      returnFocusRef.current = document.activeElement as HTMLElement | null;
+      wasOpen.current = true;
+      const frame = requestAnimationFrame(() => drawerRef.current?.querySelector<HTMLElement>('[aria-label="Close node editor"]')?.focus());
+      return () => cancelAnimationFrame(frame);
+    }
+    if (!isOpen && wasOpen.current) {
+      returnFocusRef.current?.focus();
+      wasOpen.current = false;
+    }
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeEditor();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      if (event.target instanceof Element && event.target.closest('[data-radix-popper-content-wrapper]')) return;
+      const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), md-text-button:not([disabled]), md-filled-button:not([disabled]), md-outlined-button:not([disabled]), md-icon-button:not([disabled]), md-outlined-text-field:not([disabled]), md-switch:not([disabled]), [data-slot="select-trigger"]:not([disabled])') ?? [])
+        .filter((element) => element.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, closeEditor]);
+
+  React.useEffect(() => {
+    if (saveError && errorRef.current) {
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [store.saveError]);
+  }, [saveError]);
 
-  if (!store.isOpen) return null;
+  if (!isOpen) return null;
 
   const isSpecial = ['socks', 'http'].includes(store.editProtocol);
   const noTransport = ['socks', 'http', 'hysteria2', 'tuic'].includes(store.editProtocol);
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm transition-all duration-200" onClick={store.closeEditor} />
-      <div className="fixed inset-y-0 right-0 z-50 h-full w-[420px] bg-card border-l border-border shadow-lg flex flex-col transition-all duration-200 ease">
+      <div className="node-editor-scrim" onClick={store.closeEditor} aria-hidden="true" />
+      <div ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="node-editor-title" className="node-editor-drawer">
         {/* Header */}
-        <div className="flex justify-between items-center px-5 py-4 border-b border-border shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-foreground">Edit Node</span>
+        <div className="node-editor-header">
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 id="node-editor-title" className="text-lg font-semibold text-foreground">Edit server</h2>
             <Badge variant="outline" className="h-5 px-2 text-[9.5px] font-mono border-border bg-muted/40 text-foreground">
               {PROTOCOL_LABELS[store.editProtocol] || store.editProtocol}
             </Badge>
@@ -130,6 +162,7 @@ export function NodeEditor() {
             size="icon"
             className="size-7 text-muted-foreground hover:text-foreground rounded"
             onClick={store.closeEditor}
+            aria-label="Close node editor"
           >
             <X className="size-4" />
           </Button>
@@ -137,17 +170,14 @@ export function NodeEditor() {
 
         {/* Section tabs */}
         {!isSpecial && (
-          <div className="flex gap-1 px-5 pt-2 border-b border-border bg-muted/10 shrink-0">
+          <div className="node-editor-tabs">
             {(['basic', 'transport', 'tls'] as const).map((s) => (
               <Button
                 key={s}
                 variant="ghost"
                 onClick={() => store.setSection(s)}
-                className={`h-9 px-3 text-xs font-bold rounded-none border-b-2 bg-transparent hover:bg-transparent ${
-                  store.section === s
-                    ? 'border-foreground text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
+                aria-pressed={store.section === s}
+                className={`node-editor-tab ${store.section === s ? 'is-active' : ''}`}
               >
                 {s === 'tls' ? 'TLS / Security' : s.charAt(0).toUpperCase() + s.slice(1)}
               </Button>
@@ -156,18 +186,17 @@ export function NodeEditor() {
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+        <div className="node-editor-body">
           {/* BASIC */}
           {(store.section === 'basic' || isSpecial) && (
             <>
               <SubCard title="Common">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Node Name (Tag) *</label>
-                  <Inp value={store.editTag} onChange={(v) => store.setField('editTag', v)} placeholder="my-proxy-sg" />
+                  <Inp label="Node name (tag)" value={store.editTag} onChange={(v) => store.setField('editTag', v)} placeholder="my-proxy-sg" />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Protocol Type</label>
                   <Sel
+                    label="Protocol type"
                     value={store.editProtocol}
                     onChange={(v) => {
                       store.setField('editProtocol', v);
@@ -187,12 +216,12 @@ export function NodeEditor() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="flex flex-col gap-1.5 col-span-2">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Server Address *</label>
-                    <Inp value={store.editAddress} onChange={(v) => store.setField('editAddress', v)} placeholder="sg.example.com" mono />
+                    <Inp label="Server address" value={store.editAddress} onChange={(v) => store.setField('editAddress', v)} placeholder="sg.example.com" mono />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Port *</label>
+                    <label htmlFor="node-server-port" className="text-xs font-medium text-muted-foreground">Port</label>
                     <input
+                      id="node-server-port"
                       type="number"
                       className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
                       value={store.editPort}
@@ -205,13 +234,12 @@ export function NodeEditor() {
               {(store.editProtocol === 'vless' || store.editProtocol === 'vmess') && (
                 <SubCard title="Authentication">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">UUID *</label>
-                    <ToggleInput value={store.editUuid} onChange={(v) => store.setField('editUuid', v)} placeholder="uuid-here" mono />
+                    <ToggleInput label="UUID" value={store.editUuid} onChange={(v) => store.setField('editUuid', v)} placeholder="uuid-here" mono />
                   </div>
                   {store.editProtocol === 'vless' && (
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Flow (XTLS)</label>
                       <Sel
+                        label="Flow (XTLS)"
                         value={store.editFlow}
                         onChange={(v) => store.setField('editFlow', v)}
                         options={[
@@ -227,8 +255,8 @@ export function NodeEditor() {
               {store.editProtocol === 'trojan' && (
                 <SubCard title="Trojan Authentication">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
                     <ToggleInput
+                      label="Trojan password"
                       value={store.editPassword}
                       onChange={(v) => store.setField('editPassword', v)}
                       placeholder="Trojan password"
@@ -240,16 +268,16 @@ export function NodeEditor() {
               {store.editProtocol === 'shadowsocks' && (
                 <SubCard title="Shadowsocks">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
                     <ToggleInput
+                      label="Shadowsocks password"
                       value={store.editPassword}
                       onChange={(v) => store.setField('editPassword', v)}
                       placeholder="Password"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Encryption Method *</label>
                     <Sel
+                      label="Encryption method"
                       value={store.editMethod}
                       onChange={(v) => store.setField('editMethod', v)}
                       options={[
@@ -266,8 +294,8 @@ export function NodeEditor() {
               {store.editProtocol === 'hysteria2' && (
                 <SubCard title="Hysteria2">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Auth Password *</label>
                     <ToggleInput
+                      label="Authentication password"
                       value={store.editHy2Auth}
                       onChange={(v) => store.setField('editHy2Auth', v)}
                       placeholder="Auth Password"
@@ -275,22 +303,19 @@ export function NodeEditor() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Upload BW</label>
-                      <Inp value={store.editHy2UpBw} onChange={(v) => store.setField('editHy2UpBw', v)} placeholder="100 mbps" mono />
+                      <Inp label="Upload bandwidth" value={store.editHy2UpBw} onChange={(v) => store.setField('editHy2UpBw', v)} placeholder="100 mbps" mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Download BW</label>
-                      <Inp value={store.editHy2DownBw} onChange={(v) => store.setField('editHy2DownBw', v)} placeholder="200 mbps" mono />
+                      <Inp label="Download bandwidth" value={store.editHy2DownBw} onChange={(v) => store.setField('editHy2DownBw', v)} placeholder="200 mbps" mono />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">SNI</label>
-                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="your-server.com" />
+                      <Inp label="SNI" value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="your-server.com" />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Obfuscation</label>
                       <Sel
+                        label="Obfuscation"
                         value={store.editHy2ObfsType}
                         onChange={(v) => store.setField('editHy2ObfsType', v)}
                         options={[
@@ -307,12 +332,11 @@ export function NodeEditor() {
                 <SubCard title="TUIC v5">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">UUID *</label>
-                      <ToggleInput value={store.editTuicUuid} onChange={(v) => store.setField('editTuicUuid', v)} placeholder="UUID" mono />
+                      <ToggleInput label="TUIC UUID" value={store.editTuicUuid} onChange={(v) => store.setField('editTuicUuid', v)} placeholder="UUID" mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Password *</label>
                       <ToggleInput
+                        label="TUIC password"
                         value={store.editTuicPassword}
                         onChange={(v) => store.setField('editTuicPassword', v)}
                         placeholder="Password"
@@ -321,8 +345,8 @@ export function NodeEditor() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Congestion</label>
                       <Sel
+                        label="Congestion"
                         value={store.editTuicCongestion}
                         onChange={(v) => store.setField('editTuicCongestion', v)}
                         options={[
@@ -333,8 +357,8 @@ export function NodeEditor() {
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">UDP Relay Mode</label>
                       <Sel
+                        label="UDP relay mode"
                         value={store.editTuicUdpMode}
                         onChange={(v) => store.setField('editTuicUdpMode', v)}
                         options={[
@@ -351,8 +375,8 @@ export function NodeEditor() {
                 <SubCard title="SOCKS">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">SOCKS Version</label>
                       <Sel
+                        label="SOCKS version"
                         value={String(store.editSocksVersion)}
                         onChange={(v) => store.setField('editSocksVersion', parseInt(v))}
                         options={[
@@ -362,13 +386,12 @@ export function NodeEditor() {
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Username</label>
-                      <Inp value={store.editSocksUser} onChange={(v) => store.setField('editSocksUser', v)} placeholder="Optional" />
+                      <Inp label="Username" value={store.editSocksUser} onChange={(v) => store.setField('editSocksUser', v)} placeholder="Optional" />
                     </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Password</label>
                     <ToggleInput
+                      label="SOCKS password"
                       value={store.editSocksPassword}
                       onChange={(v) => store.setField('editSocksPassword', v)}
                       placeholder="Optional"
@@ -378,7 +401,7 @@ export function NodeEditor() {
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[11.5px] font-bold text-foreground">UDP over TCP</span>
                     </div>
-                    <Toggle checked={store.editSocksUdpOverTcp} onChange={(v) => store.setField('editSocksUdpOverTcp', v)} />
+                    <Toggle label="UDP over TCP" checked={store.editSocksUdpOverTcp} onChange={(v) => store.setField('editSocksUdpOverTcp', v)} />
                   </div>
                 </SubCard>
               )}
@@ -387,12 +410,11 @@ export function NodeEditor() {
                 <SubCard title="HTTP Proxy">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Username</label>
-                      <Inp value={store.editHttpUser} onChange={(v) => store.setField('editHttpUser', v)} placeholder="Optional" />
+                      <Inp label="Username" value={store.editHttpUser} onChange={(v) => store.setField('editHttpUser', v)} placeholder="Optional" />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Password</label>
                       <ToggleInput
+                        label="HTTP password"
                         value={store.editHttpPassword}
                         onChange={(v) => store.setField('editHttpPassword', v)}
                         placeholder="Optional"
@@ -403,7 +425,7 @@ export function NodeEditor() {
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[11.5px] font-bold text-foreground">HTTPS (TLS)</span>
                     </div>
-                    <Toggle checked={store.editHttpTls} onChange={(v) => store.setField('editHttpTls', v)} />
+                    <Toggle label="HTTPS (TLS)" checked={store.editHttpTls} onChange={(v) => store.setField('editHttpTls', v)} />
                   </div>
                 </SubCard>
               )}
@@ -414,8 +436,8 @@ export function NodeEditor() {
           {store.section === 'transport' && !noTransport && (
             <SubCard title="Transport Layer">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase">Network Transport</label>
                 <Sel
+                  label="Network transport"
                   value={store.editNetwork}
                   onChange={(v) => store.setField('editNetwork', v)}
                   options={[
@@ -430,19 +452,16 @@ export function NodeEditor() {
               {(store.editNetwork === 'ws' || store.editNetwork === 'http' || store.editNetwork === 'httpupgrade') && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Path</label>
-                    <Inp value={store.editPath} onChange={(v) => store.setField('editPath', v)} placeholder="/graphql" mono />
+                    <Inp label="Path" value={store.editPath} onChange={(v) => store.setField('editPath', v)} placeholder="/graphql" mono />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Host Header</label>
-                    <Inp value={store.editHost} onChange={(v) => store.setField('editHost', v)} placeholder="cdn.example.com" mono />
+                    <Inp label="Host header" value={store.editHost} onChange={(v) => store.setField('editHost', v)} placeholder="cdn.example.com" mono />
                   </div>
                 </div>
               )}
               {store.editNetwork === 'grpc' && (
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Service Name</label>
-                  <Inp value={store.editServiceName} onChange={(v) => store.setField('editServiceName', v)} placeholder="GunService" mono />
+                  <Inp label="Service name" value={store.editServiceName} onChange={(v) => store.setField('editServiceName', v)} placeholder="GunService" mono />
                 </div>
               )}
             </SubCard>
@@ -453,8 +472,8 @@ export function NodeEditor() {
             <>
               <SubCard title="TLS Security">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase">Security Mode</label>
                   <Sel
+                    label="Security mode"
                     value={store.editTlsEnabled ? (store.editRealityEnabled ? 'reality' : 'tls') : 'none'}
                     onChange={(v) => {
                       if (v === 'none') {
@@ -477,8 +496,8 @@ export function NodeEditor() {
                 </div>
                 {store.editTlsEnabled && (
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">uTLS Fingerprint</label>
                     <Sel
+                      label="uTLS fingerprint"
                       value={store.editFingerprint}
                       onChange={(v) => store.setField('editFingerprint', v)}
                       options={[
@@ -496,12 +515,11 @@ export function NodeEditor() {
                 <SubCard title="TLS Parameters">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">SNI</label>
-                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
+                      <Inp label="SNI" value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">ALPN</label>
                       <Sel
+                        label="ALPN"
                         value={store.editAlpn}
                         onChange={(v) => store.setField('editAlpn', v)}
                         options={[
@@ -536,17 +554,14 @@ export function NodeEditor() {
                     <span>REALITY impersonates a real TLS server to bypass censorship.</span>
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase">Public Key (pbk) *</label>
-                    <Inp value={store.editPublicKey} onChange={(v) => store.setField('editPublicKey', v)} placeholder="Base64 public key..." mono />
+                    <Inp label="Public key (pbk)" value={store.editPublicKey} onChange={(v) => store.setField('editPublicKey', v)} placeholder="Base64 public key..." mono />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Short ID (sid)</label>
-                      <Inp value={store.editShortId} onChange={(v) => store.setField('editShortId', v)} placeholder="97c4e5fcb1e8" mono />
+                      <Inp label="Short ID (sid)" value={store.editShortId} onChange={(v) => store.setField('editShortId', v)} placeholder="97c4e5fcb1e8" mono />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold text-muted-foreground uppercase">Destination SNI</label>
-                      <Inp value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
+                      <Inp label="Destination SNI" value={store.editServerName} onChange={(v) => store.setField('editServerName', v)} placeholder="aka.ms" mono />
                     </div>
                   </div>
                 </SubCard>
@@ -555,7 +570,7 @@ export function NodeEditor() {
           )}
 
           {store.saveError && (
-            <div ref={errorRef} className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2 mt-2">
+            <div ref={errorRef} role="alert" className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2 mt-2">
               <ShieldAlert className="size-3.5 shrink-0" />
               <span>{store.saveError}</span>
             </div>
@@ -563,11 +578,11 @@ export function NodeEditor() {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-border shrink-0 bg-muted/10">
-          <Button variant="outline" size="sm" onClick={store.closeEditor} className="font-semibold text-xs h-8.5 px-4">
+        <div className="node-editor-footer">
+          <Button variant="outline" size="sm" onClick={store.closeEditor} className="font-semibold text-xs px-4">
             Cancel
           </Button>
-          <Button variant="default" size="sm" onClick={store.saveEditor} disabled={store.isSaving} className="font-semibold text-xs h-8.5 px-4 min-w-[90px]">
+          <Button variant="default" size="sm" onClick={store.saveEditor} disabled={store.isSaving} className="font-semibold text-xs px-4 min-w-[90px]">
             {store.isSaving ? <><RefreshCw className="size-3 animate-spin mr-1" /> Saving…</> : 'Save Node'}
           </Button>
         </div>

@@ -474,10 +474,6 @@ pub fn check_tun_support(app: tauri::AppHandle) -> bool {
 
 #[tauri::command]
 pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = app;
-    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -494,7 +490,10 @@ pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
         let mut file: Vec<u16> = exe_path.as_os_str().encode_wide().collect();
         file.push(0);
 
-        let mut params: Vec<u16> = std::ffi::OsStr::new("").encode_wide().collect();
+        // The elevated process waits for this instance to exit before the
+        // single-instance plugin claims the application mutex.
+        let handoff = format!("--elevation-handoff={}", std::process::id());
+        let mut params: Vec<u16> = std::ffi::OsStr::new(&handoff).encode_wide().collect();
         params.push(0);
 
         unsafe {
@@ -512,7 +511,9 @@ pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
             }
         }
 
-        // Elevation succeeded, shut down this non-elevated window instance
+        // ShellExecuteW only confirms launch. Leave the elevated instance to
+        // claim the mutex after this one finishes its owned-process cleanup.
+        crate::tray::perform_clean_cleanup(&app);
         std::process::exit(0);
     }
 

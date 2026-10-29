@@ -55,11 +55,11 @@ export function RoutingView() {
   return (
     <ViewShell
       title="Routing"
-      subtitle="Traffic routing engine — GeoIP, GeoSite, rule sets & split tunneling"
+      subtitle="Set the final outbound, manage rule sets and choose how traffic is routed"
       actions={
         <Button
           size="sm"
-          className="h-8 gap-1 px-3 text-xs font-semibold"
+          className="font-semibold"
           onClick={() => {
             setEditingRule(null);
             setRuleForm({ type: 'geoip', value: '', outbound: 'direct', invert: false, notes: '' });
@@ -70,14 +70,14 @@ export function RoutingView() {
         </Button>
       }
     >
-      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
+      <div className="utility-view routing-view">
         {isConnected && (
           <div className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
             Routing changes are saved and applied with a validated restart of the running proxy; if the restart fails the previous rules are restored.
           </div>
         )}
         {/* Global + Rule Sets row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-[10px]">
+        <div className="routing-overview">
           {/* Global Settings */}
           <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
             <CardHeader className="p-0 flex flex-row items-center gap-2 space-y-0 pb-1">
@@ -86,8 +86,8 @@ export function RoutingView() {
             </CardHeader>
             <CardContent className="p-0 flex flex-col gap-3.5">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Final Outbound (Fallback)</label>
                 <FormSelect
+                  label="Final outbound (fallback)"
                   value={settings.finalOutbound}
                   onChange={(v) => updateSettings({ finalOutbound: v as OutboundAction })}
                   options={[
@@ -107,7 +107,7 @@ export function RoutingView() {
           </Card>
 
           {/* Rule Sets */}
-          <Card className="col-span-1 md:col-span-2 p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden">
+          <Card className="routing-rule-sets p-4 bg-card flex flex-col min-w-0">
             <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
               <div className="flex items-center gap-2">
                 <Database className="size-4 text-muted-foreground" />
@@ -119,16 +119,16 @@ export function RoutingView() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-6 gap-1 px-2 text-[10px] font-semibold"
+                className="font-semibold"
                 onClick={() => setShowAddRuleSet(true)}
               >
                 <Plus className="size-3" /> Add Rule Set
               </Button>
             </CardHeader>
 
-            <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
+            <CardContent className="p-0 flex-1 flex flex-col min-w-0">
               {showAddRuleSet && (
-                <div className="p-3 mb-3 bg-muted/40 border border-border/50 rounded-lg shrink-0 animate-[fade-in_150ms_ease-out]">
+                <div className="routing-rule-set-form p-3 mb-3 bg-muted/40 rounded-lg shrink-0">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-xs font-bold text-foreground">Add Rule Set</span>
                     <Button
@@ -136,26 +136,26 @@ export function RoutingView() {
                       size="icon"
                       className="size-6 text-muted-foreground hover:text-foreground"
                       onClick={() => setShowAddRuleSet(false)}
+                      aria-label="Cancel adding rule set"
                     >
                       <X className="size-3.5" />
                     </Button>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
-                    <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
-                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Tag</label>
-                      <FormInput value={ruleSetForm.tag} onChange={(v) => setRuleSetForm({ tag: v })} placeholder="geoip-cn" mono />
+                  <div className="routing-form-grid routing-rule-set-grid">
+                    <div className="flex flex-col gap-1">
+                      <FormInput label="Tag" value={ruleSetForm.tag} onChange={(v) => setRuleSetForm({ tag: v })} placeholder="geoip-cn" mono />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Type</label>
                       <FormSelect
+                        label="Rule set type"
                         value={ruleSetForm.type}
                         onChange={(v) => setRuleSetForm({ type: v as 'remote' | 'local' })}
                         options={[{ value: 'remote', label: 'Remote' }, { value: 'local', label: 'Local' }]}
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Format</label>
                       <FormSelect
+                        label="Format"
                         value={ruleSetForm.format}
                         onChange={(v) => setRuleSetForm({ format: v as 'binary' | 'source' })}
                         options={[
@@ -165,8 +165,8 @@ export function RoutingView() {
                       />
                     </div>
                     <div className="flex flex-col gap-1">
-                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Update</label>
                       <FormSelect
+                        label="Update interval"
                         value={ruleSetForm.updateInterval}
                         onChange={(v) => setRuleSetForm({ updateInterval: v })}
                         options={[
@@ -180,7 +180,7 @@ export function RoutingView() {
                     <Button
                       variant="default"
                       size="sm"
-                      className="h-8 col-span-2 sm:col-span-1 font-semibold"
+                      className="font-semibold"
                       onClick={saveRuleSet}
                     >
                       Add
@@ -188,16 +188,15 @@ export function RoutingView() {
                   </div>
                   {ruleSetForm.type === 'remote' && (
                     <div className="flex flex-col gap-1 mt-2.5">
-                      <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Remote URL</label>
-                      <FormInput value={ruleSetForm.url || ''} onChange={(v) => setRuleSetForm({ url: v })} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" />
+                      <FormInput label="Remote URL" value={ruleSetForm.url || ''} onChange={(v) => setRuleSetForm({ url: v })} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" />
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[170px] pr-1">
+              <div className="routing-rule-set-list flex flex-col gap-1.5 overflow-y-auto pr-1">
                 {ruleSets.map((rs) => (
-                  <div key={rs.id} className="flex items-center gap-2 p-2 bg-muted/40 border border-border/40 rounded-lg min-w-0">
+                  <div key={rs.id} className="routing-rule-set-item flex items-center gap-2 p-2 bg-muted/40 rounded-lg min-w-0">
                     <Database className="size-3 text-muted-foreground shrink-0" />
                     <span className="font-mono text-xs font-bold text-foreground truncate min-w-0 pr-1">{rs.tag}</span>
                     <Badge variant="secondary" className="h-4 px-1.5 text-[8.5px] font-semibold tracking-wider bg-background/50 border border-border/40 text-muted-foreground shrink-0">{rs.type}</Badge>
@@ -215,6 +214,7 @@ export function RoutingView() {
                           size="icon"
                           className="size-6 text-muted-foreground hover:text-foreground rounded"
                           onClick={() => updateRuleSet(rs)}
+                          aria-label={`Update rule set ${rs.tag}`}
                           disabled={updatingRuleSet === rs.id}
                         >
                           <Download className={`size-3 ${updatingRuleSet === rs.id ? 'animate-spin' : ''}`} />
@@ -225,6 +225,7 @@ export function RoutingView() {
                         size="icon"
                         className="size-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
                         onClick={() => deleteRuleSet(rs.id)}
+                        aria-label={`Delete rule set ${rs.tag}`}
                       >
                         <Trash2 className="size-3" />
                       </Button>
@@ -242,7 +243,7 @@ export function RoutingView() {
         </div>
 
         {/* Rules Table */}
-        <Card className="p-4 bg-card border-border shadow-sm flex flex-col overflow-hidden flex-1 min-h-0">
+        <Card className="routing-rules-panel p-4 bg-card border-border shadow-sm flex flex-col min-w-0">
           <CardHeader className="p-0 pb-3 flex flex-row items-center gap-2 space-y-0 shrink-0">
             <Filter className="size-4 text-muted-foreground" />
             <CardTitle className="text-xs font-bold text-foreground">Routing Rules</CardTitle>
@@ -251,13 +252,13 @@ export function RoutingView() {
             </Badge>
           </CardHeader>
 
-          <CardContent className="p-0 flex-1 flex flex-col overflow-hidden min-h-0">
+          <CardContent className="p-0 flex-1 flex flex-col min-w-0">
             {showAddRule && (
-              <div className="p-3 mb-3.5 bg-muted/40 border border-border/50 rounded-lg shrink-0 overflow-y-auto max-h-[200px] sm:max-h-none pr-1 animate-[fade-in_150ms_ease-out]">
-                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 items-end">
+              <div className="p-3 mb-3.5 bg-muted/40 rounded-lg shrink-0">
+                <div className="routing-form-grid routing-rule-grid">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Rule Type</label>
                     <FormSelect
+                      label="Rule type"
                       value={ruleForm.type}
                       onChange={(v) => setRuleForm({ type: v as RoutingRuleType })}
                       options={[
@@ -274,10 +275,10 @@ export function RoutingView() {
                       ]}
                     />
                   </div>
-                  <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
-                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Value</label>
+                  <div className="flex flex-col gap-1">
                     {ruleForm.type === 'rule_set' ? (
                       <FormSelect
+                        label="Rule value"
                         value={ruleForm.value}
                         onChange={(v) => setRuleForm({ value: v })}
                         options={[
@@ -287,6 +288,7 @@ export function RoutingView() {
                       />
                     ) : (
                       <FormInput
+                        label="Rule value"
                         value={ruleForm.value}
                         onChange={(v) => setRuleForm({ value: v })}
                         placeholder={ruleForm.type === 'geoip' ? 'cn, private…' : ruleForm.type === 'ip_cidr' ? '10.0.0.0/8' : 'e.g. google.com'}
@@ -295,8 +297,8 @@ export function RoutingView() {
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Outbound</label>
                     <FormSelect
+                      label="Outbound"
                       value={ruleForm.outbound}
                       onChange={(v) => setRuleForm({ outbound: v as OutboundAction })}
                       options={[
@@ -308,20 +310,19 @@ export function RoutingView() {
                     />
                   </div>
                   <div className="flex flex-col gap-1 items-center">
-                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Invert</label>
+                    <span className="text-xs font-medium text-muted-foreground">Invert</span>
                     <div className="h-8 flex items-center">
-                      <Switch checked={ruleForm.invert} onCheckedChange={(v) => setRuleForm({ invert: v })} />
+                      <Switch checked={ruleForm.invert} onCheckedChange={(v) => setRuleForm({ invert: v })} aria-label="Invert rule" />
                     </div>
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[9.5px] font-bold text-muted-foreground uppercase">Notes</label>
-                    <FormInput value={ruleForm.notes || ''} onChange={(v) => setRuleForm({ notes: v })} placeholder="e.g. China bypass" />
+                    <FormInput label="Notes" value={ruleForm.notes || ''} onChange={(v) => setRuleForm({ notes: v })} placeholder="e.g. China bypass" />
                   </div>
-                  <div className="flex gap-1 shrink-0 pb-0.5 justify-end">
+                  <div className="routing-form-actions flex gap-1 justify-end">
                     <Button
                       variant="default"
                       size="sm"
-                      className="h-8 font-semibold text-xs px-3"
+                      className="font-semibold"
                       onClick={saveRoutingRule}
                     >
                       {editingRule ? 'Update' : 'Add'}
@@ -331,6 +332,7 @@ export function RoutingView() {
                       size="icon"
                       className="size-8"
                       onClick={() => { setShowAddRule(false); setEditingRule(null); }}
+                      aria-label="Cancel editing rule"
                     >
                       <X className="size-4" />
                     </Button>
@@ -339,29 +341,30 @@ export function RoutingView() {
               </div>
             )}
 
-            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-              <div className="rules-table border border-border/40 rounded-lg overflow-hidden bg-muted/10 flex-1 flex flex-col min-h-0">
+            <div className="routing-table-scroll">
+              <div className="rules-table rounded-lg bg-muted/10">
                 <div className="rules-table-header bg-muted/40 border-b border-border/60 text-[10px] uppercase font-bold tracking-wider text-muted-foreground py-2.5 px-3 flex items-center shrink-0">
                   <span className="w-7">#</span>
-                  <span className="w-12">Active</span>
+                  <span className="w-16">Active</span>
                   <span className="w-32 shrink-0">Type</span>
                   <span className="flex-1 truncate">Value</span>
                   <span className="w-24 shrink-0">Outbound</span>
                   <span className="flex-1 truncate">Notes</span>
                   <span className="w-16 shrink-0 text-right">Actions</span>
                 </div>
-                <div className="flex-1 overflow-y-auto flex flex-col divide-y divide-border/30">
+                <div className="flex flex-col divide-y divide-border/30">
                   {routingRules.map((rule, i) => (
                     <div
                       key={rule.id}
-                      className={`flex items-center text-xs py-2 px-3 hover:bg-muted/20 transition-all animate-[fade-in_150ms_ease-out] ${
+                      className={`flex items-center text-xs py-2 px-3 hover:bg-muted/20 ${
                         rule.enabled === false ? 'opacity-40' : ''
                       }`}
                     >
                       <span className="w-7 text-[10px] text-muted-foreground font-mono">{i + 1}</span>
-                      <span className="w-12 flex items-center">
+                      <span className="w-16 flex items-center">
                         <Switch
                           checked={rule.enabled !== false}
+                          aria-label={`Enable rule ${rule.value}`}
                           onCheckedChange={(checked) => toggleRoutingRuleEnabled(rule.id, checked)}
                         />
                       </span>
@@ -379,6 +382,7 @@ export function RoutingView() {
                           size="icon"
                           className="size-6 text-muted-foreground hover:text-foreground rounded"
                           onClick={() => { setEditingRule(rule); setShowAddRule(true); }}
+                          aria-label={`Edit rule ${rule.value}`}
                         >
                           <Edit3 className="size-3" />
                         </Button>
@@ -387,6 +391,7 @@ export function RoutingView() {
                           size="icon"
                           className="size-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded"
                           onClick={() => deleteRoutingRule(rule.id)}
+                          aria-label={`Delete rule ${rule.value}`}
                         >
                           <Trash2 className="size-3" />
                         </Button>

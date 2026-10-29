@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { NavRail } from './components/NavRail';
 import type { TabId } from './components/NavRail';
 import { DashboardView } from './views/DashboardView';
-import { ConfigView } from './views/ConfigView';
-import { RoutingView } from './views/RoutingView';
-import { LogsView } from './views/LogsView';
-import { SettingsView } from './views/SettingsView';
-import { ConnectionsView } from './views/ConnectionsView.tsx';
-import { NodeEditor } from './components/domain/NodeEditor';
+const ConfigView = lazy(() => import('./views/ConfigView').then((module) => ({ default: module.ConfigView })));
+const RoutingView = lazy(() => import('./views/RoutingView').then((module) => ({ default: module.RoutingView })));
+const LogsView = lazy(() => import('./views/LogsView').then((module) => ({ default: module.LogsView })));
+const SettingsView = lazy(() => import('./views/SettingsView').then((module) => ({ default: module.SettingsView })));
+const ConnectionsView = lazy(() => import('./views/ConnectionsView').then((module) => ({ default: module.ConnectionsView })));
+const NodeEditor = lazy(() => import('./components/domain/NodeEditor').then((module) => ({ default: module.NodeEditor })));
 import { ToastContainer } from './components/ToastContainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { migrateStores } from './utils/migrate';
@@ -84,8 +84,8 @@ export default function App() {
         resolvedTag = useProfileStore.getState().selectedNodeTag;
       }
 
-      // Auto-connect if elevated
-      if (elevated && activeProfile && !hasAutoConnected.current) {
+      // Auto-connect only when TUN is the saved preference and available.
+      if (elevated && updatedSettings.proxyMode === 'tun' && activeProfile && !hasAutoConnected.current) {
         hasAutoConnected.current = true;
         (async () => {
           try {
@@ -312,15 +312,17 @@ export default function App() {
       <NavRail activeTab={activeTab} onTabChange={setActiveTab} />
       
       <div className="view-host view-fade" key={activeTab}>
-        {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
-        {activeTab === 'profiles' && <ErrorBoundary fallbackTitle="Profiles Error"><ConfigView /></ErrorBoundary>}
-        {activeTab === 'routing' && <ErrorBoundary fallbackTitle="Routing Error"><RoutingView /></ErrorBoundary>}
-        {activeTab === 'connections' && <ErrorBoundary fallbackTitle="Connections Monitor Error"><ConnectionsView /></ErrorBoundary>}
-        {activeTab === 'logs' && <ErrorBoundary fallbackTitle="Logs Error"><LogsView /></ErrorBoundary>}
-        {activeTab === 'settings' && <ErrorBoundary fallbackTitle="Settings Error"><SettingsView /></ErrorBoundary>}
+        <Suspense fallback={<main className="view-loading" role="status">Loading view…</main>}>
+          {activeTab === 'dashboard' && <ErrorBoundary fallbackTitle="Dashboard Error"><DashboardView onNavigateToTab={setActiveTab} /></ErrorBoundary>}
+          {activeTab === 'profiles' && <ErrorBoundary fallbackTitle="Profiles Error"><ConfigView /></ErrorBoundary>}
+          {activeTab === 'routing' && <ErrorBoundary fallbackTitle="Routing Error"><RoutingView /></ErrorBoundary>}
+          {activeTab === 'connections' && <ErrorBoundary fallbackTitle="Connections Monitor Error"><ConnectionsView /></ErrorBoundary>}
+          {activeTab === 'logs' && <ErrorBoundary fallbackTitle="Logs Error"><LogsView /></ErrorBoundary>}
+          {activeTab === 'settings' && <ErrorBoundary fallbackTitle="Settings Error"><SettingsView /></ErrorBoundary>}
+        </Suspense>
       </div>
 
-      <NodeEditor />
+      <Suspense fallback={null}><NodeEditor /></Suspense>
       <ToastContainer />
     </div>
   );

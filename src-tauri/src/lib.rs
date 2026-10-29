@@ -9,8 +9,38 @@ use state::ProxyState;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+#[cfg(target_os = "windows")]
+fn wait_for_elevation_handoff() {
+    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
+    let parent_id = std::env::args().skip(1).find_map(|arg| {
+        arg.strip_prefix("--elevation-handoff=")?
+            .parse::<u32>()
+            .ok()
+    });
+    let Some(parent_id) = parent_id else { return };
+
+    // Wait only for the instance that requested elevation, not an unrelated process.
+    if let Ok(parent) = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, parent_id) } {
+        let result = unsafe { WaitForSingleObject(parent, 15_000) };
+        let _ = unsafe { CloseHandle(parent) };
+        if result != WAIT_OBJECT_0 {
+            eprintln!(
+                "Elevation handoff timed out; the existing X-Link instance is still running."
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    wait_for_elevation_handoff();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {

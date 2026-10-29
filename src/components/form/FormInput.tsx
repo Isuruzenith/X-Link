@@ -1,36 +1,29 @@
 import React, { useId } from 'react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 
-interface FormInputProps extends Omit<React.ComponentProps<typeof Input>, 'onChange'> {
+interface FormInputProps extends Omit<React.ComponentProps<'input'>, 'onChange' | 'value'> {
   label?: string;
   value: string | number;
   onChange: (val: string) => void;
-  placeholder?: string;
   mono?: boolean;
+  rows?: number;
 }
 
-export function FormInput({ label, value, onChange, placeholder, mono, className, type = "text", id, ...props }: FormInputProps) {
+export function FormInput({ label, value, onChange, placeholder, mono, rows, className, type = 'text', id, ...props }: FormInputProps) {
   const generatedId = useId();
   const inputId = id || generatedId;
+  const field = React.createElement('md-outlined-text-field', {
+    ...props,
+    id: inputId,
+    type,
+    value: String(value),
+    rows,
+    label,
+    placeholder,
+    'aria-label': props['aria-label'] || label || placeholder,
+    onInput: (event: React.FormEvent<HTMLElement>) => onChange((event.currentTarget as HTMLElementTagNameMap['md-outlined-text-field']).value),
+    className: cn('material-field', mono && 'material-mono', className),
+  });
 
-  return (
-    <div className="flex flex-col gap-1.5 w-full">
-      {label && (
-        <Label htmlFor={inputId} className="text-2xs font-bold text-muted-foreground uppercase tracking-wider cursor-pointer">
-          {label}
-        </Label>
-      )}
-      <Input
-        id={inputId}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={cn(mono && "font-mono text-xs", "h-9 bg-background/50 border-border text-foreground focus-visible:ring-1 focus-visible:ring-ring", className)}
-        {...props}
-      />
-    </div>
-  );
+  return <div className="material-field-wrap">{field}</div>;
 }

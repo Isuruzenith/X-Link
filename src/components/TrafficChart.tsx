@@ -207,7 +207,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     maxSpeed = maxSpeed * 1.15;
  
     // Measure Y-axis text width to dynamically scale padding.left
-    ctx.font = '9px "Inter", sans-serif';
+    ctx.font = '11px "Geist Variable", system-ui, sans-serif';
     const longestLabel = formatSpeed(maxSpeed);
     const labelWidth = ctx.measureText(longestLabel).width;
     const paddingLeft = Math.max(48, Math.ceil(labelWidth + 12));
@@ -216,6 +216,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     const padding = { top: 20, right: 15, bottom: 25, left: paddingLeft };
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
+    if (chartWidth <= 0 || chartHeight <= 0) return;
  
     // Draw background grid lines
     ctx.strokeStyle = borderDefault;
@@ -232,7 +233,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
     // If there is no history, draw empty state
     if (history.length === 0) {
       ctx.fillStyle = textLow;
-      ctx.font = '12px "Inter", sans-serif';
+      ctx.font = '12px "Geist Variable", system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('No real-time traffic data', width / 2, height / 2);
@@ -241,7 +242,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
  
     // Draw Y axis labels
     ctx.fillStyle = textLow;
-    ctx.font = '9px "Inter", sans-serif';
+    ctx.font = '11px "Geist Variable", system-ui, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let i = 0; i <= gridCount; i++) {
@@ -294,9 +295,9 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
       ctx.fillStyle = fillGradient;
       ctx.fill();
 
-      // 2. Draw glowing curve stroke
+      // 2. Draw the curve with a subtle glow
       ctx.shadowColor = glowColor;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 2;
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
@@ -357,7 +358,7 @@ export const TrafficChart: React.FC<TrafficChartProps> = ({ history }) => {
 
     // Draw timeline markers (e.g. -30s, -15s, Now)
     ctx.fillStyle = textLow;
-    ctx.font = '9px "Inter", sans-serif';
+    ctx.font = '11px "Geist Variable", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 

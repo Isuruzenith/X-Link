@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useDeferredValue, useMemo } from 'react';
-import { Terminal, Copy, Trash2, Search } from 'lucide-react';
+import { Terminal, Copy, Trash2 } from 'lucide-react';
 import { List, useListRef, type RowComponentProps } from 'react-window';
 import { ViewShell } from '../components/ViewShell';
 import { useLogStore, type LogEntry } from '../stores/logStore';
@@ -151,10 +151,10 @@ export function LogsView() {
 
   return (
     <ViewShell
-      title="Console Logs"
-      subtitle="Real-time core proxy logs and system events output"
+      title="Logs"
+      subtitle="Follow proxy activity and system events as they happen"
       actions={
-        <div className="flex items-center gap-2 select-none">
+        <div className="utility-toolbar select-none">
           <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs font-semibold" onClick={handleCopy}>
             <Copy className="size-3.5" /> Copy All
           </Button>
@@ -162,7 +162,7 @@ export function LogsView() {
             <Trash2 className="size-3.5" /> Clear
           </Button>
           <div className="flex items-center gap-2 border-l border-border/80 pl-3.5 ml-1 h-5">
-            <Switch id="autoscroll-toggle" checked={autoScroll} onCheckedChange={setAutoScroll} />
+            <Switch id="autoscroll-toggle" checked={autoScroll} onCheckedChange={setAutoScroll} aria-label="Autoscroll logs" />
             <label htmlFor="autoscroll-toggle" className="text-xs font-bold text-muted-foreground cursor-pointer select-none">
               Autoscroll
             </label>
@@ -170,15 +170,15 @@ export function LogsView() {
         </div>
       }
     >
-      <div className="flex flex-col gap-[10px] overflow-hidden h-full w-full min-h-0">
+      <div className="utility-view utility-log">
 
         {/* Filter bar */}
-        <div className="flex items-center gap-3 shrink-0 select-none">
-          <div className="relative flex-1 min-w-[140px] max-w-[320px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground z-10" />
+        <div className="utility-toolbar utility-log-filters select-none">
+          <div className="utility-search">
             <FormInput
-              className="pl-9 h-8"
-              placeholder="Search console output…"
+              type="search"
+              label="Search logs"
+              placeholder="Find a message…"
               value={filterText}
               onChange={setFilterText}
             />
@@ -202,9 +202,9 @@ export function LogsView() {
         </div>
 
         {/* Terminal block */}
-        <Card className="flex-1 p-0 overflow-hidden bg-card border-border shadow-sm flex flex-col min-h-0">
+        <Card className="utility-log-panel flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
           {filtered.length > 0 ? (
-            <div className="flex-1 w-full min-h-0 p-2 font-mono text-[11.5px]">
+            <div className="flex-1 w-full min-h-0 p-3 font-mono text-[11.5px]">
               <List
                 listRef={listRef}
                 rowCount={filtered.length}
