@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useDeferredValue, useMemo } from 'react';
-import { Terminal, Copy, Trash2 } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { List, useListRef, type RowComponentProps } from 'react-window';
 import { ViewShell } from '../components/ViewShell';
 import { useLogStore, type LogEntry } from '../stores/logStore';
@@ -156,10 +156,10 @@ export function LogsView() {
       actions={
         <div className="utility-toolbar select-none">
           <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs font-semibold" onClick={handleCopy}>
-            <Copy className="size-3.5" /> Copy All
+            <Icon name="content_copy" size={14} /> Copy All
           </Button>
           <Button variant="outline" size="sm" className="h-8 gap-1 px-3 text-xs font-semibold" onClick={clearLogs}>
-            <Trash2 className="size-3.5" /> Clear
+            <Icon name="delete" size={14} /> Clear
           </Button>
           <div className="flex items-center gap-2 border-l border-border/80 pl-3.5 ml-1 h-5">
             <Switch id="autoscroll-toggle" checked={autoScroll} onCheckedChange={setAutoScroll} aria-label="Autoscroll logs" />
@@ -218,7 +218,7 @@ export function LogsView() {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground gap-2.5 select-none animate-in fade-in duration-200">
-              <Terminal className="size-9 opacity-60 stroke-[1.2]" />
+              <Icon name="terminal" size={36} className="opacity-60" />
               <span className="text-xs font-bold text-foreground">
                 {logs.length > 0 ? 'No logs match the current filters.' : 'Waiting for core process console output…'}
               </span>

@@ -1,11 +1,12 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/ui/icon';
 import { cn } from '@/lib/utils';
 
 export interface SegmentOption<T extends string> {
   value: T;
   label: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  icon?: string | React.ComponentType<{ className?: string }>;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -19,7 +20,11 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
   return (
     <div className={cn("material-segments flex items-center bg-muted/60 p-1 rounded-2xl shrink-0 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", className)}>
       {options.map((opt) => {
-        const Icon = opt.icon;
+        const iconElement = typeof opt.icon === 'string'
+          ? <Icon name={opt.icon} size={14} className="shrink-0" />
+          : opt.icon
+            ? React.createElement(opt.icon, { className: 'size-3 shrink-0' })
+            : null;
         const isActive = value === opt.value;
         return (
           <Button
@@ -30,7 +35,7 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
             aria-pressed={isActive}
             className={cn('material-segment', isActive && 'is-active')}
           >
-            {Icon && <Icon className="size-3 shrink-0" />}
+            {iconElement}
             <span>{opt.label}</span>
           </Button>
         );
@@ -38,3 +43,4 @@ export function SegmentedControl<T extends string>({ value, onChange, options, c
     </div>
   );
 }
+

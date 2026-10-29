@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, Check, Clipboard, Edit3, FileUp, Globe, Link2, Plus, RefreshCw, ShieldAlert, Trash2, X, Zap } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { ViewShell } from '../components/ViewShell';
 import { Button } from '@/components/ui/button';
@@ -66,7 +66,7 @@ export function ConfigView() {
   return (
     <ViewShell title="Profiles" subtitle="Choose a configuration and select the server that carries your traffic"
       actions={<Button onClick={() => setShowImport((open) => !open)} aria-expanded={showImport} aria-controls="profile-import-panel">
-        {showImport ? <X aria-hidden="true" /> : <Plus aria-hidden="true" />} {showImport ? 'Close import' : 'Add profile'}
+        {showImport ? <Icon name="close" aria-hidden="true" /> : <Icon name="add" aria-hidden="true" />} {showImport ? 'Close import' : 'Add profile'}
       </Button>}>
       <div className={`profiles-layout ${showImport ? 'with-import' : ''}`}>
         {showImport && <section id="profile-import-panel" className="profiles-import material-panel" aria-labelledby="import-heading">
@@ -76,7 +76,7 @@ export function ConfigView() {
               <p>Paste a share link, subscription URL or configuration, or choose a file.</p>
             </div>
             <Button variant="outline" onClick={() => void handleFileImport()} disabled={isImporting}>
-              <FileUp aria-hidden="true" /> Choose file
+              <Icon name="upload_file" aria-hidden="true" /> Choose file
             </Button>
           </div>
           <form className="profiles-import-form" onSubmit={(event) => { event.preventDefault(); if (trimmedContent && !urlError && !isImporting) void handleImport(); }}>
@@ -92,16 +92,16 @@ export function ConfigView() {
               aria-describedby={urlError ? 'profile-url-error' : undefined}
             />
             {urlError && <p id="profile-url-error" className="material-error" role="alert">{urlError}</p>}
-            {importError && <p className="material-error" role="alert"><ShieldAlert aria-hidden="true" /> {importError}</p>}
-            {importSuccess && <p className="material-success" role="status"><Check aria-hidden="true" /> Profile imported.</p>}
+            {importError && <p className="material-error" role="alert"><Icon name="warning" aria-hidden="true" /> {importError}</p>}
+            {importSuccess && <p className="material-success" role="status"><Icon name="check" aria-hidden="true" /> Profile imported.</p>}
             <div className="profiles-import-actions">
               <Button variant="outline" onClick={pasteClipboard} disabled={isImporting}>
-                <Clipboard aria-hidden="true" /> Paste clipboard
+                <Icon name="content_paste" aria-hidden="true" /> Paste clipboard
               </Button>
-              <button className="material-submit" type="submit" disabled={isImporting || !trimmedContent || Boolean(urlError)}>
-                {isImporting ? <RefreshCw aria-hidden="true" className="animate-spin" /> : <FileUp aria-hidden="true" />}
+              <Button type="submit" disabled={isImporting || !trimmedContent || Boolean(urlError)} className="material-submit">
+                <Icon name={isImporting ? "refresh" : "upload_file"} aria-hidden="true" className={isImporting ? "animate-spin" : undefined} />
                 {isImporting ? 'Importing…' : 'Import profile'}
-              </button>
+              </Button>
             </div>
           </form>
         </section>}
@@ -120,7 +120,7 @@ export function ConfigView() {
               return (
                 <div key={profile.id} className={`profile-item ${isSelected ? 'is-selected' : ''}`}>
                   <button type="button" className="profile-item-select" onClick={() => selectProfile(profile.id)} aria-current={isSelected ? 'true' : undefined}>
-                    <span className="profile-item-icon">{profile.type === 'subscription' ? <Link2 aria-hidden="true" /> : <Globe aria-hidden="true" />}</span>
+                    <span className="profile-item-icon">{profile.type === 'subscription' ? <Icon name="link" aria-hidden="true" /> : <Icon name="public" aria-hidden="true" />}</span>
                     <span className="profile-item-copy">
                       <strong title={profile.name}>{profile.name}</strong>
                       <span>{profile.type} · {profile.nodeCount} nodes · {new Date(profile.lastUpdated).toLocaleDateString()}</span>
@@ -131,22 +131,22 @@ export function ConfigView() {
                     {profile.type === 'subscription' && profile.subscriptionUrl && (
                       <Button variant="ghost" size="icon" aria-label={`Refresh ${profile.name}`} title={`Refresh ${profile.name}`}
                         disabled={refreshingProfileId === profile.id} onClick={() => refreshSubscription(profile.id)}>
-                        <RefreshCw className={refreshingProfileId === profile.id ? 'animate-spin' : ''} aria-hidden="true" />
+                        <Icon name="refresh" className={refreshingProfileId === profile.id ? 'animate-spin' : ''} aria-hidden="true" />
                       </Button>
                     )}
                     <Button variant="ghost" size="icon" aria-label={`Delete ${profile.name}`} title={`Delete ${profile.name}`}
                       onClick={() => void handleDeleteProfile(profile)}>
-                      <Trash2 aria-hidden="true" />
+                      <Icon name="delete" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
               );
             }) : (
               <div className="material-empty">
-                <Globe aria-hidden="true" />
+                <Icon name="public" aria-hidden="true" />
                 <h3>No profiles yet</h3>
                 <p>Add a subscription, paste a share link or choose a configuration file to get started.</p>
-                <Button onClick={() => setShowImport(true)}><Plus aria-hidden="true" /> Add your first profile</Button>
+                <Button onClick={() => setShowImport(true)}><Icon name="add" aria-hidden="true" /> Add your first profile</Button>
               </div>
             )}
           </div>
@@ -162,11 +162,11 @@ export function ConfigView() {
               {selectedProfile.type === 'subscription' && selectedProfile.subscriptionUrl && (
                 <Button variant="outline" disabled={refreshingProfileId === selectedProfile.id}
                   onClick={() => refreshSubscription(selectedProfile.id)}>
-                  <RefreshCw className={refreshingProfileId === selectedProfile.id ? 'animate-spin' : ''} aria-hidden="true" /> Refresh
+                  <Icon name="refresh" className={refreshingProfileId === selectedProfile.id ? 'animate-spin' : ''} aria-hidden="true" /> Refresh
                 </Button>
               )}
               <Button variant="outline" disabled={isTestingLatency || !nodes.length} onClick={testAllNodes}>
-                <Activity aria-hidden="true" /> {isTestingLatency ? 'Testing…' : 'Test latency'}
+                <Icon name="speed" aria-hidden="true" /> {isTestingLatency ? 'Testing…' : 'Test latency'}
               </Button>
             </div>}
           </div>
@@ -182,7 +182,7 @@ export function ConfigView() {
                 return (
                   <div key={`${node.tag}-${index}`} id={`node-card-${node.tag}`} className={`server-item ${isSelected ? 'is-selected' : ''}`}>
                     <button type="button" className="server-item-select" onClick={() => selectNode(node)} aria-pressed={isSelected}>
-                      <span className="server-item-icon" aria-hidden="true">{country && country.length === 2 ? country.toUpperCase() : <Globe />}</span>
+                      <span className="server-item-icon" aria-hidden="true">{country && country.length === 2 ? country.toUpperCase() : <Icon name="public" />}</span>
                       <span className="server-item-copy">
                         <strong title={node.tag}>{node.tag}</strong>
                         <span>{node.type}{usage && (usage.totalUploadBytes > 0 || usage.totalDownloadBytes > 0) ? ` · ${formatBytes(usage.totalUploadBytes + usage.totalDownloadBytes)} used` : ''}</span>
@@ -193,7 +193,7 @@ export function ConfigView() {
                     </button>
                     {selectedProfile.id === activeProfileId && (
                       <Button variant="ghost" size="icon" aria-label={`Edit ${node.tag}`} title={`Edit ${node.tag}`} onClick={() => openEditor(node)}>
-                        <Edit3 aria-hidden="true" />
+                        <Icon name="edit" aria-hidden="true" />
                       </Button>
                     )}
                   </div>
@@ -202,7 +202,7 @@ export function ConfigView() {
             </div>
           ) : (
             <div className="material-empty">
-              {selectedProfile ? <Zap aria-hidden="true" /> : <Globe aria-hidden="true" />}
+              {selectedProfile ? <Icon name="bolt" aria-hidden="true" /> : <Icon name="public" aria-hidden="true" />}
               <h3>{selectedProfile ? 'No servers available' : 'No profile selected'}</h3>
               <p>{selectedProfile ? 'This profile has no selectable proxy nodes.' : 'Choose a profile to see its servers, or add a new one.'}</p>
             </div>

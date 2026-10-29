@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, Layers, Route, Terminal, Settings, Network, Menu, X } from 'lucide-react';
+import { Icon } from './ui/icon';
 import xLinkLogo from '../assets/X-Link-logo.png';
 import { useConnectionStore } from '../stores/connectionStore';
 
@@ -11,12 +11,12 @@ interface NavRailProps {
 }
 
 const NAV_ITEMS = [
-  { id: 'dashboard', icon: Activity, label: 'Dashboard' },
-  { id: 'profiles', icon: Layers, label: 'Profiles' },
-  { id: 'routing', icon: Route, label: 'Routing' },
-  { id: 'connections', icon: Network, label: 'Connections' },
-  { id: 'logs', icon: Terminal, label: 'Logs' },
-  { id: 'settings', icon: Settings, label: 'Settings' },
+  { id: 'dashboard', icon: 'speed', label: 'Dashboard' },
+  { id: 'profiles', icon: 'folder_open', label: 'Profiles' },
+  { id: 'routing', icon: 'alt_route', label: 'Routing' },
+  { id: 'connections', icon: 'hub', label: 'Connections' },
+  { id: 'logs', icon: 'terminal', label: 'Logs' },
+  { id: 'settings', icon: 'settings', label: 'Settings' },
 ] as const;
 
 export function NavRail({ activeTab, onTabChange }: NavRailProps) {
@@ -66,19 +66,19 @@ export function NavRail({ activeTab, onTabChange }: NavRailProps) {
   return (
     <>
       <button ref={menuRef} className="mobile-menu-button" type="button" aria-label="Open navigation" aria-expanded={open} aria-controls="primary-navigation" onClick={() => setOpen(true)}>
-        <Menu size={21} />
+        <Icon name="menu" size={21} />
       </button>
       {open && compact && <button className="nav-scrim" type="button" aria-label="Close navigation" tabIndex={-1} onClick={() => { setOpen(false); menuRef.current?.focus(); }} />}
       <aside ref={navRef} id="primary-navigation" className={`app-navigation ${open ? 'is-open' : ''}`} aria-label="X-Link navigation" inert={compact && !open}>
         <div className="nav-brand">
           <img src={xLinkLogo} alt="" className="nav-brand-icon" />
           <div><strong>X-Link</strong><span>Network control</span></div>
-          <button type="button" className="nav-close" aria-label="Close navigation" onClick={() => { setOpen(false); menuRef.current?.focus(); }}><X size={18} /></button>
+          <button type="button" className="nav-close" aria-label="Close navigation" onClick={() => { setOpen(false); menuRef.current?.focus(); }}><Icon name="close" size={18} /></button>
         </div>
         <nav className="nav-destinations" aria-label="Main navigation">
-          {NAV_ITEMS.map(({ id, icon: Icon, label }) => (
+          {NAV_ITEMS.map(({ id, icon, label }) => (
             <button key={id} type="button" aria-current={activeTab === id ? 'page' : undefined} className={`nav-destination ${activeTab === id ? 'is-active' : ''}`} onClick={() => navigate(id)}>
-              <Icon size={19} aria-hidden="true" /><span>{label}</span>
+              <Icon name={icon} size={19} aria-hidden="true" /><span>{label}</span>
             </button>
           ))}
         </nav>

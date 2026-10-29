@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useDeferredValue, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ask } from '@tauri-apps/plugin-dialog';
-import { Network, X, ShieldAlert, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
@@ -16,7 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { FormInput, SegmentedControl } from '@/components/form';
 import { cn } from '@/lib/utils';
 
@@ -166,9 +165,9 @@ const ConnectionRow = memo(({
           disabled={isKilling}
         >
           {isKilling ? (
-            <RefreshCw className="size-3.5 animate-spin" />
+            <Icon name="refresh" size={14} className="animate-spin" />
           ) : (
-            <X className="size-3.5" />
+            <Icon name="close" size={14} />
           )}
         </Button>
       </TableCell>
@@ -347,7 +346,7 @@ export function ConnectionsView() {
               className="h-8 gap-1 px-3 text-xs font-semibold"
               onClick={handleKillAll}
             >
-              <ShieldAlert className="size-3.5" /> Close All
+              <Icon name="warning" size={14} /> Close All
             </Button>
           )}
         </div>
@@ -384,7 +383,7 @@ export function ConnectionsView() {
  
         {/* Connections table panel */}
         <Card className="flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
-          <ScrollArea className="utility-table flex-1 w-full">
+          <div data-slot="scroll-area" className="material-scroll-area utility-table flex-1 w-full relative overflow-auto size-full">
             {sorted.length > 0 ? (
               <Table>
                 <caption className="sr-only">Active connections, routes, speeds and transferred data</caption>
@@ -393,7 +392,7 @@ export function ConnectionsView() {
                     <TableHead className="h-9 px-4">
                       <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[120px] pr-2 text-left", sortBy === 'host' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')} aria-label={`Sort by destination ${sortBy === 'host' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Destination</span>
-                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
@@ -404,19 +403,19 @@ export function ConnectionsView() {
                     <TableHead className="h-9 px-4">
                       <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'speed' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')} aria-label={`Sort by live speed ${sortBy === 'speed' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Live speed</span>
-                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
                       <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'bytes' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')} aria-label={`Sort by total data ${sortBy === 'bytes' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Total data</span>
-                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </button>
                     </TableHead>
                     <TableHead className="h-9 px-4">
                       <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[90px] pr-2 text-left", sortBy === 'time' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')} aria-label={`Sort by uptime ${sortBy === 'time' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
                         <span>Uptime</span>
-                        <ArrowUpDown className={cn("size-3 shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
                       </button>
                     </TableHead>
                     <TableHead className="h-9 px-4 w-14 text-center">
@@ -439,7 +438,7 @@ export function ConnectionsView() {
               </Table>
             ) : (
               <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground p-10 gap-3 select-none">
-                <Network className="size-10 opacity-60 stroke-[1.2]" />
+                <Icon name="hub" size={40} className="opacity-60" />
                 <span className="text-xs font-bold text-foreground">
                   {!isConnected ? 'Proxy service is disconnected.' : 'No active network connections found.'}
                 </span>
@@ -448,7 +447,7 @@ export function ConnectionsView() {
                 )}
               </div>
             )}
-          </ScrollArea>
+          </div>
         </Card>
       </div>
     </ViewShell>

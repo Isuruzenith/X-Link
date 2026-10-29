@@ -1,9 +1,10 @@
 import React from 'react';
-import { X, RefreshCw, ShieldAlert, Info, Eye, EyeOff } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { useNodeEditorStore } from '../../stores/nodeEditorStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { FormInput, FormSelect } from '@/components/form';
 import { Switch } from '@/components/ui/switch';
 
@@ -74,7 +75,7 @@ const ToggleInput = ({ value, onChange, placeholder, mono = false, label }: {
         aria-label={`${show ? 'Hide' : 'Show'} ${label || placeholder || 'value'}`}
         aria-pressed={show}
       >
-        {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        {show ? <Icon name="visibility_off" size={14} /> : <Icon name="visibility" size={14} />}
       </Button>
     </div>
   );
@@ -121,8 +122,8 @@ export function NodeEditor() {
         return;
       }
       if (event.key !== 'Tab') return;
-      if (event.target instanceof Element && event.target.closest('[data-radix-popper-content-wrapper]')) return;
-      const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), md-text-button:not([disabled]), md-filled-button:not([disabled]), md-outlined-button:not([disabled]), md-icon-button:not([disabled]), md-outlined-text-field:not([disabled]), md-switch:not([disabled]), [data-slot="select-trigger"]:not([disabled])') ?? [])
+      if (event.target instanceof Element && event.target.closest('md-outlined-select, md-select-option')) return;
+      const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), md-text-button:not([disabled]), md-filled-button:not([disabled]), md-outlined-button:not([disabled]), md-icon-button:not([disabled]), md-outlined-text-field:not([disabled]), md-outlined-select:not([disabled]), md-switch:not([disabled])') ?? [])
         .filter((element) => element.getClientRects().length > 0);
       if (!focusable.length) return;
       const first = focusable[0];
@@ -164,7 +165,7 @@ export function NodeEditor() {
             onClick={store.closeEditor}
             aria-label="Close node editor"
           >
-            <X className="size-4" />
+            <Icon name="close" size={16} />
           </Button>
         </div>
 
@@ -219,14 +220,7 @@ export function NodeEditor() {
                     <Inp label="Server address" value={store.editAddress} onChange={(v) => store.setField('editAddress', v)} placeholder="sg.example.com" mono />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label htmlFor="node-server-port" className="text-xs font-medium text-muted-foreground">Port</label>
-                    <input
-                      id="node-server-port"
-                      type="number"
-                      className="field text-xs bg-background border border-border px-2.5 rounded h-8 text-foreground w-full"
-                      value={store.editPort}
-                      onChange={(e) => store.setField('editPort', Number(e.target.value) || 443)}
-                    />
+                    <Inp label="Port" type="number" value={String(store.editPort)} onChange={(v) => store.setField('editPort', Number(v) || 443)} mono />
                   </div>
                 </div>
               </SubCard>
@@ -534,12 +528,11 @@ export function NodeEditor() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-2 px-1">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       id="nodeAllowInsecure"
-                      className="rounded border-border text-foreground focus:ring-ring shrink-0 size-3.5"
+                      aria-label="Allow Insecure (skip cert verification)"
                       checked={store.editAllowInsecure}
-                      onChange={(e) => store.setField('editAllowInsecure', e.target.checked)}
+                      onCheckedChange={(checked) => store.setField('editAllowInsecure', checked)}
                     />
                     <label htmlFor="nodeAllowInsecure" className="text-xs font-semibold text-muted-foreground select-none cursor-pointer">
                       Allow Insecure (skip cert verification)
@@ -550,7 +543,7 @@ export function NodeEditor() {
               {store.editTlsEnabled && store.editRealityEnabled && (
                 <SubCard title="REALITY Configuration">
                   <div className="bg-muted/40 border border-border/40 p-2.5 rounded-lg flex items-start gap-2 text-[10px] text-muted-foreground leading-normal shrink-0 mb-1">
-                    <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+                    <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
                     <span>REALITY impersonates a real TLS server to bypass censorship.</span>
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -571,7 +564,7 @@ export function NodeEditor() {
 
           {store.saveError && (
             <div ref={errorRef} role="alert" className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2 mt-2">
-              <ShieldAlert className="size-3.5 shrink-0" />
+              <Icon name="warning" size={14} className="shrink-0" />
               <span>{store.saveError}</span>
             </div>
           )}
@@ -583,7 +576,7 @@ export function NodeEditor() {
             Cancel
           </Button>
           <Button variant="default" size="sm" onClick={store.saveEditor} disabled={store.isSaving} className="font-semibold text-xs px-4 min-w-[90px]">
-            {store.isSaving ? <><RefreshCw className="size-3 animate-spin mr-1" /> Saving…</> : 'Save Node'}
+            {store.isSaving ? <><Icon name="refresh" size={12} className="animate-spin mr-1" /> Saving…</> : 'Save Node'}
           </Button>
         </div>
       </div>

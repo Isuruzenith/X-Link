@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  Settings as SettingsIcon, Network, Eye, Dna, Code2,
-  Info, AlertTriangle, CheckCircle2, ExternalLink, Sun, Moon, Monitor,
-  RefreshCw, Copy
-} from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
@@ -42,12 +38,12 @@ export function SettingsView() {
 
   const [settingsTab, setSettingsTab] = React.useState<SettingsSection>('general');
 
-  const sideNavItems: [SettingsSection, React.ComponentType<{ className?: string; size?: number }>, string][] = [
-    ['general', SettingsIcon, 'General'],
-    ['tun', Network, 'TUN Mode'],
-    ['sniff', Eye, 'Sniffing'],
-    ['dns', Dna, 'DNS'],
-    ['api', Code2, 'API'],
+  const sideNavItems: [SettingsSection, string, string][] = [
+    ['general', 'tune', 'General'],
+    ['tun', 'router', 'TUN Mode'],
+    ['sniff', 'visibility', 'Sniffing'],
+    ['dns', 'dns', 'DNS'],
+    ['api', 'code', 'API'],
   ];
 
   return (
@@ -55,7 +51,7 @@ export function SettingsView() {
       <div className="settings-layout">
         {/* Secondary nav */}
         <nav className="settings-navigation" aria-label="Settings sections">
-          {sideNavItems.map(([id, Icon, label]) => (
+          {sideNavItems.map(([id, iconName, label]) => (
             <Button
               key={id}
               variant="ghost"
@@ -63,7 +59,7 @@ export function SettingsView() {
               aria-current={settingsTab === id ? 'page' : undefined}
               onClick={() => setSettingsTab(id)}
             >
-              <Icon className="size-3.5 shrink-0" />
+              <Icon name={iconName} size={15} className="shrink-0" />
               <span>{label}</span>
             </Button>
           ))}
@@ -134,9 +130,9 @@ export function SettingsView() {
                       value={theme}
                       onChange={(mode) => setTheme(mode as ThemeMode)}
                       options={[
-                        { value: 'light', label: 'Light', icon: Sun },
-                        { value: 'dark', label: 'Dark', icon: Moon },
-                        { value: 'system', label: 'System', icon: Monitor },
+                        { value: 'light', label: 'Light', icon: 'light_mode' },
+                        { value: 'dark', label: 'Dark', icon: 'dark_mode' },
+                        { value: 'system', label: 'System', icon: 'desktop_windows' },
                       ]}
                       className="w-full justify-stretch"
                     />
@@ -228,7 +224,7 @@ export function SettingsView() {
             <div className="flex flex-col gap-4">
               {!isElevated && (
                 <div className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2">
-                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <Icon name="warning" size={14} className="shrink-0" />
                   <span>TUN Mode requires Administrator elevation. Click "Run as Admin" on the Dashboard.</span>
                 </div>
               )}
@@ -267,7 +263,7 @@ export function SettingsView() {
                 ))}
               </Card>
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
-                <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+                <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
                 <span>TUN mode captures ALL system traffic. Combined with Auto Route + Strict Route, it prevents DNS leaks. While connected, TUN interface changes are applied with a validated restart that keeps the current effective mode; on failure the previous values are restored.</span>
               </div>
             </div>
@@ -385,7 +381,7 @@ export function SettingsView() {
               </Card>
 
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
-                <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+                <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
                 <span>While connected, DNS changes are applied with a validated restart; on failure the previous values are restored.</span>
               </div>
             </div>
@@ -435,7 +431,7 @@ export function SettingsView() {
                             updateSettings({ apiSecret: secret });
                           }}
                         >
-                          <RefreshCw className="size-3.5" />
+                          <Icon name="refresh" size={14} />
                         </Button>
                       </div>
                     </div>
@@ -445,7 +441,7 @@ export function SettingsView() {
                   {settings.apiEnabled && isConnected && (
                     <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-3.5 text-muted-foreground shrink-0" />
+                        <Icon name="check_circle" size={14} className="text-muted-foreground shrink-0" />
                         <span className="leading-normal">
                           API active at <code className="font-mono text-[10.5px] bg-background border border-border px-1 py-0.5 rounded text-foreground">
                             http://127.0.0.1:{settings.apiPort}
@@ -457,7 +453,7 @@ export function SettingsView() {
                             rel="noreferrer noopener"
                             className="text-foreground font-semibold underline underline-offset-2 inline-flex items-center gap-0.5"
                           >
-                            Yacd UI <ExternalLink className="size-3 inline-block" />
+                            Yacd UI <Icon name="open_in_new" size={12} className="inline-block" />
                           </a>
                         </span>
                       </div>
@@ -477,7 +473,7 @@ export function SettingsView() {
                             }
                           }}
                         >
-                          <Copy className="size-3" />
+                          <Icon name="content_copy" size={12} />
                           Copy Token
                         </Button>
                       )}
@@ -486,7 +482,7 @@ export function SettingsView() {
                 </div>
               </Card>
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
-                <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+                <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
                 <span>The Clash-compatible API lets Yacd or MetaCubeX dashboard control routing and monitor connections in real-time.</span>
               </div>
             </div>

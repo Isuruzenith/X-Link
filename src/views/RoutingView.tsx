@@ -1,4 +1,4 @@
-import { Plus, Trash2, Edit3, X, Database, Filter, GitFork, Download, Info } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useRoutingStore } from '../stores/routingStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -66,7 +66,7 @@ export function RoutingView() {
             setShowAddRule(true);
           }}
         >
-          <Plus className="size-3.5" /> Add Rule
+          <Icon name="add" size={14} /> Add Rule
         </Button>
       }
     >
@@ -81,7 +81,7 @@ export function RoutingView() {
           {/* Global Settings */}
           <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
             <CardHeader className="p-0 flex flex-row items-center gap-2 space-y-0 pb-1">
-              <GitFork className="size-4 text-muted-foreground" />
+              <Icon name="alt_route" size={16} className="text-muted-foreground" />
               <CardTitle className="text-xs font-bold text-foreground">Global Routing</CardTitle>
             </CardHeader>
             <CardContent className="p-0 flex flex-col gap-3.5">
@@ -110,7 +110,7 @@ export function RoutingView() {
           <Card className="routing-rule-sets p-4 bg-card flex flex-col min-w-0">
             <CardHeader className="p-0 pb-3 flex flex-row items-center justify-between space-y-0 shrink-0">
               <div className="flex items-center gap-2">
-                <Database className="size-4 text-muted-foreground" />
+                <Icon name="database" size={16} className="text-muted-foreground" />
                 <CardTitle className="text-xs font-bold text-foreground">Rule Sets</CardTitle>
                 <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
                   {ruleSets.length}
@@ -122,7 +122,7 @@ export function RoutingView() {
                 className="font-semibold"
                 onClick={() => setShowAddRuleSet(true)}
               >
-                <Plus className="size-3" /> Add Rule Set
+                <Icon name="add" size={12} /> Add Rule Set
               </Button>
             </CardHeader>
 
@@ -138,7 +138,7 @@ export function RoutingView() {
                       onClick={() => setShowAddRuleSet(false)}
                       aria-label="Cancel adding rule set"
                     >
-                      <X className="size-3.5" />
+                      <Icon name="close" size={14} />
                     </Button>
                   </div>
                   <div className="routing-form-grid routing-rule-set-grid">
@@ -197,7 +197,7 @@ export function RoutingView() {
               <div className="routing-rule-set-list flex flex-col gap-1.5 overflow-y-auto pr-1">
                 {ruleSets.map((rs) => (
                   <div key={rs.id} className="routing-rule-set-item flex items-center gap-2 p-2 bg-muted/40 rounded-lg min-w-0">
-                    <Database className="size-3 text-muted-foreground shrink-0" />
+                    <Icon name="database" size={12} className="text-muted-foreground shrink-0" />
                     <span className="font-mono text-xs font-bold text-foreground truncate min-w-0 pr-1">{rs.tag}</span>
                     <Badge variant="secondary" className="h-4 px-1.5 text-[8.5px] font-semibold tracking-wider bg-background/50 border border-border/40 text-muted-foreground shrink-0">{rs.type}</Badge>
                     <Badge variant="outline" className="h-4 px-1.5 text-[8.5px] font-semibold tracking-wider border-border bg-background/30 text-muted-foreground shrink-0">{rs.format}</Badge>
@@ -217,7 +217,7 @@ export function RoutingView() {
                           aria-label={`Update rule set ${rs.tag}`}
                           disabled={updatingRuleSet === rs.id}
                         >
-                          <Download className={`size-3 ${updatingRuleSet === rs.id ? 'animate-spin' : ''}`} />
+                          <Icon name="download" size={12} className={updatingRuleSet === rs.id ? 'animate-spin' : ''} />
                         </Button>
                       )}
                       <Button
@@ -227,7 +227,7 @@ export function RoutingView() {
                         onClick={() => deleteRuleSet(rs.id)}
                         aria-label={`Delete rule set ${rs.tag}`}
                       >
-                        <Trash2 className="size-3" />
+                        <Icon name="delete" size={12} />
                       </Button>
                     </div>
                   </div>
@@ -245,7 +245,7 @@ export function RoutingView() {
         {/* Rules Table */}
         <Card className="routing-rules-panel p-4 bg-card border-border shadow-sm flex flex-col min-w-0">
           <CardHeader className="p-0 pb-3 flex flex-row items-center gap-2 space-y-0 shrink-0">
-            <Filter className="size-4 text-muted-foreground" />
+            <Icon name="filter_list" size={16} className="text-muted-foreground" />
             <CardTitle className="text-xs font-bold text-foreground">Routing Rules</CardTitle>
             <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-border bg-muted/30">
               {routingRules.filter(r => r.enabled !== false).length} / {routingRules.length} active
@@ -334,7 +334,7 @@ export function RoutingView() {
                       onClick={() => { setShowAddRule(false); setEditingRule(null); }}
                       aria-label="Cancel editing rule"
                     >
-                      <X className="size-4" />
+                      <Icon name="close" size={16} />
                     </Button>
                   </div>
                 </div>
@@ -384,7 +384,7 @@ export function RoutingView() {
                           onClick={() => { setEditingRule(rule); setShowAddRule(true); }}
                           aria-label={`Edit rule ${rule.value}`}
                         >
-                          <Edit3 className="size-3" />
+                          <Icon name="edit" size={12} />
                         </Button>
                         <Button
                           variant="ghost"
@@ -393,7 +393,7 @@ export function RoutingView() {
                           onClick={() => deleteRoutingRule(rule.id)}
                           aria-label={`Delete rule ${rule.value}`}
                         >
-                          <Trash2 className="size-3" />
+                          <Icon name="delete" size={12} />
                         </Button>
                       </span>
                     </div>
@@ -408,7 +408,7 @@ export function RoutingView() {
             </div>
 
             <div className="info-box mt-3 bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
-              <Info className="size-3.5 mt-0.5 text-foreground shrink-0" />
+              <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
               <span>Rules evaluate top-to-bottom. First match wins. Hardcoded: dns → dns-out, private IPs → direct.</span>
             </div>
           </CardContent>

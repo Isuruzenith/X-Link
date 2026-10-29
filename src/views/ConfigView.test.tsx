@@ -31,7 +31,7 @@ describe('Profiles import', () => {
     expect(screen.getByRole('heading', { name: 'Add a profile' })).toBeTruthy();
     act(() => useProfileStore.getState().setImportContent('https:/broken'));
     expect(screen.getByRole('alert').textContent).toContain('Enter a valid subscription URL');
-    expect(screen.getByText('Import profile').closest('button')?.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Import profile').closest('button, md-filled-button')?.hasAttribute('disabled')).toBe(true);
   });
 
   it('validates content pasted from the clipboard', async () => {
@@ -40,7 +40,7 @@ describe('Profiles import', () => {
     fireEvent.click(screen.getByText('Add your first profile'));
     fireEvent.click(screen.getByText('Paste clipboard'));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Enter a valid subscription URL'));
-    expect(screen.getByText('Import profile').closest('button')?.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Import profile').closest('button, md-filled-button')?.hasAttribute('disabled')).toBe(true);
   });
 
   it('imports valid content and returns to the saved profiles view', async () => {

@@ -1,13 +1,13 @@
-import { X, CheckCircle, AlertTriangle, AlertCircle, Info } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { useToastStore, type ToastType } from '../stores/toastStore';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-const TOAST_ICONS: Record<ToastType, typeof CheckCircle> = {
-  success: CheckCircle,
-  error: AlertCircle,
-  warning: AlertTriangle,
-  info: Info,
+const TOAST_ICONS: Record<ToastType, string> = {
+  success: 'check_circle',
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
 };
 
 const TOAST_CLASSES: Record<ToastType, { border: string; icon: string }> = {
@@ -28,12 +28,12 @@ export function ToastContainer() {
       <div className="fixed bottom-0 inset-x-0 h-28 bg-gradient-to-t from-background/80 to-transparent pointer-events-none backdrop-blur-[2px] z-[190]" />
 
       {/* Centered Toast List */}
-      <div 
+      <div
         className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] flex flex-col gap-2 w-[360px] max-w-[calc(100vw-32px)] pointer-events-none"
         style={{ transformOrigin: 'right center' }}
       >
         {toasts.map((toast) => {
-          const Icon = TOAST_ICONS[toast.type];
+          const iconName = TOAST_ICONS[toast.type];
           const classes = TOAST_CLASSES[toast.type];
           const isExiting = toast.exiting;
 
@@ -47,14 +47,14 @@ export function ToastContainer() {
               }}
               className={cn(
                 "flex items-start gap-3 p-3.5 px-4 rounded-xl bg-card/95 border shadow-lg backdrop-blur-md pointer-events-auto transition-all duration-300",
-                isExiting 
-                  ? "animate-out fade-out slide-out-to-bottom-5" 
+                isExiting
+                  ? "animate-out fade-out slide-out-to-bottom-5"
                   : "animate-in fade-in slide-in-from-bottom-5",
                 classes.border
               )}
             >
-              <Icon className={`size-4 shrink-0 mt-0.5 ${classes.icon}`} />
-              
+              <Icon name={iconName} size={16} className={`shrink-0 mt-0.5 ${classes.icon}`} />
+
               <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                 {toast.title && (
                   <span className="text-xs font-bold text-foreground truncate">
@@ -73,7 +73,7 @@ export function ToastContainer() {
                 className="size-6 text-muted-foreground hover:text-foreground hover:bg-muted/40 rounded shrink-0 -mt-0.5 -mr-1"
                 onClick={() => dismissToast(toast.id)}
               >
-                <X className="size-3.5" />
+                <Icon name="close" size={14} />
               </Button>
             </div>
           );

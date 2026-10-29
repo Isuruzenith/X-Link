@@ -40,6 +40,19 @@ function Button({
       ...props.style,
     } as React.CSSProperties : props.style,
     className: cn('material-action', iconOnly && 'material-icon-action', `material-action-${variant}`, className),
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (props.disabled) {
+        e.preventDefault();
+        return;
+      }
+      if (type === 'submit') {
+        const form = (e.currentTarget as HTMLElement).closest('form');
+        if (form) {
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        }
+      }
+      props.onClick?.(e);
+    },
   }, children);
 }
 

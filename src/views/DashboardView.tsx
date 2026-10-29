@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ArrowDown, ArrowUp, Clock3, Network, Power, ShieldCheck, ShieldAlert, Wifi, Server } from 'lucide-react';
+import { Icon } from '@/components/ui/icon';
 import { TrafficChart } from '../components/TrafficChart';
 import { ViewShell } from '../components/ViewShell';
 import { useConnectionStore } from '../stores/connectionStore';
@@ -53,7 +53,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
       <div className="dashboard-layout">
         <section className={`dashboard-connect ${connectionStatus}`} aria-label="Connection control">
           <div className="dashboard-connect-header">
-            <span className="dashboard-connect-symbol"><Power size={25} strokeWidth={1.8} aria-hidden="true" /></span>
+            <span className="dashboard-connect-symbol"><Icon name="power_settings_new" size={26} aria-hidden="true" /></span>
             <span className="dashboard-connect-mode">{connected
               ? effectiveProxyMode === 'tun' ? 'TUN routing' : effectiveProxyMode === 'system' ? 'System proxy' : 'Mode unknown'
               : settings.proxyMode === 'tun' ? 'TUN preferred' : 'System proxy preferred'}</span>
@@ -77,10 +77,10 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
           <div className="dashboard-connect-footer">
             {settings.proxyMode === 'tun' && !isElevated && !connected ? (
               <Button variant="ghost" onClick={requestElevation} className="dashboard-admin-action">
-                <ShieldAlert size={17} aria-hidden="true" /> Run as administrator for TUN
+                <Icon name="warning" size={17} aria-hidden="true" /> Run as administrator for TUN
               </Button>
             ) : (
-              <span><ShieldCheck size={16} aria-hidden="true" />{connected ? `Session active · ${formatUptime(uptime)}` : isElevated ? 'Administrator access available' : 'Ready to connect'}</span>
+              <span><Icon name="verified_user" size={16} aria-hidden="true" />{connected ? `Session active · ${formatUptime(uptime)}` : isElevated ? 'Administrator access available' : 'Ready to connect'}</span>
             )}
           </div>
         </section>
@@ -91,8 +91,8 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
             <span className="live-tag">{connected ? 'Live' : 'Idle'}</span>
           </div>
           <div className="dashboard-speeds" aria-label="Current transfer speeds">
-            <div><span className="speed-key down"><ArrowDown size={16} aria-hidden="true" />Download</span><strong>{formatSpeed(downloadSpeed)}</strong></div>
-            <div><span className="speed-key up"><ArrowUp size={16} aria-hidden="true" />Upload</span><strong>{formatSpeed(uploadSpeed)}</strong></div>
+            <div><span className="speed-key down"><Icon name="arrow_downward" size={16} aria-hidden="true" />Download</span><strong>{formatSpeed(downloadSpeed)}</strong></div>
+            <div><span className="speed-key up"><Icon name="arrow_upward" size={16} aria-hidden="true" />Upload</span><strong>{formatSpeed(uploadSpeed)}</strong></div>
           </div>
           <div className="dashboard-plot"><TrafficChart history={speedHistory} /></div>
           <details className="traffic-data"><summary>View traffic data as a table</summary>
@@ -103,9 +103,9 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </section>
 
         <section className="dashboard-server" aria-labelledby="server-title">
-          <div className="dashboard-section-heading"><div><h2 id="server-title">Active server</h2><p>{activeProfile?.name || 'No profile selected'}</p></div><Server size={20} aria-hidden="true" /></div>
+          <div className="dashboard-section-heading"><div><h2 id="server-title">Active server</h2><p>{activeProfile?.name || 'No profile selected'}</p></div><Icon name="dns" size={20} aria-hidden="true" /></div>
           {nodes.length > 0 ? <>
-            <div className="dashboard-server-name"><span className="server-glyph"><Network size={21} aria-hidden="true" /></span><div><strong title={activeNode?.tag || selectedNodeTag || nodes[0].tag}>{activeNode?.tag || selectedNodeTag || nodes[0].tag}</strong><span>{activeNode ? `${activeNode.server}:${activeNode.port}` : 'Select a server below'}</span></div></div>
+            <div className="dashboard-server-name"><span className="server-glyph"><Icon name="router" size={21} aria-hidden="true" /></span><div><strong title={activeNode?.tag || selectedNodeTag || nodes[0].tag}>{activeNode?.tag || selectedNodeTag || nodes[0].tag}</strong><span>{activeNode ? `${activeNode.server}:${activeNode.port}` : 'Select a server below'}</span></div></div>
             {nodes.length > 1 && <div className="dashboard-server-list" aria-label="Switch server">
               {nodes.slice(0, 8).map((node) => <button key={node.tag} type="button" className={`server-choice ${selectedNodeTag === node.tag ? 'is-selected' : ''}`} aria-pressed={selectedNodeTag === node.tag} onClick={() => selectNode(node)} title={node.tag}>{node.tag}</button>)}
               {nodes.length > 8 && <Button variant="ghost" onClick={() => onNavigateToTab?.('profiles')}>View all {nodes.length} servers</Button>}
@@ -114,10 +114,10 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
         </section>
 
         <section className="dashboard-details" aria-label="Session details">
-          <div className="dashboard-detail"><ArrowDown aria-hidden="true" size={20} /><span>Downloaded</span><strong>{formatBytes(downloadBytes)}</strong></div>
-          <div className="dashboard-detail"><ArrowUp aria-hidden="true" size={20} /><span>Uploaded</span><strong>{formatBytes(uploadBytes)}</strong></div>
-          <div className="dashboard-detail"><Clock3 aria-hidden="true" size={20} /><span>Uptime</span><strong>{connected ? formatUptime(uptime) : '—'}</strong></div>
-          <button type="button" className="dashboard-detail detail-link" onClick={() => onNavigateToTab?.('connections')}><Network aria-hidden="true" size={20} /><span>Connections</span><strong>{activeConnections} active</strong></button>
+          <div className="dashboard-detail"><Icon name="arrow_downward" aria-hidden="true" size={20} /><span>Downloaded</span><strong>{formatBytes(downloadBytes)}</strong></div>
+          <div className="dashboard-detail"><Icon name="arrow_upward" aria-hidden="true" size={20} /><span>Uploaded</span><strong>{formatBytes(uploadBytes)}</strong></div>
+          <div className="dashboard-detail"><Icon name="schedule" aria-hidden="true" size={20} /><span>Uptime</span><strong>{connected ? formatUptime(uptime) : '—'}</strong></div>
+          <button type="button" className="dashboard-detail detail-link" onClick={() => onNavigateToTab?.('connections')}><Icon name="router" aria-hidden="true" size={20} /><span>Connections</span><strong>{activeConnections} active</strong></button>
         </section>
 
         <section className="dashboard-inbounds" aria-label="Inbound listeners">
@@ -126,7 +126,7 @@ export function DashboardView({ onNavigateToTab }: DashboardViewProps) {
             { name: 'HTTP', port: settings.httpPort }, { name: 'SOCKS5', port: settings.socksPort },
           ] : [{ name: 'Mixed', port: settings.mixedPort }]).concat(settings.apiEnabled ? [{ name: 'API', port: settings.apiPort }] : []).map(({ name, port }) =>
             <span key={name} className="inbound-port">{name} <code>{port}</code></span>)}
-            {settings.wifiSharing && <span className="inbound-port"><Wifi size={14} aria-hidden="true" /> LAN sharing on</span>}
+            {settings.wifiSharing && <span className="inbound-port"><Icon name="wifi" size={14} aria-hidden="true" /> LAN sharing on</span>}
           </div>
           <Button variant="ghost" onClick={() => onNavigateToTab?.('settings')}>Settings</Button>
         </section>
