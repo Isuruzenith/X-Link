@@ -593,6 +593,27 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
             .to_str()
             .ok_or_else(|| "Failed to convert executable path to string".to_string())?;
 
+        // In debug builds, avoid registering target\debug\xlink.exe with RUNASADMIN.
+        // Doing so causes `cargo run` / `tauri dev` to fail with OS error 740 (elevation required)
+        // when launched from a standard non-elevated terminal.
+        if cfg!(debug_assertions) {
+            let _ = std::process::Command::new("reg")
+                .args([
+                    "delete",
+                    "HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers",
+                    "/v",
+                    exe_str,
+                    "/f",
+                ])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output();
+
+            if enabled {
+                log::debug!("Skipping set_runas_admin(true) in debug mode to prevent cargo error 740");
+                return Ok(());
+            }
+        }
+
         let mut command = std::process::Command::new("reg");
         if enabled {
             command.args([
@@ -717,6 +738,13 @@ mod tests {
         assert_eq!(extract_singbox_version_number("some random text"), None);
         assert_eq!(extract_singbox_version_number("sing-box version"), None);
         assert_eq!(extract_singbox_version_number(""), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_set_runas_admin_debug_mode_safe() {
+        // In debug mode, calling set_runas_admin(true) should succeed without leaving RUNASADMIN
+        assert!(set_runas_admin(true).is_ok());
     }
 
     #[test]
