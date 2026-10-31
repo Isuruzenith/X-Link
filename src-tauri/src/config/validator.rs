@@ -4,6 +4,11 @@ use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
 pub async fn validate_singbox_config(app: &AppHandle, config_path: &Path) -> Result<(), String> {
+    // Verify sing-box sidecar binary version compatibility before validating config
+    crate::commands::system::ensure_sidecar_compatible(app)
+        .await
+        .map_err(|e| format!("Configuration validation aborted: {}", e))?;
+
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let _ = std::fs::create_dir_all(&app_data_dir);
 

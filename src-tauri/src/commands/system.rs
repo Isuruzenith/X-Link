@@ -58,6 +58,247 @@ pub fn parse_singbox_version_output(
     Ok(out_str)
 }
 
+/// Pinned and tested sing-box version bundled with X-Link (defined in scripts/setup-sidecars.cjs).
+pub const TESTED_SINGBOX_VERSION: &str = "1.13.14";
+
+/// Supported sing-box major version.
+pub const SUPPORTED_SINGBOX_MAJOR: u64 = 1;
+
+/// Supported sing-box minor version series.
+pub const SUPPORTED_SINGBOX_MINOR: u64 = 13;
+
+/// Structured semantic version representation for sing-box sidecar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SingBoxVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+    pub prerelease: Option<String>,
+    pub build: Option<String>,
+    pub raw: String,
+}
+
+impl SingBoxVersion {
+    /// Formats the semantic version components as "major.minor.patch" (plus prerelease/build if present).
+    #[allow(dead_code)]
+    pub fn semver_string(&self) -> String {
+        let mut s = format!("{}.{}.{}", self.major, self.minor, self.patch);
+        if let Some(ref pre) = self.prerelease {
+            s.push('-');
+            s.push_str(pre);
+        }
+        if let Some(ref b) = self.build {
+            s.push('+');
+            s.push_str(b);
+        }
+        s
+    }
+
+    /// Parses a semantic version string (e.g. "1.13.14", "v1.13.14", "1.13.14-rc.1").
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err("Version string cannot be empty".to_string());
+        }
+
+        let clean = trimmed.strip_prefix(['v', 'V']).unwrap_or(trimmed);
+
+        let (without_build, build) = match clean.split_once('+') {
+            Some((pre_build, b)) => {
+                if b.is_empty() {
+                    return Err(format!(
+                        "Invalid version '{}': empty build metadata after '+'",
+                        input
+                    ));
+                }
+                (pre_build, Some(b.to_string()))
+            }
+            None => (clean, None),
+        };
+
+        let (version_core, prerelease) = match without_build.split_once('-') {
+            Some((core, pre)) => {
+                if pre.is_empty() {
+                    return Err(format!(
+                        "Invalid version '{}': empty prerelease tag after '-'",
+                        input
+                    ));
+                }
+                (core, Some(pre.to_string()))
+            }
+            None => (without_build, None),
+        };
+
+        let parts: Vec<&str> = version_core.split('.').collect();
+        if parts.len() != 3 {
+            return Err(format!(
+                "Invalid version format '{}': expected exactly 3 numeric parts (major.minor.patch)",
+                input
+            ));
+        }
+
+        let major = parts[0]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid major version '{}' in '{}'", parts[0], input))?;
+        let minor = parts[1]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid minor version '{}' in '{}'", parts[1], input))?;
+        let patch = parts[2]
+            .parse::<u64>()
+            .map_err(|_| format!("Invalid patch version '{}' in '{}'", parts[2], input))?;
+
+        Ok(Self {
+            major,
+            minor,
+            patch,
+            prerelease,
+            build,
+            raw: input.trim().to_string(),
+        })
+    }
+}
+
+/// Checks whether a parsed or raw sing-box version satisfies the compatibility contract.
+///
+/// Compatibility Policy:
+/// - Must be a valid semantic version (major.minor.patch).
+/// - Must match major version 1 and minor version 13 (sing-box 1.13.x series, tested with 1.13.14).
+/// - Versions < 1.13 are rejected (lacking required DNS/routing options and keepalive configurations).
+/// - Versions >= 1.14 are explicitly rejected (avoid accepting untested 1.14 with breaking configuration schema changes).
+/// - Prerelease versions (e.g., -rc, -beta, -alpha) are rejected to ensure stable proxy operation.
+pub fn check_singbox_version_compatibility(raw_input: &str) -> Result<SingBoxVersion, String> {
+    let trimmed = raw_input.trim();
+    if trimmed.is_empty() {
+        return Err("sing-box version output is empty. Cannot verify compatibility.".to_string());
+    }
+
+    // Try extracting from standard "sing-box version <SEMVER>" line first,
+    // otherwise parse trimmed input directly as semver.
+    let version_str = match extract_singbox_version_number(trimmed) {
+        Some(v) => v,
+        None => trimmed.to_string(),
+    };
+
+    let parsed = SingBoxVersion::parse(&version_str).map_err(|err| {
+        let preview: String = trimmed
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(64)
+            .collect();
+        format!(
+            "Failed to determine sing-box version: unrecognized or malformed version string ('{}'): {}. Expected semantic version format like 1.13.14.",
+            preview, err
+        )
+    })?;
+
+    // Policy check 1: Reject prerelease versions
+    if let Some(ref pre) = parsed.prerelease {
+        return Err(format!(
+            "Unsupported sing-box prerelease version '{}-{}'. X-Link requires a stable release of sing-box {}.x (tested with {}).",
+            format!("{}.{}.{}", parsed.major, parsed.minor, parsed.patch),
+            pre,
+            SUPPORTED_SINGBOX_MINOR,
+            TESTED_SINGBOX_VERSION
+        ));
+    }
+
+    // Policy check 2: Major version mismatch
+    if parsed.major != SUPPORTED_SINGBOX_MAJOR {
+        return Err(format!(
+            "Unsupported sing-box major version {}. X-Link requires sing-box {}.{}.x (tested with {}).",
+            parsed.major,
+            SUPPORTED_SINGBOX_MAJOR,
+            SUPPORTED_SINGBOX_MINOR,
+            TESTED_SINGBOX_VERSION
+        ));
+    }
+
+    // Policy check 3: Minor version lower bound (< 1.13)
+    if parsed.minor < SUPPORTED_SINGBOX_MINOR {
+        return Err(format!(
+            "Unsupported sing-box version '{}.{}.{}'. X-Link requires sing-box {}.{}.x (tested with {}). Versions prior to 1.13 lack required routing and configuration features.",
+            parsed.major,
+            parsed.minor,
+            parsed.patch,
+            SUPPORTED_SINGBOX_MAJOR,
+            SUPPORTED_SINGBOX_MINOR,
+            TESTED_SINGBOX_VERSION
+        ));
+    }
+
+    // Policy check 4: Minor version upper bound (>= 1.14)
+    if parsed.minor > SUPPORTED_SINGBOX_MINOR {
+        return Err(format!(
+            "Unsupported sing-box version '{}.{}.{}'. X-Link is tested with sing-box {} and does not support sing-box 1.14+ due to incompatible configuration schema changes.",
+            parsed.major,
+            parsed.minor,
+            parsed.patch,
+            TESTED_SINGBOX_VERSION
+        ));
+    }
+
+    Ok(parsed)
+}
+
+/// Checks the cached sing-box version string in `ProxyState` against the compatibility policy.
+///
+/// Returns `Some(Ok(version))` if cached and compatible, `Some(Err(err))` if cached but incompatible,
+/// or `None` if no version is cached yet.
+pub fn check_cached_singbox_compatibility(
+    state: &ProxyState,
+) -> Option<Result<SingBoxVersion, String>> {
+    if let Ok(guard) = state.singbox_version.lock() {
+        if let Some(ref cached) = *guard {
+            return Some(check_singbox_version_compatibility(cached));
+        }
+    }
+    None
+}
+
+/// Verifies runtime availability and version compatibility of the actual sing-box sidecar binary.
+///
+/// If a valid compatible version is already cached in `ProxyState`, it is returned immediately.
+/// Otherwise, it executes the sidecar with `version`, parses and checks the output, caches the
+/// verified version string on success, and returns `Ok(SingBoxVersion)`.
+///
+/// Fails with an actionable, non-secret error if the binary is unavailable, fails execution,
+/// returns malformed output, or has an unsupported/prerelease version.
+pub async fn ensure_sidecar_compatible(app: &tauri::AppHandle) -> Result<SingBoxVersion, String> {
+    if let Some(state) = app.try_state::<ProxyState>() {
+        if let Some(res) = check_cached_singbox_compatibility(&state) {
+            return res;
+        }
+    }
+
+    let sidecar = app
+        .shell()
+        .sidecar("sing-box")
+        .map_err(|e| format!("sing-box sidecar binary is unavailable: {}", e))?;
+
+    let output = sidecar
+        .args(["version"])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to execute sing-box sidecar version check: {}", e))?;
+
+    let raw_version =
+        parse_singbox_version_output(output.status.success(), &output.stdout, &output.stderr)
+            .map_err(|e| format!("sing-box version check failed: {}", e))?;
+
+    let version = check_singbox_version_compatibility(&raw_version)?;
+
+    if let Some(state) = app.try_state::<ProxyState>() {
+        if let Ok(mut guard) = state.singbox_version.lock() {
+            *guard = Some(raw_version);
+        }
+    }
+
+    Ok(version)
+}
+
 /// Extracts semantic version number from sing-box version output (e.g. "1.13.14").
 #[allow(dead_code)]
 pub fn extract_singbox_version_number(version_output: &str) -> Option<String> {
@@ -848,6 +1089,217 @@ mod tests {
         assert_eq!(extract_singbox_version_number("some random text"), None);
         assert_eq!(extract_singbox_version_number("sing-box version"), None);
         assert_eq!(extract_singbox_version_number(""), None);
+    }
+
+    #[test]
+    fn test_singbox_version_parse_valid() {
+        let v1 = SingBoxVersion::parse("1.13.14").expect("standard semver parses");
+        assert_eq!(v1.major, 1);
+        assert_eq!(v1.minor, 13);
+        assert_eq!(v1.patch, 14);
+        assert_eq!(v1.prerelease, None);
+        assert_eq!(v1.build, None);
+        assert_eq!(v1.semver_string(), "1.13.14");
+
+        let v2 = SingBoxVersion::parse("v1.13.14").expect("leading 'v' stripped");
+        assert_eq!(v2.major, 1);
+        assert_eq!(v2.minor, 13);
+        assert_eq!(v2.patch, 14);
+
+        let v3 = SingBoxVersion::parse("1.13.0").expect("zero patch parses");
+        assert_eq!(v3.major, 1);
+        assert_eq!(v3.minor, 13);
+        assert_eq!(v3.patch, 0);
+
+        let v4 = SingBoxVersion::parse("1.13.14-rc.1").expect("prerelease parses");
+        assert_eq!(v4.major, 1);
+        assert_eq!(v4.minor, 13);
+        assert_eq!(v4.patch, 14);
+        assert_eq!(v4.prerelease.as_deref(), Some("rc.1"));
+        assert_eq!(v4.semver_string(), "1.13.14-rc.1");
+
+        let v5 =
+            SingBoxVersion::parse("1.14.0-alpha.2+20261031").expect("prerelease and build parse");
+        assert_eq!(v5.major, 1);
+        assert_eq!(v5.minor, 14);
+        assert_eq!(v5.patch, 0);
+        assert_eq!(v5.prerelease.as_deref(), Some("alpha.2"));
+        assert_eq!(v5.build.as_deref(), Some("20261031"));
+        assert_eq!(v5.semver_string(), "1.14.0-alpha.2+20261031");
+
+        let v6 = SingBoxVersion::parse("1.13.14+wintun").expect("build metadata parses");
+        assert_eq!(v6.major, 1);
+        assert_eq!(v6.minor, 13);
+        assert_eq!(v6.patch, 14);
+        assert_eq!(v6.prerelease, None);
+        assert_eq!(v6.build.as_deref(), Some("wintun"));
+        assert_eq!(v6.semver_string(), "1.13.14+wintun");
+    }
+
+    #[test]
+    fn test_singbox_version_parse_malformed() {
+        assert!(SingBoxVersion::parse("").is_err());
+        assert!(SingBoxVersion::parse("   ").is_err());
+        assert!(SingBoxVersion::parse("1.13").is_err());
+        assert!(SingBoxVersion::parse("1.13.14.0").is_err());
+        assert!(SingBoxVersion::parse("1.13.x").is_err());
+        assert!(SingBoxVersion::parse("abc").is_err());
+        assert!(SingBoxVersion::parse("1.13.14-").is_err());
+        assert!(SingBoxVersion::parse("1.13.14+").is_err());
+        assert!(SingBoxVersion::parse("-1.13.14").is_err());
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_accepted() {
+        // Full multiline output as generated by sing-box version
+        let sample_output =
+            "sing-box version 1.13.14\n\nEnvironment: go1.26.4 windows/amd64\nTags: with_gvisor\n";
+        let v1 = check_singbox_version_compatibility(sample_output)
+            .expect("sample 1.13.14 is compatible");
+        assert_eq!(v1.major, 1);
+        assert_eq!(v1.minor, 13);
+        assert_eq!(v1.patch, 14);
+
+        // Compact single-line output
+        let v2 = check_singbox_version_compatibility("sing-box version 1.13.14")
+            .expect("compact 1.13.14 compatible");
+        assert_eq!(v2.semver_string(), "1.13.14");
+
+        // Single line with commit info
+        let v3 = check_singbox_version_compatibility("sing-box version 1.13.14 (commit: 25a600d)")
+            .expect("output with commit compatible");
+        assert_eq!(v3.major, 1);
+        assert_eq!(v3.minor, 13);
+        assert_eq!(v3.patch, 14);
+
+        // Direct semver strings
+        let v4 = check_singbox_version_compatibility("1.13.14")
+            .expect("direct semver string compatible");
+        assert_eq!(v4.patch, 14);
+
+        let v5 =
+            check_singbox_version_compatibility("v1.13.14").expect("v-prefixed semver compatible");
+        assert_eq!(v5.patch, 14);
+
+        // Base of 1.13 series
+        let v6 = check_singbox_version_compatibility("sing-box version 1.13.0")
+            .expect("1.13.0 compatible");
+        assert_eq!(v6.patch, 0);
+
+        // Subsequent patch in 1.13 series
+        let v7 = check_singbox_version_compatibility("sing-box version 1.13.15")
+            .expect("1.13.15 compatible");
+        assert_eq!(v7.patch, 15);
+
+        // Build metadata attached
+        let v8 = check_singbox_version_compatibility("sing-box version 1.13.14+build.20261031")
+            .expect("build metadata compatible");
+        assert_eq!(v8.patch, 14);
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_unsupported_future_minor() {
+        // Sing-box 1.14 introduces breaking configuration schema changes and deprecation removals
+        let err1 = check_singbox_version_compatibility("sing-box version 1.14.0").unwrap_err();
+        assert!(err1.contains("1.14+"));
+        assert!(err1.contains("incompatible configuration schema changes"));
+        assert!(err1.contains("1.14.0"));
+
+        let err2 = check_singbox_version_compatibility("1.14.5").unwrap_err();
+        assert!(err2.contains("1.14+"));
+
+        let err3 = check_singbox_version_compatibility("sing-box version 1.15.0").unwrap_err();
+        assert!(err3.contains("1.14+"));
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_unsupported_major() {
+        let err1 = check_singbox_version_compatibility("sing-box version 2.0.0").unwrap_err();
+        assert!(err1.contains("major version 2"));
+
+        let err2 = check_singbox_version_compatibility("sing-box version 0.13.14").unwrap_err();
+        assert!(err2.contains("major version 0"));
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_unsupported_legacy() {
+        let err1 = check_singbox_version_compatibility("sing-box version 1.12.0").unwrap_err();
+        assert!(err1
+            .contains("Versions prior to 1.13 lack required routing and configuration features"));
+        assert!(err1.contains("1.12.0"));
+
+        let err2 = check_singbox_version_compatibility("1.11.8").unwrap_err();
+        assert!(err2.contains("Versions prior to 1.13 lack required routing"));
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_prerelease_rejected() {
+        let err1 =
+            check_singbox_version_compatibility("sing-box version 1.13.14-rc.1").unwrap_err();
+        assert!(err1.contains("Unsupported sing-box prerelease version"));
+        assert!(err1.contains("1.13.14-rc.1"));
+        assert!(err1.contains("requires a stable release"));
+
+        let err2 =
+            check_singbox_version_compatibility("sing-box version 1.13.14-beta.2").unwrap_err();
+        assert!(err2.contains("Unsupported sing-box prerelease version"));
+
+        let err3 = check_singbox_version_compatibility("1.14.0-alpha.1").unwrap_err();
+        assert!(err3.contains("Unsupported sing-box prerelease version"));
+
+        let err4 =
+            check_singbox_version_compatibility("sing-box version 1.13.0-preview.1").unwrap_err();
+        assert!(err4.contains("Unsupported sing-box prerelease version"));
+    }
+
+    #[test]
+    fn test_check_singbox_version_compatibility_malformed_and_empty() {
+        let err1 = check_singbox_version_compatibility("").unwrap_err();
+        assert!(err1.contains("sing-box version output is empty"));
+
+        let err2 = check_singbox_version_compatibility("   \n\t  ").unwrap_err();
+        assert!(err2.contains("sing-box version output is empty"));
+
+        let err3 = check_singbox_version_compatibility("some random text with no version info")
+            .unwrap_err();
+        assert!(err3.contains("unrecognized or malformed version string"));
+
+        let err4 = check_singbox_version_compatibility("sing-box version ").unwrap_err();
+        assert!(err4.contains("unrecognized or malformed version string"));
+
+        let err5 = check_singbox_version_compatibility("sing-box version 1.13").unwrap_err();
+        assert!(err5.contains("expected exactly 3 numeric parts"));
+
+        let err6 = check_singbox_version_compatibility("sing-box version 1.13.x").unwrap_err();
+        assert!(err6.contains("Invalid patch version"));
+    }
+
+    #[test]
+    fn test_check_cached_singbox_compatibility() {
+        let state = ProxyState::new();
+
+        // Initially no cached version
+        assert!(check_cached_singbox_compatibility(&state).is_none());
+
+        // Cache a valid 1.13.14 version
+        *state.singbox_version.lock().unwrap() =
+            Some("sing-box version 1.13.14\nTags: with_gvisor".to_string());
+        let res1 = check_cached_singbox_compatibility(&state).expect("should return cached result");
+        assert!(res1.is_ok());
+        let v1 = res1.unwrap();
+        assert_eq!(v1.semver_string(), "1.13.14");
+
+        // Cache an incompatible 1.14.0 version
+        *state.singbox_version.lock().unwrap() = Some("sing-box version 1.14.0".to_string());
+        let res2 = check_cached_singbox_compatibility(&state).expect("should return cached result");
+        assert!(res2.is_err());
+        assert!(res2.unwrap_err().contains("1.14+"));
+
+        // Cache an unsupported prerelease version
+        *state.singbox_version.lock().unwrap() = Some("sing-box version 1.13.14-rc.1".to_string());
+        let res3 = check_cached_singbox_compatibility(&state).expect("should return cached result");
+        assert!(res3.is_err());
+        assert!(res3.unwrap_err().contains("prerelease"));
     }
 
     #[test]

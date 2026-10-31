@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { useProfileStore } from '../stores/profileStore';
+import { useSettingsStore } from '../stores/settingsStore';
+import { useConnectionStore } from '../stores/connectionStore';
 import { ConfigView } from './ConfigView';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -20,7 +22,10 @@ beforeEach(() => {
   useProfileStore.setState({
     profiles: [], activeProfileId: null, selectedProfileId: null, nodes: [], selectedNodeTag: null,
     importName: '', importContent: '', importError: null, importSuccess: false, isImporting: false,
+    latencyResults: {}, isTestingLatency: false, testingNodeTag: null,
   });
+  useConnectionStore.setState({ isConnected: false });
+  useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: false } });
 });
 
 describe('Profiles import', () => {
@@ -69,6 +74,33 @@ describe('Profiles import', () => {
     fireEvent.click(screen.getByText('Empty profile'));
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Add a profile' })).toBeNull());
     expect(vi.mocked(invoke)).toHaveBeenCalledWith('create_empty_profile', { name: 'Manual Profile' });
+  });
+
+  it('shows a direct TCP control and labels its result', async () => {
+    useProfileStore.setState({
+      profiles: [{ id: 'p1', name: 'Profile 1', type: 'manual', importedAt: 1, lastUpdated: 1, nodeCount: 1, selectedNodeTag: 'node-1' }],
+      activeProfileId: 'p1', selectedProfileId: 'p1',
+      nodes: [{ tag: 'node-1', type: 'vless', server: '192.0.2.1', server_port: 443 }],
+    });
+    vi.mocked(invoke).mockResolvedValue(18 as never);
+    const { container } = render(<ConfigView />);
+    expect(container.querySelector('md-icon-button[aria-label="Test proxy URL for node-1"]')).toBeNull();
+    const control = container.querySelector('md-icon-button[aria-label="Test direct TCP for node-1"]') as HTMLElement;
+    fireEvent.click(control);
+    await waitFor(() => expect(screen.getByText('TCP: 18 ms')).toBeTruthy());
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('test_node_latency', { server: '192.0.2.1', port: 443 });
+  });
+
+  it('shows proxy URL test only for the active profile with an enabled API', () => {
+    useProfileStore.setState({
+      profiles: [{ id: 'p1', name: 'Profile 1', type: 'manual', importedAt: 1, lastUpdated: 1, nodeCount: 1, selectedNodeTag: 'node-1' }],
+      activeProfileId: 'p1', selectedProfileId: 'p1',
+      nodes: [{ tag: 'node-1', type: 'vless', server: '192.0.2.1', server_port: 443 }],
+    });
+    useConnectionStore.setState({ isConnected: true });
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: true } });
+    const { container } = render(<ConfigView />);
+    expect(container.querySelector('md-icon-button[aria-label="Test proxy URL for node-1"]')).toBeTruthy();
   });
 
   it('deletes a node when confirmed', async () => {

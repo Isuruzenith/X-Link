@@ -331,8 +331,8 @@ md-icon {
 .profile-item-copy strong, .server-item-copy strong { font-size: 13px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-item-copy > span, .server-item-copy > span { font-size: 11px; color: var(--md-sys-color-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-item.is-selected .profile-item-copy > span, .server-item.is-selected .server-item-copy > span, .server-item.is-selected .server-latency { color: var(--md-sys-color-on-secondary-container); }
-.profile-item-actions { display: flex; align-items: center; gap: 3px; flex: none; padding-right: 6px; }
-.server-item > .material-icon-action { margin-right: 9px; flex: none; }
+.profile-item-actions, .server-item-actions { display: flex; align-items: center; gap: 3px; flex: none; padding-right: 6px; }
+.server-item-actions { flex-wrap: wrap; justify-content: flex-end; }
 .server-latency { margin-left: auto; flex: none; font-size: 11px; color: var(--md-sys-color-on-surface-variant); font-variant-numeric: tabular-nums; }
 .utility-view { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 100%; }
 .utility-view > .material-card, .utility-view > [data-slot="card"] { min-width: 0; }

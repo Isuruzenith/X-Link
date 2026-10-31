@@ -52,3 +52,5 @@ src-tauri/binaries/
 .playwright-mcp/*
 dogfood-output/*
 .hermes/*
+.claude/*
+

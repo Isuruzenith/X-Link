@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { FormInput } from '@/components/form';
 import { useProfileStore, getCountryCode } from '../stores/profileStore';
 import { useConnectionStore } from '../stores/connectionStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { useNodeEditorStore } from '../stores/nodeEditorStore';
 import { useStatsStore } from '../stores/statsStore';
 import type { Profile, ProxyNode } from '../utils/store';
@@ -21,12 +22,13 @@ export function ConfigView() {
   const {
     profiles, activeProfileId, selectedProfileId, nodes, selectedNodeTag,
     importName, importContent, importError, importSuccess, isImporting,
-    latencyResults, isTestingLatency, refreshingProfileId, activatingNodeTag, nodeGeoCache,
+    latencyResults, isTestingLatency, testingNodeTag, refreshingProfileId, activatingNodeTag, nodeGeoCache,
     setImportName, setImportContent, setImportError, pasteClipboard, pickFileAndImport, importConfig,
-    selectNode, deleteProfile, testAllNodes, selectProfile, refreshSubscription,
+    selectNode, deleteProfile, testAllNodes, testNode, selectProfile, refreshSubscription,
     setProfileAutoUpdateInterval, createEmptyProfile, deleteNode,
   } = useProfileStore();
   const isConnected = useConnectionStore((state) => state.isConnected);
+  const apiEnabled = useSettingsStore((state) => state.settings.apiEnabled);
   const openEditor = useNodeEditorStore((state) => state.openEditor);
   const stats = useStatsStore((state) => state.stats);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) || null;
@@ -204,8 +206,9 @@ export function ConfigView() {
                   <Icon name="add" aria-hidden="true" /> Add node
                 </Button>
               )}
-              <Button variant="outline" disabled={isTestingLatency || !nodes.length} onClick={testAllNodes}>
-                <Icon name="speed" aria-hidden="true" /> {isTestingLatency ? 'Testing…' : 'Test latency'}
+              <Button variant="outline" disabled={isTestingLatency || Boolean(testingNodeTag) || !nodes.length} onClick={testAllNodes}
+                title={isConnected && apiEnabled && selectedProfile.id === activeProfileId ? 'Tests proxy URL through each node' : 'Tests direct TCP reachability of each node server'}>
+                <Icon name="speed" aria-hidden="true" /> {isTestingLatency ? 'Testing…' : 'Test all nodes'}
               </Button>
             </div>}
           </div>
@@ -228,18 +231,32 @@ export function ConfigView() {
                       </span>
                       {isActive && <span className="material-status">Connected</span>}
                       {activatingNodeTag === node.tag && <span className="material-status">Connecting…</span>}
-                      {latency && <span className="server-latency" title={latency.error || undefined}>{latency.latencyMs !== null ? `${latency.latencyMs} ms` : 'Timeout'}</span>}
+                      {latency && <span className="server-latency" title={latency.error || `${latency.mode === 'tcp' ? 'Direct server TCP connect' : 'Proxy URL round trip'} latency`}>
+                        {latency.mode === 'tcp' ? 'TCP' : 'Proxy URL'}: {latency.latencyMs !== null ? `${latency.latencyMs} ms` : 'Failed'}
+                      </span>}
                     </button>
-                    {selectedProfile.id === activeProfileId && (
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" aria-label={`Edit ${node.tag}`} title={`Edit ${node.tag}`} onClick={() => openEditor(node)}>
-                          <Icon name="edit" aria-hidden="true" />
+                    <div className="server-item-actions">
+                      <Button variant="ghost" size="icon" aria-label={`Test direct TCP for ${node.tag}`} title={`Test direct TCP for ${node.tag}`}
+                        disabled={isTestingLatency || Boolean(testingNodeTag)} onClick={() => void testNode(node, 'tcp')}>
+                        <Icon name="network_ping" aria-hidden="true" />
+                      </Button>
+                      {isConnected && apiEnabled && selectedProfile.id === activeProfileId && (
+                        <Button variant="ghost" size="icon" aria-label={`Test proxy URL for ${node.tag}`} title={`Test proxy URL for ${node.tag}`}
+                          disabled={isTestingLatency || Boolean(testingNodeTag)} onClick={() => void testNode(node, 'proxy-url')}>
+                          <Icon name="speed" aria-hidden="true" />
                         </Button>
-                        <Button variant="ghost" size="icon" aria-label={`Delete ${node.tag}`} title={`Delete ${node.tag}`} onClick={() => void handleDeleteNode(node.tag)}>
-                          <Icon name="delete" aria-hidden="true" />
-                        </Button>
-                      </div>
-                    )}
+                      )}
+                      {selectedProfile.id === activeProfileId && (
+                        <>
+                          <Button variant="ghost" size="icon" aria-label={`Edit ${node.tag}`} title={`Edit ${node.tag}`} onClick={() => openEditor(node)}>
+                            <Icon name="edit" aria-hidden="true" />
+                          </Button>
+                          <Button variant="ghost" size="icon" aria-label={`Delete ${node.tag}`} title={`Delete ${node.tag}`} onClick={() => void handleDeleteNode(node.tag)}>
+                            <Icon name="delete" aria-hidden="true" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}

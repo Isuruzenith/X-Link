@@ -301,6 +301,14 @@ fn spawn_singbox_sidecar(
     config_path: &Path,
     session_id: &str,
 ) -> Result<oneshot::Receiver<Option<i32>>, String> {
+    // Defense-in-depth: check cached sidecar version compatibility before spawning
+    if let Ok(guard) = state.singbox_version.lock() {
+        if let Some(ref cached) = *guard {
+            crate::commands::system::check_singbox_version_compatibility(cached)
+                .map_err(|e| format!("Proxy execution blocked: {}", e))?;
+        }
+    }
+
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let _ = std::fs::create_dir_all(&app_data_dir);
 
@@ -1245,6 +1253,11 @@ pub async fn toggle_proxy(
             return Ok("started".into());
         }
     }
+
+    // Verify sidecar binary compatibility before transitioning status or running proxy
+    crate::commands::system::ensure_sidecar_compatible(&app)
+        .await
+        .map_err(|e| format!("Proxy startup aborted: {}", e))?;
 
     state.set_status(&app, crate::state::ConnectionStatus::Connecting);
     crate::tray::update_tray(&app);

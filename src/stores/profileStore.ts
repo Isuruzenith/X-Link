@@ -23,6 +23,10 @@ interface ImportResult {
   nodeCount: number;
 }
 
+export type LatencyTestMode = 'tcp' | 'proxy-url';
+
+type NodeLatencyResult = { latencyMs: number | null; error: string | null; mode: LatencyTestMode };
+
 interface ProfileState {
   // Multi-profile state
   profiles: Profile[];
@@ -41,8 +45,9 @@ interface ProfileState {
   isImporting: boolean;
 
   // Latency testing
-  latencyResults: Record<string, { latencyMs: number | null; error: string | null }>;
+  latencyResults: Record<string, NodeLatencyResult>;
   isTestingLatency: boolean;
+  testingNodeTag: string | null;
 
   // Subscription refresh state
   refreshingProfileId: string | null;
@@ -64,6 +69,7 @@ interface ProfileState {
   deleteProfile: (profileId: string) => Promise<void>;
   switchProfile: (profileId: string) => Promise<void>;
   testAllNodes: () => Promise<void>;
+  testNode: (node: ProxyNode, mode: LatencyTestMode) => Promise<void>;
   updateNodesList: (newNodes: ProxyNode[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
   refreshSubscription: (profileId: string) => Promise<void>;
@@ -184,6 +190,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   isImporting: false,
   latencyResults: {},
   isTestingLatency: false,
+  testingNodeTag: null,
   refreshingProfileId: null,
 
   activeProfile: () => {
@@ -525,7 +532,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   selectProfile: async (profileId) => {
-    set({ selectedProfileId: profileId });
+    set({ selectedProfileId: profileId, latencyResults: {} });
     await get().refreshNodes(profileId);
   },
 
@@ -534,21 +541,24 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const logStore = useLogStore.getState();
     const isConnected = useConnectionStore.getState().isConnected;
     const apiEnabled = useSettingsStore.getState().settings.apiEnabled;
-    if (!pid) return;
+    const isActiveProfile = pid === get().activeProfileId;
+    if (!pid || get().isTestingLatency || get().testingNodeTag) return;
 
     set({ isTestingLatency: true, latencyResults: {} });
-    logStore.pushSystemLog(isConnected && apiEnabled ? 'Testing true proxy URL latency for all nodes...' : 'Testing TCP latency for all nodes...');
+    logStore.pushSystemLog(isConnected && apiEnabled && isActiveProfile ? 'Testing proxy URL latency for all nodes...' : 'Testing direct TCP latency for all nodes...');
 
     try {
+      let mode: LatencyTestMode = isConnected && apiEnabled && isActiveProfile ? 'proxy-url' : 'tcp';
       let results: Array<{ tag: string; latencyMs: number | null; error: string | null }>;
-      if (isConnected && apiEnabled) {
+      if (mode === 'proxy-url') {
         try {
           results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
             'test_all_nodes_url_latency',
             { profileId: pid }
           );
         } catch {
-          logStore.pushSystemLog('Proxy URL latency unavailable; falling back to TCP latency.');
+          mode = 'tcp';
+          logStore.pushSystemLog('Proxy URL latency unavailable; falling back to direct TCP latency.');
           results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
             'test_all_nodes',
             { profileId: pid }
@@ -561,19 +571,44 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         );
       }
 
-      const latencyMap: Record<string, { latencyMs: number | null; error: string | null }> = {};
+      const latencyMap: Record<string, NodeLatencyResult> = {};
       for (const r of results) {
-        latencyMap[r.tag] = { latencyMs: r.latencyMs, error: r.error };
+        latencyMap[r.tag] = { latencyMs: r.latencyMs, error: r.error, mode };
       }
 
-      set({ latencyResults: latencyMap });
+      if (pid === (get().selectedProfileId || get().activeProfileId)) set({ latencyResults: latencyMap });
 
       const successful = results.filter((r) => r.latencyMs !== null).length;
-      logStore.pushSystemLog(`Latency test complete: ${successful}/${results.length} nodes reachable.`);
+      logStore.pushSystemLog(`${mode === 'tcp' ? 'Direct TCP' : 'Proxy URL'} test complete: ${successful}/${results.length} nodes succeeded.`);
     } catch (err) {
       logStore.pushSystemLog(`Latency test failed: ${err}`);
     } finally {
       set({ isTestingLatency: false });
+    }
+  },
+
+  testNode: async (node, mode) => {
+    const pid = get().selectedProfileId || get().activeProfileId;
+    if (!pid || get().isTestingLatency || get().testingNodeTag || !get().nodes.some((item) => item.tag === node.tag)) return;
+    const logStore = useLogStore.getState();
+    const canTestProxy = useConnectionStore.getState().isConnected && useSettingsStore.getState().settings.apiEnabled && pid === get().activeProfileId;
+    if (mode === 'proxy-url' && !canTestProxy) return;
+
+    set({ testingNodeTag: node.tag });
+    try {
+      const ms = mode === 'tcp'
+        ? await invoke<number>('test_node_latency', { server: node.server, port: node.server_port ?? 443 })
+        : await invoke<number>('test_proxy_url_latency', { tag: node.tag });
+      if (pid === (get().selectedProfileId || get().activeProfileId)) {
+        set((state) => ({ latencyResults: { ...state.latencyResults, [node.tag]: { latencyMs: ms, error: null, mode } } }));
+      }
+    } catch (err) {
+      if (pid === (get().selectedProfileId || get().activeProfileId)) {
+        set((state) => ({ latencyResults: { ...state.latencyResults, [node.tag]: { latencyMs: null, error: String(err), mode } } }));
+      }
+      logStore.pushSystemLog(`${mode === 'tcp' ? 'Direct TCP' : 'Proxy URL'} test failed for "${node.tag}": ${err}`);
+    } finally {
+      set({ testingNodeTag: null });
     }
   },
 

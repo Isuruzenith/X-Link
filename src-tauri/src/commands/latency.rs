@@ -1,7 +1,19 @@
 use serde::Serialize;
-use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::collections::VecDeque;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
+use tokio::sync::{mpsc, Mutex};
+
+const DEFAULT_BATCH_CONCURRENCY: usize = 8;
+const DEFAULT_PER_ITEM_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_OVERALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+struct NodeTcpTarget {
+    server: String,
+    port: u16,
+}
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -86,8 +98,8 @@ pub async fn test_node_latency(server: String, port: u16) -> Result<u32, String>
         None => {
             // Fallback to system resolution
             let addr = format!("{}:{}", server, port);
-            let socket_addrs = addr
-                .to_socket_addrs()
+            let socket_addrs = tokio::net::lookup_host(addr)
+                .await
                 .map_err(|e| format!("Invalid address or DNS lookup failed: {}", e))?;
             match socket_addrs.into_iter().next() {
                 Some(sa) => sa.ip(),
@@ -96,18 +108,157 @@ pub async fn test_node_latency(server: String, port: u16) -> Result<u32, String>
         }
     };
 
-    let socket_addr = SocketAddr::new(ip, port);
-    let result = tokio::task::spawn_blocking(move || {
-        let start = Instant::now();
-        if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)).is_ok() {
-            return Ok(start.elapsed().as_millis() as u32);
+    connect_tcp(ip, port).await
+}
+
+async fn connect_tcp(ip: IpAddr, port: u16) -> Result<u32, String> {
+    let start = Instant::now();
+    match tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::TcpStream::connect(SocketAddr::new(ip, port)),
+    )
+    .await
+    {
+        Ok(Ok(_)) => Ok(start.elapsed().as_millis() as u32),
+        _ => Err("Connection failed".to_string()),
+    }
+}
+
+async fn test_single_node_tcp_latency(tag: String, target: NodeTcpTarget) -> LatencyResult {
+    let NodeTcpTarget { server, port } = target;
+    let result = if server.is_empty() {
+        Err("No server address".to_string())
+    } else {
+        let ip = match resolve_hostname_doh(&server).await {
+            Some(ip) => Some(ip),
+            None => tokio::net::lookup_host((server.as_str(), port))
+                .await
+                .ok()
+                .and_then(|mut addrs| addrs.next().map(|addr| addr.ip())),
+        };
+        match ip {
+            Some(ip) => connect_tcp(ip, port).await,
+            None => Err("DNS resolution failed".to_string()),
         }
-        Err("Connection failed".to_string())
+    };
+    match result {
+        Ok(ms) => LatencyResult {
+            tag,
+            latency_ms: Some(ms),
+            error: None,
+        },
+        Err(error) => LatencyResult {
+            tag,
+            latency_ms: None,
+            error: Some(error),
+        },
+    }
+}
+
+async fn run_bounded_batch_with_timeouts<T, F, Fut>(
+    items: Vec<(String, T)>,
+    concurrency_limit: usize,
+    per_item_timeout: Duration,
+    overall_timeout: Duration,
+    worker: F,
+) -> Vec<LatencyResult>
+where
+    T: Send + 'static,
+    F: Fn(String, T) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = LatencyResult> + Send + 'static,
+{
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let total = items.len();
+    let limit = concurrency_limit.max(1).min(total);
+    let tags: Vec<String> = items.iter().map(|(tag, _)| tag.clone()).collect();
+    let queue = Arc::new(Mutex::new(
+        items
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (tag, value))| (idx, tag, value))
+            .collect::<VecDeque<_>>(),
+    ));
+    let worker = Arc::new(worker);
+    let (tx, mut rx) = mpsc::channel::<(usize, LatencyResult)>(limit);
+    let mut tasks = tokio::task::JoinSet::new();
+    for _ in 0..limit {
+        let queue = Arc::clone(&queue);
+        let worker = Arc::clone(&worker);
+        let tx = tx.clone();
+        tasks.spawn(async move {
+            loop {
+                let item = queue.lock().await.pop_front();
+                let (idx, tag, value) = match item {
+                    Some(item) => item,
+                    None => break,
+                };
+                let result = match tokio::time::timeout(
+                    per_item_timeout,
+                    worker(tag.clone(), value),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => LatencyResult {
+                        tag,
+                        latency_ms: None,
+                        error: Some("Latency test timed out".to_string()),
+                    },
+                };
+                if tx.send((idx, result)).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(tx);
+
+    let mut results: Vec<Option<LatencyResult>> = (0..total).map(|_| None).collect();
+    let timed_out = tokio::time::timeout(overall_timeout, async {
+        while let Some((idx, result)) = rx.recv().await {
+            results[idx] = Some(result);
+        }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?;
+    .is_err();
+    // Dropping the JoinSet cancels any queued or running async tests, even when the IPC call is cancelled.
+    drop(tasks);
+    tags.into_iter()
+        .enumerate()
+        .map(|(idx, tag)| {
+            results[idx].take().unwrap_or_else(|| LatencyResult {
+                tag,
+                latency_ms: None,
+                error: Some(
+                    if timed_out {
+                        "Overall latency test timeout exceeded"
+                    } else {
+                        "Task execution failed"
+                    }
+                    .to_string(),
+                ),
+            })
+        })
+        .collect()
+}
 
-    result
+async fn run_bounded_batch<T, F, Fut>(items: Vec<(String, T)>, worker: F) -> Vec<LatencyResult>
+where
+    T: Send + 'static,
+    F: Fn(String, T) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = LatencyResult> + Send + 'static,
+{
+    run_bounded_batch_with_timeouts(
+        items,
+        DEFAULT_BATCH_CONCURRENCY,
+        DEFAULT_PER_ITEM_TIMEOUT,
+        DEFAULT_OVERALL_TIMEOUT,
+        worker,
+    )
+    .await
 }
 
 /// Tests all nodes in a profile by reading the config and attempting TCP connections.
@@ -119,90 +270,27 @@ pub async fn test_all_nodes(
 ) -> Result<Vec<LatencyResult>, String> {
     let nodes = crate::commands::config::get_profile_outbounds(app, profile_id)?;
 
-    let mut handles = Vec::new();
-
-    for node in &nodes {
-        let tag = node
-            .get("tag")
-            .and_then(|t| t.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let server = node
-            .get("server")
-            .and_then(|s| s.as_str())
-            .unwrap_or("")
-            .to_string();
-        let port = node
-            .get("server_port")
-            .and_then(|p| p.as_u64())
-            .unwrap_or(443) as u16;
-
-        if server.is_empty() {
-            handles.push(tokio::spawn(async move {
-                LatencyResult {
-                    tag,
-                    latency_ms: None,
-                    error: Some("No server address".to_string()),
-                }
-            }));
-            continue;
-        }
-
-        handles.push(tokio::spawn(async move {
-            let ip = match resolve_hostname_doh(&server).await {
-                Some(ip) => Some(ip),
-                None => {
-                    // Fallback to system resolution
-                    let addr = format!("{}:{}", server, port);
-                    addr.to_socket_addrs()
-                        .ok()
-                        .and_then(|mut addrs| addrs.next().map(|sa| sa.ip()))
-                }
-            };
-
-            let socket_addr = ip.map(|i| SocketAddr::new(i, port));
-
-            let result = tokio::task::spawn_blocking(move || {
-                let socket_addr = match socket_addr {
-                    Some(sa) => sa,
-                    None => return Err("DNS resolution failed".to_string()),
-                };
-                let start = Instant::now();
-                if TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)).is_ok() {
-                    return Ok(start.elapsed().as_millis() as u32);
-                }
-                Err("Connection failed".to_string())
-            })
-            .await;
-
-            match result {
-                Ok(Ok(ms)) => LatencyResult {
-                    tag,
-                    latency_ms: Some(ms),
-                    error: None,
-                },
-                Ok(Err(e)) => LatencyResult {
-                    tag,
-                    latency_ms: None,
-                    error: Some(e),
-                },
-                Err(e) => LatencyResult {
-                    tag,
-                    latency_ms: None,
-                    error: Some(format!("Task error: {}", e)),
-                },
-            }
-        }));
-    }
-
-    let mut results = Vec::new();
-    for handle in handles {
-        if let Ok(result) = handle.await {
-            results.push(result);
-        }
-    }
-
-    Ok(results)
+    let items = nodes
+        .into_iter()
+        .map(|node| {
+            let tag = node
+                .get("tag")
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let server = node
+                .get("server")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let port = node
+                .get("server_port")
+                .and_then(|p| p.as_u64())
+                .unwrap_or(443) as u16;
+            (tag, NodeTcpTarget { server, port })
+        })
+        .collect();
+    Ok(run_bounded_batch(items, test_single_node_tcp_latency).await)
 }
 
 fn controller_for_latency(settings: &crate::state::UserSettings) -> Result<(u16, &str), String> {
@@ -233,20 +321,34 @@ pub async fn test_proxy_url_latency(
 
     let url_to_test =
         test_url.unwrap_or_else(|| "http://cp.cloudflare.com/generate_204".to_string());
+    query_clash_proxy_delay(api_port, api_secret, &tag, &url_to_test).await
+}
+
+async fn query_clash_proxy_delay(
+    api_port: u16,
+    api_secret: &str,
+    tag: &str,
+    test_url: &str,
+) -> Result<u32, String> {
     let encoded_tag =
-        percent_encoding::utf8_percent_encode(&tag, percent_encoding::NON_ALPHANUMERIC).to_string();
-    let query_url = format!(
-        "http://127.0.0.1:{}/proxies/{}/delay?url={}&timeout=5000",
-        api_port, encoded_tag, url_to_test
-    );
+        percent_encoding::utf8_percent_encode(tag, percent_encoding::NON_ALPHANUMERIC).to_string();
+    let mut query_url = reqwest::Url::parse(&format!(
+        "http://127.0.0.1:{}/proxies/{}/delay",
+        api_port, encoded_tag
+    ))
+    .map_err(|e| format!("Invalid API URL: {}", e))?;
+    query_url
+        .query_pairs_mut()
+        .append_pair("url", test_url)
+        .append_pair("timeout", "5000");
 
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(6))
         .build()
         .map_err(|e| format!("Client creation failed: {}", e))?;
-
     let resp = client
-        .get(&query_url)
+        .get(query_url)
         .header("Authorization", format!("Bearer {}", api_secret))
         .send()
         .await
@@ -256,7 +358,6 @@ pub async fn test_proxy_url_latency(
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("Proxy URL test failed (HTTP {}): {}", status, body));
     }
-
     let val: serde_json::Value = resp
         .json()
         .await
@@ -267,8 +368,7 @@ pub async fn test_proxy_url_latency(
             .unwrap_or("Unknown error from proxy core")
             .to_string()
     })?;
-
-    Ok(delay as u32)
+    u32::try_from(delay).map_err(|_| "Invalid proxy delay".to_string())
 }
 
 /// Tests true proxy URL latency for all nodes via sing-box Clash API when running.
@@ -284,7 +384,9 @@ pub async fn test_all_nodes_url_latency(
             "Proxy core is not running. Please connect to test proxy URL latency.".to_string(),
         );
     }
-    controller_for_latency(&state.get_settings())?;
+    let settings = state.get_settings();
+    let (api_port, api_secret) = controller_for_latency(&settings)?;
+    let api_secret = api_secret.to_string();
 
     let nodes = if let Some(pid) = profile_id {
         crate::commands::config::get_profile_outbounds(app.clone(), pid)?
@@ -294,39 +396,36 @@ pub async fn test_all_nodes_url_latency(
 
     let url_to_test =
         test_url.unwrap_or_else(|| "http://cp.cloudflare.com/generate_204".to_string());
-    let mut handles = Vec::new();
-
-    for node in nodes {
-        let tag = node
-            .get("tag")
-            .and_then(|t| t.as_str())
-            .unwrap_or("unknown")
-            .to_string();
-        let app_handle = app.clone();
-        let url_clone = url_to_test.clone();
-        handles.push(tokio::spawn(async move {
-            match test_proxy_url_latency(app_handle, tag.clone(), Some(url_clone)).await {
+    let items = nodes
+        .into_iter()
+        .map(|node| {
+            let tag = node
+                .get("tag")
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            (tag, ())
+        })
+        .collect();
+    Ok(run_bounded_batch(items, move |tag, ()| {
+        let url = url_to_test.clone();
+        let secret = api_secret.clone();
+        async move {
+            match query_clash_proxy_delay(api_port, &secret, &tag, &url).await {
                 Ok(ms) => LatencyResult {
                     tag,
                     latency_ms: Some(ms),
                     error: None,
                 },
-                Err(e) => LatencyResult {
+                Err(error) => LatencyResult {
                     tag,
                     latency_ms: None,
-                    error: Some(e),
+                    error: Some(error),
                 },
             }
-        }));
-    }
-
-    let mut results = Vec::new();
-    for handle in handles {
-        if let Ok(res) = handle.await {
-            results.push(res);
         }
-    }
-    Ok(results)
+    })
+    .await)
 }
 
 /// Selects the HTTP-capable proxy port to use for URL latency testing or health checks.
@@ -414,6 +513,7 @@ pub async fn test_active_proxy_url(
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn test_parse_doh_response_ipv4() {
@@ -490,6 +590,126 @@ mod tests {
             parse_doh_json_response(fixture),
             Some(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)))
         );
+    }
+
+    #[tokio::test]
+    async fn test_bounded_batch_limits_in_flight_tests_and_preserves_order() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let items: Vec<_> = (0..12)
+            .map(|idx| (format!("node-{idx}"), 12 - idx))
+            .collect();
+        let active_worker = Arc::clone(&active);
+        let max_worker = Arc::clone(&max_active);
+        let results = run_bounded_batch_with_timeouts(
+            items,
+            3,
+            Duration::from_secs(2),
+            Duration::from_secs(5),
+            move |tag, delay| {
+                let active = Arc::clone(&active_worker);
+                let max_active = Arc::clone(&max_worker);
+                async move {
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(delay * 5)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    LatencyResult {
+                        tag,
+                        latency_ms: Some(delay as u32),
+                        error: None,
+                    }
+                }
+            },
+        )
+        .await;
+        assert!(max_active.load(Ordering::SeqCst) <= 3);
+        assert!(max_active.load(Ordering::SeqCst) > 1);
+        assert_eq!(results.len(), 12);
+        for (idx, result) in results.iter().enumerate() {
+            assert_eq!(result.tag, format!("node-{idx}"));
+            assert_eq!(result.latency_ms, Some((12 - idx) as u32));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bounded_batch_reports_item_and_overall_timeouts() {
+        let results = run_bounded_batch_with_timeouts(
+            vec![("quick".to_string(), 1u64), ("slow".to_string(), 100)],
+            1,
+            Duration::from_millis(30),
+            Duration::from_secs(2),
+            |tag, delay| async move {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                LatencyResult {
+                    tag,
+                    latency_ms: Some(delay as u32),
+                    error: None,
+                }
+            },
+        )
+        .await;
+        assert_eq!(results[0].latency_ms, Some(1));
+        assert!(results[1].error.as_deref().unwrap().contains("timed out"));
+
+        let results = run_bounded_batch_with_timeouts(
+            (0..5).map(|idx| (format!("node-{idx}"), ())).collect(),
+            1,
+            Duration::from_secs(1),
+            Duration::from_millis(40),
+            |tag, ()| async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                LatencyResult {
+                    tag,
+                    latency_ms: Some(1),
+                    error: None,
+                }
+            },
+        )
+        .await;
+        assert_eq!(results.len(), 5);
+        for (idx, result) in results.iter().enumerate() {
+            assert_eq!(result.tag, format!("node-{idx}"));
+            assert!(result
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("Overall latency test timeout"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bounded_batch_empty_and_worker_error() {
+        let empty: Vec<(String, ())> = Vec::new();
+        assert!(run_bounded_batch(empty, |_, ()| async { unreachable!() })
+            .await
+            .is_empty());
+        let results = run_bounded_batch(vec![("node".to_string(), ())], |tag, ()| async move {
+            LatencyResult {
+                tag,
+                latency_ms: None,
+                error: Some("Connection refused".to_string()),
+            }
+        })
+        .await;
+        assert_eq!(results[0].error.as_deref(), Some("Connection refused"));
+    }
+
+    #[tokio::test]
+    async fn test_single_node_tcp_latency_on_loopback() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let result = test_single_node_tcp_latency(
+            "local".to_string(),
+            NodeTcpTarget {
+                server: "127.0.0.1".to_string(),
+                port,
+            },
+        )
+        .await;
+        assert_eq!(result.tag, "local");
+        assert!(result.latency_ms.is_some());
+        assert!(result.error.is_none());
     }
 
     #[tokio::test]
@@ -668,6 +888,33 @@ mod tests {
         assert!(latency
             .unwrap_err()
             .contains("Proxy responded with status 502"));
+    }
+
+    #[tokio::test]
+    async fn test_query_clash_proxy_delay_encodes_url_and_authenticates() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 2048];
+            let size = socket.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..size]);
+            assert!(request.contains("GET /proxies/myproxy/delay?url=http%3A%2F%2Fexample.com%2Ftest%3Fx%3D1%26y%3D2&timeout=5000"));
+            assert!(request
+                .to_lowercase()
+                .contains("authorization: bearer secret-123"));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{\"delay\":42}").await.unwrap();
+        });
+        let result = query_clash_proxy_delay(
+            port,
+            "secret-123",
+            "myproxy",
+            "http://example.com/test?x=1&y=2",
+        )
+        .await;
+        server.await.unwrap();
+        assert_eq!(result, Ok(42));
     }
 
     #[tokio::test]

@@ -28,6 +28,7 @@ beforeEach(() => {
   useProfileStore.setState({
     profiles: [profile('first'), profile('second')], activeProfileId: 'first',
     selectedProfileId: 'first', nodes: [], selectedNodeTag: 'old', nodeGeoCache: {},
+    latencyResults: {}, isTestingLatency: false, testingNodeTag: null,
   });
   useConnectionStore.setState({ connectionStatus: 'connected', isConnected: true });
   useSettingsStore.setState({
@@ -246,6 +247,7 @@ describe('empty profile and node management', () => {
     expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
       latencyMs: 120,
       error: null,
+      mode: 'proxy-url',
     });
   });
 
@@ -266,6 +268,7 @@ describe('empty profile and node management', () => {
     expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
       latencyMs: 45,
       error: null,
+      mode: 'tcp',
     });
   });
 
@@ -285,7 +288,45 @@ describe('empty profile and node management', () => {
     expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
       latencyMs: 45,
       error: null,
+      mode: 'tcp',
     });
+  });
+
+  it('tests TCP for an inactive profile even when the active core exposes an API', async () => {
+    useProfileStore.setState({ selectedProfileId: 'second' });
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: true } });
+    native.mockResolvedValue([{ tag: 'node-1', latencyMs: 45, error: null }] as never);
+
+    await useProfileStore.getState().testAllNodes();
+
+    expect(native).not.toHaveBeenCalledWith('test_all_nodes_url_latency', expect.anything());
+    expect(native).toHaveBeenCalledWith('test_all_nodes', { profileId: 'second' });
+    expect(useProfileStore.getState().latencyResults['node-1'].mode).toBe('tcp');
+  });
+
+  it('tests one node via direct TCP without selecting it', async () => {
+    const node = { tag: 'one', type: 'vless', server: '192.0.2.1', server_port: 8443 };
+    useProfileStore.setState({ nodes: [node] });
+    native.mockResolvedValue(35 as never);
+
+    await useProfileStore.getState().testNode(node, 'tcp');
+
+    expect(native).toHaveBeenCalledWith('test_node_latency', { server: node.server, port: 8443 });
+    expect(useProfileStore.getState().latencyResults.one).toEqual({ latencyMs: 35, error: null, mode: 'tcp' });
+    expect(useProfileStore.getState().selectedNodeTag).toBe('old');
+  });
+
+  it('reports per-node proxy URL failures without silently relabeling them as TCP', async () => {
+    const node = { tag: 'one', type: 'vless', server: '192.0.2.1', server_port: 8443 };
+    useProfileStore.setState({ nodes: [node] });
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: true } });
+    native.mockRejectedValue(new Error('controller failed'));
+
+    await useProfileStore.getState().testNode(node, 'proxy-url');
+
+    expect(native).toHaveBeenCalledWith('test_proxy_url_latency', { tag: 'one' });
+    expect(native).not.toHaveBeenCalledWith('test_node_latency', expect.anything());
+    expect(useProfileStore.getState().latencyResults.one).toMatchObject({ latencyMs: null, mode: 'proxy-url' });
   });
 
   it('falls back to TCP ping when disconnected', async () => {
@@ -304,6 +345,7 @@ describe('empty profile and node management', () => {
     expect(useProfileStore.getState().latencyResults['node-2']).toEqual({
       latencyMs: 45,
       error: null,
+      mode: 'tcp',
     });
   });
 });

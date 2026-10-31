@@ -7,7 +7,6 @@ pub mod tray;
 
 use state::ProxyState;
 use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
 
 #[cfg(target_os = "windows")]
 fn wait_for_elevation_handoff() {
@@ -135,22 +134,11 @@ pub fn run() {
                 copy_wintun_dll_to_sidecar_dir(&handle_for_wintun);
             });
 
-            // Pre-fetch and cache the sing-box version in the background
+            // Pre-fetch and cache the sing-box version in the background, validating compatibility
             let handle_for_version = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(sidecar) = handle_for_version.shell().sidecar("sing-box") {
-                    if let Ok(output) = sidecar.args(["version"]).output().await {
-                        if output.status.success() {
-                            let version = String::from_utf8_lossy(&output.stdout).into_owned();
-                            {
-                                let state = handle_for_version.state::<ProxyState>();
-                                if let Ok(mut guard) = state.singbox_version.lock() {
-                                    *guard = Some(version);
-                                };
-                            }
-                        }
-                    }
-                }
+                let _ =
+                    crate::commands::system::ensure_sidecar_compatible(&handle_for_version).await;
             });
 
             // Programmatically initialize the system tray helper
