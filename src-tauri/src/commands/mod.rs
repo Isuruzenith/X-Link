@@ -1,4 +1,5 @@
 pub mod config;
+pub mod diagnostics;
 pub mod geo;
 pub mod latency;
 pub mod logs;

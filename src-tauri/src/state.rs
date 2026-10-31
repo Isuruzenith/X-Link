@@ -369,4 +369,18 @@ impl ProxyState {
             Vec::new()
         }
     }
+
+    /// Return a non-destructive clone snapshot of up to `max_lines` recent log lines from the buffer.
+    pub fn get_buffered_logs_snapshot(&self, max_lines: usize) -> Vec<String> {
+        if let Ok(buf) = self.log_buffer.lock() {
+            let start = if buf.len() > max_lines {
+                buf.len() - max_lines
+            } else {
+                0
+            };
+            buf.iter().skip(start).cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
 }

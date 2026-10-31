@@ -358,6 +358,15 @@ pub fn has_saved_system_proxy() -> bool {
     PROXY_STATE.lock().is_ok_and(|s| s.has_saved())
 }
 
+pub fn is_system_proxy_owned() -> bool {
+    if let Ok(state) = PROXY_STATE.lock() {
+        if let Some(ref snapshot) = state.owned {
+            return snapshot.applied.is_some();
+        }
+    }
+    false
+}
+
 pub fn reset_saved_system_proxy() {
     if let Ok(mut s) = PROXY_STATE.lock() {
         s.reset();

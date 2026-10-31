@@ -197,8 +197,10 @@ pub fn check_singbox_version_compatibility(raw_input: &str) -> Result<SingBoxVer
     // Policy check 1: Reject prerelease versions
     if let Some(ref pre) = parsed.prerelease {
         return Err(format!(
-            "Unsupported sing-box prerelease version '{}-{}'. X-Link requires a stable release of sing-box {}.x (tested with {}).",
-            format!("{}.{}.{}", parsed.major, parsed.minor, parsed.patch),
+            "Unsupported sing-box prerelease version '{}.{}.{}-{}'. X-Link requires a stable release of sing-box {}.x (tested with {}).",
+            parsed.major,
+            parsed.minor,
+            parsed.patch,
             pre,
             SUPPORTED_SINGBOX_MINOR,
             TESTED_SINGBOX_VERSION
@@ -475,7 +477,7 @@ fn listener_owner(port: u16) -> Option<u32> {
     }
 }
 
-fn port_is_bound(port: u16) -> bool {
+pub fn port_is_bound(port: u16) -> bool {
     use std::net::{TcpListener, UdpSocket};
 
     // Probe both wildcard and loopback binds: operating systems can permit a wildcard

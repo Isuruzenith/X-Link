@@ -1,4 +1,5 @@
 import React from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
@@ -13,7 +14,46 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { FormInput, FormSelect, FormSwitchRow, SegmentedControl } from '@/components/form';
 
-type SettingsSection = 'general' | 'tun' | 'sniff' | 'dns' | 'api';
+type SettingsSection = 'general' | 'tun' | 'sniff' | 'dns' | 'api' | 'diagnostics';
+
+export interface RoutingSimulationResult {
+  destination: string;
+  destinationType: 'ip' | 'domain';
+  matchedOutbound: string;
+  matchedRuleId: string | null;
+  matchedRuleType: string | null;
+  matchReason: string;
+  isLanBypass: boolean;
+  dnsStrategy: string;
+}
+
+export interface DiagnosticsReport {
+  timestamp: number;
+  appVersion: string;
+  os: { platform: string; arch: string; isElevated: boolean };
+  sidecar: {
+    bundledTestedVersion: string;
+    cachedVersion: string | null;
+    isCompatible: boolean;
+    compatibilityError: string | null;
+  };
+  proxy: { status: string; effectiveMode: string | null; tunSupported: boolean };
+  ports: {
+    mixedPort: number;
+    socksPort: number;
+    httpPort: number;
+    apiPort: number;
+    portStatuses: Record<number, string>;
+  };
+  systemProxy: { managedByXlink: boolean };
+  profiles: {
+    profileCount: number;
+    activeProfileType: string | null;
+    nodeCountsByType: Record<string, number>;
+  };
+  settings: Record<string, unknown>;
+  recentLogs: string[];
+}
 
 export function SettingsView() {
   const {
@@ -38,6 +78,70 @@ export function SettingsView() {
   const connectedConfigChange = connectionStatus === 'connected';
 
   const [settingsTab, setSettingsTab] = React.useState<SettingsSection>('general');
+  const [simDestination, setSimDestination] = React.useState('');
+  const [simResult, setSimResult] = React.useState<RoutingSimulationResult | null>(null);
+  const [isSimulating, setIsSimulating] = React.useState(false);
+  const [diagReport, setDiagReport] = React.useState<DiagnosticsReport | null>(null);
+  const [isExportingDiag, setIsExportingDiag] = React.useState(false);
+  const [showDiagPreview, setShowDiagPreview] = React.useState(false);
+
+  const handleSimulate = async () => {
+    const dest = simDestination.trim();
+    if (!dest) return;
+    setIsSimulating(true);
+    try {
+      const res = await invoke<RoutingSimulationResult>('simulate_routing', { destination: dest });
+      setSimResult(res);
+    } catch (err) {
+      useToastStore.getState().addToast('error', `Simulation failed: ${err}`, 'Simulation Error');
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleFetchDiagnostics = async () => {
+    setIsExportingDiag(true);
+    try {
+      const report = await invoke<DiagnosticsReport>('export_system_diagnostics');
+      setDiagReport(report);
+      return report;
+    } catch (err) {
+      useToastStore.getState().addToast('error', `Failed to export diagnostics: ${err}`, 'Diagnostics Error');
+      return null;
+    } finally {
+      setIsExportingDiag(false);
+    }
+  };
+
+  const handleCopyDiagnostics = async () => {
+    const report = diagReport || (await handleFetchDiagnostics());
+    if (report) {
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+        useToastStore.getState().addToast('success', 'Sanitized diagnostics copied to clipboard.', 'Copied');
+      } catch {
+        useToastStore.getState().addToast('error', 'Clipboard write failed.', 'Error');
+      }
+    }
+  };
+
+  const handleDownloadDiagnostics = async () => {
+    const report = diagReport || (await handleFetchDiagnostics());
+    if (report) {
+      try {
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `xlink-diagnostics-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        useToastStore.getState().addToast('success', 'Diagnostics file downloaded.', 'Downloaded');
+      } catch {
+        useToastStore.getState().addToast('error', 'Download failed.', 'Error');
+      }
+    }
+  };
 
   const sideNavItems: [SettingsSection, string, string][] = [
     ['general', 'tune', 'General'],
@@ -45,6 +149,7 @@ export function SettingsView() {
     ['sniff', 'visibility', 'Sniffing'],
     ['dns', 'dns', 'DNS'],
     ['api', 'code', 'API'],
+    ['diagnostics', 'troubleshoot', 'Diagnostics'],
   ];
 
   return (
@@ -560,6 +665,203 @@ export function SettingsView() {
               <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
                 <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
                 <span>The Clash-compatible API lets Yacd or MetaCubeX dashboard control routing and monitor connections in real-time.</span>
+              </div>
+            </div>
+          )}
+
+          {/* ── DIAGNOSTICS ── */}
+          {settingsTab === 'diagnostics' && (
+            <div className="flex flex-col gap-4">
+              {/* System Health Overview Card */}
+              <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
+                  <CardTitle className="text-xs font-bold text-foreground">System Health & Bundle</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-primary border-primary/20 bg-primary/5 select-none">Privacy Safe</Badge>
+                </CardHeader>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Export a sanitized diagnostic snapshot of core system services, port bindings, sing-box sidecar health, and redacted log excerpts. Sensitive tokens and passwords are scrubbed before export.
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <div className="bg-muted/40 p-2.5 rounded-lg border border-border/40 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Elevation</span>
+                    <span className="text-xs font-semibold flex items-center gap-1.5">
+                      <Icon name={isElevated ? 'verified_user' : 'person'} size={14} className={isElevated ? 'text-primary' : 'text-muted-foreground'} />
+                      {isElevated ? 'Administrator' : 'Standard User'}
+                    </span>
+                  </div>
+                  <div className="bg-muted/40 p-2.5 rounded-lg border border-border/40 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Proxy Core</span>
+                    <span className="text-xs font-semibold flex items-center gap-1.5">
+                      <Icon name={isConnected ? 'check_circle' : 'stop_circle'} size={14} className={isConnected ? 'text-green-500' : 'text-muted-foreground'} />
+                      {isConnected ? 'Running' : 'Stopped'}
+                    </span>
+                  </div>
+                  <div className="bg-muted/40 p-2.5 rounded-lg border border-border/40 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Current Mode</span>
+                    <span className="text-xs font-semibold uppercase font-mono">
+                      {settings.proxyMode}
+                    </span>
+                  </div>
+                  <div className="bg-muted/40 p-2.5 rounded-lg border border-border/40 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Port Conflicts</span>
+                    <span className="text-xs font-semibold flex items-center gap-1.5">
+                      <Icon name={conflictingPorts.length === 0 ? 'check' : 'warning'} size={14} className={conflictingPorts.length === 0 ? 'text-green-500' : 'text-amber-500'} />
+                      {conflictingPorts.length === 0 ? 'None detected' : `${conflictingPorts.length} conflict(s)`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="sm"
+                    className="h-8 text-xs font-semibold gap-1.5"
+                    disabled={isExportingDiag}
+                    onClick={async () => {
+                      await handleFetchDiagnostics();
+                      setShowDiagPreview(true);
+                    }}
+                  >
+                    <Icon name="assignment" size={14} />
+                    {isExportingDiag ? 'Generating...' : 'Generate Diagnostics'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs font-semibold gap-1.5"
+                    onClick={handleCopyDiagnostics}
+                    disabled={isExportingDiag}
+                  >
+                    <Icon name="content_copy" size={14} />
+                    Copy JSON
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs font-semibold gap-1.5"
+                    onClick={handleDownloadDiagnostics}
+                    disabled={isExportingDiag}
+                  >
+                    <Icon name="download" size={14} />
+                    Download Report
+                  </Button>
+                  {diagReport && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs gap-1 ml-auto text-muted-foreground"
+                      onClick={() => setShowDiagPreview((prev) => !prev)}
+                    >
+                      <Icon name={showDiagPreview ? 'visibility_off' : 'visibility'} size={14} />
+                      {showDiagPreview ? 'Hide Preview' : 'Show Preview'}
+                    </Button>
+                  )}
+                </div>
+
+                {showDiagPreview && diagReport && (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                      <span>Diagnostics Preview ({new Date(diagReport.timestamp * 1000).toLocaleTimeString()})</span>
+                      <span className="text-green-500 font-medium">✓ Sanitized</span>
+                    </div>
+                    <pre className="p-3 bg-muted/60 rounded-md border border-border/60 text-[10.5px] font-mono overflow-auto max-h-60 text-foreground/90 whitespace-pre">
+                      {JSON.stringify(diagReport, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </Card>
+
+              {/* Route & DNS Simulation Explainer */}
+              <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
+                  <CardTitle className="text-xs font-bold text-foreground">Routing Rule & DNS Simulation</CardTitle>
+                  <Badge variant="secondary" className="h-4.5 px-1.5 text-[8.5px] font-bold bg-primary/10 text-primary border border-primary/25 select-none">Simulate</Badge>
+                </CardHeader>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Test how destinations (domains, IP addresses, CIDR blocks) resolve through X-Link routing logic, LAN bypass rules, and active outbounds.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <div className="flex-1">
+                    <FormInput
+                      label="Destination (Domain or IP)"
+                      placeholder="e.g. 192.168.1.1, google.com, or 10.0.0.5"
+                      value={simDestination}
+                      onChange={(val) => setSimDestination(val)}
+                      mono
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      className="h-9 px-4 text-xs font-semibold gap-1.5 shrink-0"
+                      disabled={!simDestination.trim() || isSimulating}
+                      onClick={handleSimulate}
+                    >
+                      <Icon name="play_arrow" size={14} />
+                      {isSimulating ? 'Evaluating...' : 'Simulate'}
+                    </Button>
+                  </div>
+                </div>
+
+                {simResult && (
+                  <div className="mt-2 p-3 bg-muted/30 border border-border/50 rounded-lg flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-foreground">{simResult.destination}</span>
+                        <Badge variant="outline" className="text-[9.5px] uppercase font-mono px-1.5 py-0">
+                          {simResult.destinationType}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground">Target Outbound:</span>
+                        <Badge
+                          variant={
+                            simResult.matchedOutbound === 'direct'
+                              ? 'secondary'
+                              : simResult.matchedOutbound === 'block'
+                              ? 'destructive'
+                              : 'default'
+                          }
+                          className="text-xs font-bold px-2 py-0.5"
+                        >
+                          {simResult.matchedOutbound.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
+                      <div className="p-2 bg-background/50 rounded border border-border/30">
+                        <span className="text-muted-foreground text-[10px] block">Match Reason</span>
+                        <span className="font-medium text-foreground">{simResult.matchReason}</span>
+                      </div>
+                      <div className="p-2 bg-background/50 rounded border border-border/30">
+                        <span className="text-muted-foreground text-[10px] block">Rule Matched</span>
+                        <span className="font-mono text-foreground">
+                          {simResult.matchedRuleId ? `${simResult.matchedRuleType}: ${simResult.matchedRuleId}` : 'Default Fallback'}
+                        </span>
+                      </div>
+                      <div className="p-2 bg-background/50 rounded border border-border/30">
+                        <span className="text-muted-foreground text-[10px] block">Network Scope / DNS</span>
+                        <span className="font-medium text-foreground">
+                          {simResult.isLanBypass ? 'LAN / Direct Bypass' : 'Public Internet'} ({simResult.dnsStrategy})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              <div className="info-box bg-muted/40 border border-border/40 p-2.5 px-3 rounded-lg flex items-start gap-2 text-[10.5px] text-muted-foreground leading-relaxed shrink-0">
+                <Icon name="info" size={14} className="mt-0.5 text-foreground shrink-0" />
+                <span>Diagnostics help troubleshoot routing loops, port collisions, and DNS resolution issues without revealing personal credentials.</span>
               </div>
             </div>
           )}
