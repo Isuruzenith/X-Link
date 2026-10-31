@@ -5,7 +5,41 @@ use super::resolve_server_ips;
 use serde_json::Value;
 use std::collections::HashMap;
 
-fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde_json::Value {
+fn split_host_port(addr: &str, default_port: u16) -> (String, u16) {
+    let addr = addr.trim();
+    // Bracketed IPv6: [2402:4000::2] or [2402:4000::2]:53
+    if addr.starts_with('[') {
+        if let Some(close_idx) = addr.find(']') {
+            let host = &addr[1..close_idx];
+            let rest = &addr[close_idx + 1..];
+            let port = if let Some(colon_idx) = rest.find(':') {
+                rest[colon_idx + 1..].parse::<u16>().unwrap_or(default_port)
+            } else {
+                default_port
+            };
+            return (host.to_string(), port);
+        }
+    }
+
+    // Bare IP address (IPv4 or IPv6 e.g. "2402:4000::2" or "8.8.8.8")
+    if let Ok(ip) = addr.parse::<std::net::IpAddr>() {
+        return (ip.to_string(), default_port);
+    }
+
+    // Single colon means host:port (e.g. "8.8.8.8:5353" or "dns.google:53")
+    if addr.matches(':').count() == 1 {
+        if let Some(colon_idx) = addr.rfind(':') {
+            let (h, p_str) = addr.split_at(colon_idx);
+            if let Ok(p) = p_str[1..].parse::<u16>() {
+                return (h.to_string(), p);
+            }
+        }
+    }
+
+    (addr.to_string(), default_port)
+}
+
+pub fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde_json::Value {
     let address = address.trim();
     let mut server_obj = serde_json::Map::new();
     server_obj.insert("tag".to_string(), serde_json::json!(tag));
@@ -15,54 +49,33 @@ fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde_jso
         }
     }
 
-    if address.starts_with("https://") {
+    if address == "local" || address.is_empty() {
+        server_obj.insert("type".to_string(), serde_json::json!("local"));
+    } else if address.starts_with("https://") {
         server_obj.insert("type".to_string(), serde_json::json!("https"));
         server_obj.insert("server".to_string(), serde_json::json!(address));
     } else if address.starts_with("tls://") {
         server_obj.insert("type".to_string(), serde_json::json!("tls"));
         let stripped = address.strip_prefix("tls://").unwrap();
-        let (host, port) = if let Some(idx) = stripped.find(':') {
-            let (h, p_str) = stripped.split_at(idx);
-            let p = p_str[1..].parse::<u16>().unwrap_or(853);
-            (h.to_string(), p)
-        } else {
-            (stripped.to_string(), 853)
-        };
+        let (host, port) = split_host_port(stripped, 853);
         server_obj.insert("server".to_string(), serde_json::json!(host));
         server_obj.insert("server_port".to_string(), serde_json::json!(port));
     } else if address.starts_with("quic://") {
         server_obj.insert("type".to_string(), serde_json::json!("quic"));
         let stripped = address.strip_prefix("quic://").unwrap();
-        let (host, port) = if let Some(idx) = stripped.find(':') {
-            let (h, p_str) = stripped.split_at(idx);
-            let p = p_str[1..].parse::<u16>().unwrap_or(853);
-            (h.to_string(), p)
-        } else {
-            (stripped.to_string(), 853)
-        };
+        let (host, port) = split_host_port(stripped, 853);
         server_obj.insert("server".to_string(), serde_json::json!(host));
         server_obj.insert("server_port".to_string(), serde_json::json!(port));
     } else if address.starts_with("tcp://") {
         server_obj.insert("type".to_string(), serde_json::json!("tcp"));
         let stripped = address.strip_prefix("tcp://").unwrap();
-        let (host, port) = if let Some(idx) = stripped.find(':') {
-            let (h, p_str) = stripped.split_at(idx);
-            let p = p_str[1..].parse::<u16>().unwrap_or(53);
-            (h.to_string(), p)
-        } else {
-            (stripped.to_string(), 53)
-        };
+        let (host, port) = split_host_port(stripped, 53);
         server_obj.insert("server".to_string(), serde_json::json!(host));
         server_obj.insert("server_port".to_string(), serde_json::json!(port));
     } else {
         server_obj.insert("type".to_string(), serde_json::json!("udp"));
-        let (host, port) = if let Some(idx) = address.find(':') {
-            let (h, p_str) = address.split_at(idx);
-            let p = p_str[1..].parse::<u16>().unwrap_or(53);
-            (h.to_string(), p)
-        } else {
-            (address.to_string(), 53)
-        };
+        let stripped = address.strip_prefix("udp://").unwrap_or(address);
+        let (host, port) = split_host_port(stripped, 53);
         server_obj.insert("server".to_string(), serde_json::json!(host));
         server_obj.insert("server_port".to_string(), serde_json::json!(port));
     }
@@ -211,7 +224,11 @@ pub fn generate_singbox_config(
     // Push the parsed node outbounds
     for node in outbounds {
         if node.outbound_type == "wireguard" {
-            let address = if let Some(addr) = node.fields.get("address").or_else(|| node.fields.get("local_address")) {
+            let address = if let Some(addr) = node
+                .fields
+                .get("address")
+                .or_else(|| node.fields.get("local_address"))
+            {
                 if addr.is_array() {
                     addr.clone()
                 } else if let Some(s) = addr.as_str() {
@@ -223,22 +240,30 @@ pub fn generate_singbox_config(
                 serde_json::json!(["10.0.0.2/32"])
             };
 
-            let private_key = node.fields.get("private_key")
+            let private_key = node
+                .fields
+                .get("private_key")
                 .or_else(|| node.fields.get("secret_key"))
                 .and_then(|k| k.as_str())
                 .unwrap_or("")
                 .to_string();
 
-            let server_address = node.fields.get("server")
+            let server_address = node
+                .fields
+                .get("server")
                 .and_then(|s| s.as_str())
                 .unwrap_or("")
                 .to_string();
 
-            let server_port = node.fields.get("server_port")
+            let server_port = node
+                .fields
+                .get("server_port")
                 .and_then(|p| p.as_u64())
                 .unwrap_or(51820) as u16;
 
-            let peer_public_key = node.fields.get("peer_public_key")
+            let peer_public_key = node
+                .fields
+                .get("peer_public_key")
                 .or_else(|| node.fields.get("public_key"))
                 .and_then(|k| k.as_str())
                 .unwrap_or("")
@@ -500,7 +525,7 @@ pub fn generate_singbox_config(
 
     let is_fakeip = tun_settings.dns_mode == "fakeip";
     let local_dns_addr = if tun_settings.direct_dns.trim().is_empty() {
-        resolved_dns_address
+        "local".to_string()
     } else {
         tun_settings.direct_dns.clone()
     };
@@ -1042,7 +1067,9 @@ mod tests {
         assert!(!wg_in_outbounds);
 
         // 3. WireGuard must be in endpoints
-        let endpoints = config["endpoints"].as_array().expect("Endpoints must exist");
+        let endpoints = config["endpoints"]
+            .as_array()
+            .expect("Endpoints must exist");
         assert_eq!(endpoints.len(), 1);
         let ep = &endpoints[0];
         assert_eq!(ep["type"].as_str().unwrap(), "wireguard");
@@ -1059,5 +1086,80 @@ mod tests {
             .expect("SSH outbound must exist");
         assert_eq!(ssh_in_outbounds["type"].as_str().unwrap(), "ssh");
         assert_eq!(ssh_in_outbounds["server"].as_str().unwrap(), "5.6.7.8");
+    }
+
+    #[test]
+    fn test_generate_singbox_config_empty_outbounds_creates_valid_fallback() {
+        let tun = TunSettings::default();
+        let config_str = generate_singbox_config(
+            7890,
+            Vec::new(),
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+        )
+        .unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        let outbounds = config["outbounds"].as_array().unwrap();
+        let selector = outbounds.iter().find(|o| o["type"] == "selector").unwrap();
+        assert_eq!(
+            selector["outbounds"].as_array().unwrap(),
+            &vec![serde_json::json!("direct")]
+        );
+    }
+
+    #[test]
+    fn test_parse_dns_server_ipv6_and_bracketed() {
+        // Bare IPv6 address must not be truncated at the first colon
+        let parsed_bare_ipv6 = parse_dns_server("local-dns", "2402:4000::2", Some("direct"));
+        assert_eq!(parsed_bare_ipv6["type"], "udp");
+        assert_eq!(parsed_bare_ipv6["server"], "2402:4000::2");
+        assert_eq!(parsed_bare_ipv6["server_port"], 53);
+        assert_eq!(parsed_bare_ipv6["detour"], "direct");
+
+        // Bracketed IPv6 with custom port
+        let parsed_bracketed =
+            parse_dns_server("custom-dns", "[2402:4000::2]:5353", Some("direct"));
+        assert_eq!(parsed_bracketed["type"], "udp");
+        assert_eq!(parsed_bracketed["server"], "2402:4000::2");
+        assert_eq!(parsed_bracketed["server_port"], 5353);
+
+        // Bracketed IPv6 without port
+        let parsed_bracketed_no_port =
+            parse_dns_server("custom-dns", "[2001:4860:4860::8888]", None);
+        assert_eq!(parsed_bracketed_no_port["type"], "udp");
+        assert_eq!(parsed_bracketed_no_port["server"], "2001:4860:4860::8888");
+        assert_eq!(parsed_bracketed_no_port["server_port"], 53);
+    }
+
+    #[test]
+    fn test_parse_dns_server_local_and_schemes() {
+        let parsed_local = parse_dns_server("local-dns", "local", Some("direct"));
+        assert_eq!(parsed_local["type"], "local");
+        assert_eq!(parsed_local["tag"], "local-dns");
+        assert_eq!(parsed_local["detour"], "direct");
+        assert!(parsed_local.get("server").is_none());
+
+        let parsed_empty = parse_dns_server("local-dns", "", None);
+        assert_eq!(parsed_empty["type"], "local");
+
+        let parsed_doh = parse_dns_server("doh", "https://1.1.1.1/dns-query", Some("proxy"));
+        assert_eq!(parsed_doh["type"], "https");
+        assert_eq!(parsed_doh["server"], "https://1.1.1.1/dns-query");
+
+        let parsed_dot = parse_dns_server("dot", "tls://1.1.1.1:853", Some("proxy"));
+        assert_eq!(parsed_dot["type"], "tls");
+        assert_eq!(parsed_dot["server"], "1.1.1.1");
+        assert_eq!(parsed_dot["server_port"], 853);
+
+        let parsed_udp_prefix = parse_dns_server("udp", "udp://1.1.1.1:53", Some("direct"));
+        assert_eq!(parsed_udp_prefix["type"], "udp");
+        assert_eq!(parsed_udp_prefix["server"], "1.1.1.1");
+        assert_eq!(parsed_udp_prefix["server_port"], 53);
     }
 }

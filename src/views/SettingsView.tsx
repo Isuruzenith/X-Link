@@ -6,6 +6,7 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { useProfileStore } from '../stores/profileStore';
 import type { Settings, DnsMode } from '../utils/store';
+import { generateApiSecret } from '../utils/store';
 import xLinkLogo from '../assets/X-Link-logo.png';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -446,7 +447,14 @@ export function SettingsView() {
                   <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
-                  checked={settings.apiEnabled} onChange={(v) => updateSettings({ apiEnabled: v })} />
+                  checked={settings.apiEnabled} onChange={(v) => {
+                    if (v && !settings.apiSecret.trim()) {
+                      const secret = generateApiSecret();
+                      updateSettings({ apiEnabled: v, apiSecret: secret });
+                    } else {
+                      updateSettings({ apiEnabled: v });
+                    }
+                  }} />
                 <div className={`flex flex-col gap-4 ${!settings.apiEnabled ? 'opacity-50' : ''}`}>
                   <div className="settings-api-row">
                     <div className="settings-api-port">
@@ -462,7 +470,15 @@ export function SettingsView() {
                     </div>
                     <div className="settings-api-secret">
                       <div className="settings-api-secret-action">
-                        <FormInput label="API secret token" value={settings.apiSecret} onChange={(v) => updateSettings({ apiSecret: v })} placeholder="Leave empty for no auth" disabled={!settings.apiEnabled} mono />
+                        <FormInput
+                          label="API secret token"
+                          value={settings.apiSecret}
+                          onChange={(v) => updateSettings({ apiSecret: v })}
+                          placeholder="Secret token required"
+                          disabled={!settings.apiEnabled}
+                          mono
+                          style={{ borderColor: settings.apiEnabled && !settings.apiSecret.trim() ? 'var(--destructive)' : undefined }}
+                        />
                         <Button
                           type="button"
                           variant="ghost"
@@ -471,12 +487,7 @@ export function SettingsView() {
                           title="Generate new random API Secret Token"
                           disabled={!settings.apiEnabled}
                           onClick={() => {
-                            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-                            const secret = Array.from({ length: 16 }, () => {
-                              const random = new Uint32Array(1);
-                              do { crypto.getRandomValues(random); } while (random[0] >= Math.floor(2 ** 32 / chars.length) * chars.length);
-                              return chars[random[0] % chars.length];
-                            }).join('');
+                            const secret = generateApiSecret();
                             updateSettings({ apiSecret: secret });
                           }}
                         >
@@ -485,28 +496,39 @@ export function SettingsView() {
                       </div>
                     </div>
                   </div>
+                  {settings.apiEnabled && !settings.apiSecret.trim() && (
+                    <div className="text-[11px] text-destructive flex items-center gap-1.5 -mt-2">
+                      <Icon name="warning" size={14} className="shrink-0" />
+                      <span>API secret token is required. Controller will not start without authentication.</span>
+                    </div>
+                  )}
                   <FormSwitchRow title="Allow CORS (Cross-Origin)" desc="Allow web-based controllers (Yacd) to connect from browser"
                     checked={settings.apiCors} disabled={!settings.apiEnabled} onChange={(v) => updateSettings({ apiCors: v })} />
                   {settings.apiEnabled && isConnected && (
-                    <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Icon name="check_circle" size={14} className="text-muted-foreground shrink-0" />
-                        <span className="leading-normal">
-                          API active at <code className="font-mono text-[10.5px] bg-background border border-border px-1 py-0.5 rounded text-foreground">
-                            http://127.0.0.1:{settings.apiPort}
-                          </code>
-                          {' — open in '}
-                          <a
-                            href={`https://yacd.haishan.me/?hostname=127.0.0.1&port=${settings.apiPort}`}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="text-foreground font-semibold underline underline-offset-2 inline-flex items-center gap-0.5"
-                          >
-                            Yacd UI <Icon name="open_in_new" size={12} className="inline-block" />
-                          </a>
-                        </span>
-                      </div>
-                      {settings.apiSecret && (
+                    settings.apiSecret.trim() ? (
+                      <div className="bg-muted/80 text-foreground text-[11px] px-3.5 py-2.5 rounded border border-border/50 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Icon name="check_circle" size={14} className="text-muted-foreground shrink-0" />
+                          <span className="leading-normal">
+                            API active at <code className="font-mono text-[10.5px] bg-background border border-border px-1 py-0.5 rounded text-foreground">
+                              http://127.0.0.1:{settings.apiPort}
+                            </code>
+                            {' — open in '}
+                            <a
+                              href={`https://yacd.haishan.me/?hostname=127.0.0.1&port=${settings.apiPort}`}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="text-foreground font-semibold underline underline-offset-2 inline-flex items-center gap-0.5"
+                            >
+                              Yacd UI <Icon name="open_in_new" size={12} className="inline-block" />
+                            </a>
+                            {!settings.apiCors && (
+                              <span className="text-muted-foreground text-[10px] ml-1">
+                                (Requires "Allow CORS" for web dashboard)
+                              </span>
+                            )}
+                          </span>
+                        </div>
                         <Button
                           type="button"
                           variant="outline"
@@ -525,8 +547,13 @@ export function SettingsView() {
                           <Icon name="content_copy" size={12} />
                           Copy Token
                         </Button>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="bg-destructive/10 text-destructive text-[11px] px-3.5 py-2.5 rounded border border-destructive/20 flex items-center gap-2">
+                        <Icon name="warning" size={14} className="shrink-0" />
+                        <span>API controller is disabled because secret token is missing. Please set or generate a token and restart.</span>
+                      </div>
+                    )
                   )}
                 </div>
               </Card>

@@ -195,7 +195,7 @@ export interface Settings {
   multiplex: boolean;
 }
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   proxyMode: 'tun',
   closeToTray: true,
   theme: 'dark',
@@ -219,10 +219,10 @@ const DEFAULT_SETTINGS: Settings = {
   sniffQuic: true,
   sniffOverrideDestination: false,
 
-  apiEnabled: true,
+  apiEnabled: false,
   apiPort: 9090,
   apiSecret: '',
-  apiCors: true,
+  apiCors: false,
   geoLookupEnabled: false,
 
   primaryDns: 'https://1.1.1.1/dns-query',
@@ -249,6 +249,39 @@ const DEFAULT_ROUTING_RULES: RoutingRule[] = [
 ];
 
 const DEFAULT_RULE_SETS: RuleSet[] = [];
+
+/** Generates a 128-bit secret for local Clash API authentication. */
+export function generateApiSecret(): string {
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Secure randomness is unavailable; cannot generate an API secret');
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export interface MigrateSettingsResult {
+  settings: Settings;
+  migrated: boolean;
+}
+
+/**
+ * Pure policy and safe migration for Clash API settings:
+ * 1. Controller must never start enabled without authentication: if `apiSecret` is empty or missing,
+ *    generates a secure secret token.
+ * 2. Preserves user-configured ports, mode, and explicit settings.
+ */
+export function migrateApiSettings(raw: Partial<Settings>): MigrateSettingsResult {
+  let migrated = false;
+  const merged: Settings = { ...DEFAULT_SETTINGS, ...raw };
+
+  if (!merged.apiSecret || merged.apiSecret.trim() === '') {
+    merged.apiSecret = generateApiSecret();
+    migrated = true;
+  }
+
+  return { settings: merged, migrated };
+}
 
 // ── STORE INSTANCES ───────────────────────────────────────────────────────────
 let settingsStore: Awaited<ReturnType<typeof loadAppStore>> | null = null;
@@ -285,9 +318,15 @@ export const storeHelper = {
           (saved as Record<string, unknown>)[key] = val;
         }
       }
-      return { ...DEFAULT_SETTINGS, ...saved };
+      const { settings, migrated } = migrateApiSettings(saved);
+      if (migrated) {
+        await store.set('apiSecret', settings.apiSecret);
+        await store.save();
+      }
+      return settings;
     } catch {
-      return { ...DEFAULT_SETTINGS };
+      const { settings } = migrateApiSettings({});
+      return settings;
     }
   },
 

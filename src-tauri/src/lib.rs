@@ -69,6 +69,7 @@ pub fn run() {
             commands::system::check_tun_support,
             commands::system::request_elevation,
             commands::system::set_runas_admin,
+            commands::system::get_running_processes,
             commands::logs::get_buffered_logs,
             commands::proxy::get_proxy_status,
             commands::proxy::get_traffic_stats,
@@ -79,10 +80,12 @@ pub fn run() {
             commands::proxy::reload_active_config,
             commands::proxy::switch_node_hot,
             commands::config::import_config,
+            commands::config::create_empty_profile,
             commands::config::refresh_subscription,
             commands::config::get_active_outbound,
             commands::config::get_config_outbounds,
             commands::config::update_node,
+            commands::config::delete_node,
             commands::config::delete_profile_config,
             commands::config::switch_profile,
             commands::config::get_profile_outbounds,
@@ -90,7 +93,10 @@ pub fn run() {
             commands::config::run_subscription_auto_updates,
             commands::geo::lookup_node_geo,
             commands::latency::test_node_latency,
-            commands::latency::test_all_nodes
+            commands::latency::test_all_nodes,
+            commands::latency::test_proxy_url_latency,
+            commands::latency::test_all_nodes_url_latency,
+            commands::latency::test_active_proxy_url
         ])
         .setup(|app| {
             // Load and cache settings dynamically on boot
@@ -110,10 +116,13 @@ pub fn run() {
             let handle_for_scheduler = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                let mut retries =
+                    crate::commands::subscription_schedule::SubscriptionRetryState::default();
                 loop {
                     interval.tick().await;
-                    let _ = crate::commands::config::run_subscription_auto_updates(
+                    let _ = crate::commands::subscription_schedule::run_due_updates(
                         handle_for_scheduler.clone(),
+                        &mut retries,
                     )
                     .await;
                 }

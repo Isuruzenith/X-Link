@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useRoutingStore } from '../stores/routingStore';
@@ -51,6 +53,20 @@ export function RoutingView() {
 
   const { settings, updateSettings } = useSettingsStore();
   const isConnected = useConnectionStore((state) => state.connectionStatus === 'connected');
+  const [runningProcesses, setRunningProcesses] = useState<{ pid: number; name: string }[]>([]);
+  const [loadingProcesses, setLoadingProcesses] = useState(false);
+
+  const fetchRunningProcesses = async () => {
+    setLoadingProcesses(true);
+    try {
+      const procs = await invoke<{ pid: number; name: string }[]>('get_running_processes');
+      setRunningProcesses(procs);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingProcesses(false);
+    }
+  };
 
   return (
     <ViewShell
@@ -302,18 +318,50 @@ export function RoutingView() {
                           mono
                         />
                         {ruleForm.type === 'process_name' && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {['chrome.exe', 'telegram.exe', 'discord.exe', 'steam.exe', 'spotify.exe', 'code.exe', 'git.exe'].map((app) => (
-                              <button
-                                key={app}
+                          <div className="flex flex-col gap-1.5 mt-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <Button
                                 type="button"
-                                className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                                onClick={() => setRuleForm({ value: app })}
-                                title={`Set ${app}`}
+                                variant="outline"
+                                size="sm"
+                                className="h-6 text-[11px] px-2 font-normal"
+                                onClick={() => void fetchRunningProcesses()}
+                                disabled={loadingProcesses}
                               >
-                                +{app}
-                              </button>
-                            ))}
+                                <Icon name="refresh" size={12} className={loadingProcesses ? 'animate-spin mr-1' : 'mr-1'} />
+                                {runningProcesses.length ? 'Refresh processes' : 'Pick running process'}
+                              </Button>
+                              {runningProcesses.length > 0 && (
+                                <select
+                                  className="h-6 text-[11px] bg-background border border-border rounded px-1.5 text-foreground max-w-[200px]"
+                                  onChange={(e) => {
+                                    if (e.target.value) setRuleForm({ value: e.target.value });
+                                  }}
+                                  value={runningProcesses.some((p) => p.name === ruleForm.value) ? ruleForm.value : ''}
+                                  aria-label="Select running process"
+                                >
+                                  <option value="">Select process ({runningProcesses.length} found)...</option>
+                                  {runningProcesses.map((p) => (
+                                    <option key={`${p.pid}-${p.name}`} value={p.name}>
+                                      {p.name} (PID: {p.pid})
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {['chrome.exe', 'telegram.exe', 'discord.exe', 'steam.exe', 'spotify.exe', 'code.exe', 'git.exe'].map((app) => (
+                                <button
+                                  key={app}
+                                  type="button"
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                                  onClick={() => setRuleForm({ value: app })}
+                                  title={`Set ${app}`}
+                                >
+                                  +{app}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         )}
                       </>

@@ -16,8 +16,13 @@ pub enum ConnectionStatus {
     Connected,
 }
 
+/// Generates a cryptographically secure random token (32-character hexadecimal string, 128-bit CSPRNG entropy).
+pub fn generate_secure_secret() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct UserSettings {
     pub proxy_mode: String,
     pub close_to_tray: bool,
@@ -80,10 +85,10 @@ impl Default for UserSettings {
             sniff_tls: true,
             sniff_quic: true,
             sniff_override_destination: false,
-            api_enabled: true,
+            api_enabled: false,
             api_port: 9090,
-            api_secret: "".to_string(),
-            api_cors: true,
+            api_secret: generate_secure_secret(),
+            api_cors: false,
             geo_lookup_enabled: false,
             primary_dns: "https://1.1.1.1/dns-query".to_string(),
             fallback_dns: "https://8.8.8.8/dns-query".to_string(),
@@ -276,6 +281,25 @@ impl ProxyState {
                             default_s.multiplex = v;
                         }
                         settings = default_s;
+                    }
+
+                    // Safe migration: ensure existing stored settings with empty/missing secrets get a secure token
+                    if settings.api_secret.trim().is_empty() {
+                        settings.api_secret = generate_secure_secret();
+                        if let Ok(mut json_val) =
+                            serde_json::from_str::<serde_json::Value>(&content)
+                        {
+                            if let Some(obj) = json_val.as_object_mut() {
+                                obj.insert(
+                                    "apiSecret".to_string(),
+                                    serde_json::Value::String(settings.api_secret.clone()),
+                                );
+                                let _ = std::fs::write(
+                                    &path,
+                                    serde_json::to_string_pretty(&json_val).unwrap_or_default(),
+                                );
+                            }
+                        }
                     }
                 }
             }

@@ -2,6 +2,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const { execSync } = require('child_process');
+const { verifyArchive } = require('./sidecar-integrity.cjs');
 
 const SINGBOX_VERSION = '1.13.14';
 const WINTUN_VERSION = '0.14.1';
@@ -113,6 +114,7 @@ async function setup() {
 
     try {
       await downloadFile(downloadUrl, tempArchive);
+      await verifyArchive(tempArchive, info.archiveName);
       console.log(`[Sidecar Setup] Extracting archive...`);
       fs.mkdirSync(tempExtractDir, { recursive: true });
 
@@ -152,6 +154,7 @@ async function setup() {
 
       try {
         await downloadFile(wintunUrl, tempArchive);
+        await verifyArchive(tempArchive, `wintun-${WINTUN_VERSION}.zip`);
         console.log(`[Sidecar Setup] Extracting wintun archive...`);
         fs.mkdirSync(tempExtractDir, { recursive: true });
 
@@ -175,15 +178,4 @@ async function setup() {
   }
 }
 
-function cleanupStaleProcesses() {
-  if (process.platform === 'win32') {
-    try {
-      execSync('powershell -NoProfile -Command "try { $p = Get-Process xlink -ErrorAction Stop; $p | Where-Object { $_.Path -match \'target[\\\\/]debug\' } | Stop-Process -Force } catch {}; exit 0"', { stdio: 'ignore' });
-    } catch {
-      // Ignore if no running processes
-    }
-  }
-}
-
-cleanupStaleProcesses();
 setup().then(() => console.log('[Sidecar Setup] Setup complete!'));

@@ -914,6 +914,76 @@ mod transaction_tests {
     }
 
     #[test]
+    fn test_delete_node_transforms_config_correctly() {
+        let mut config = serde_json::json!({
+            "outbounds": [
+                { "type": "selector", "tag": "proxy", "outbounds": ["vless-1", "wg-test"], "default": "vless-1" },
+                { "type": "vless", "tag": "vless-1", "server": "example.com", "server_port": 443 },
+                { "type": "direct", "tag": "direct" }
+            ],
+            "endpoints": [
+                { "type": "wireguard", "tag": "wg-test" }
+            ]
+        });
+
+        // 1. Delete vless-1: selector default switches to wg-test
+        let tag = "vless-1";
+        if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            outbounds.retain(|o| o.get("tag").and_then(|v| v.as_str()) != Some(tag));
+            for outbound in outbounds.iter_mut() {
+                if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+                    let mut first_candidate = "direct".to_string();
+                    if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut())
+                    {
+                        list.retain(|v| v.as_str() != Some(tag));
+                        if let Some(first) = list.iter().find_map(|v| v.as_str()) {
+                            first_candidate = first.to_string();
+                        }
+                    }
+                    if outbound.get("default").and_then(|d| d.as_str()) == Some(tag) {
+                        outbound["default"] = serde_json::Value::String(first_candidate);
+                    }
+                }
+            }
+        }
+
+        let selector = config["outbounds"][0].clone();
+        assert_eq!(selector["default"], "wg-test");
+        assert_eq!(selector["outbounds"], serde_json::json!(["wg-test"]));
+        assert_eq!(config["outbounds"].as_array().unwrap().len(), 2);
+
+        // 2. Delete wg-test: endpoints removed and selector outbounds falls back to ["direct"]
+        let tag2 = "wg-test";
+        if let Some(endpoints) = config.get_mut("endpoints").and_then(|e| e.as_array_mut()) {
+            endpoints.retain(|ep| ep.get("tag").and_then(|v| v.as_str()) != Some(tag2));
+        }
+        if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            for outbound in outbounds.iter_mut() {
+                if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+                    let mut first_candidate = "direct".to_string();
+                    if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut())
+                    {
+                        list.retain(|v| v.as_str() != Some(tag2));
+                        if list.is_empty() {
+                            list.push(serde_json::Value::String("direct".to_string()));
+                        }
+                        if let Some(first) = list.iter().find_map(|v| v.as_str()) {
+                            first_candidate = first.to_string();
+                        }
+                    }
+                    if outbound.get("default").and_then(|d| d.as_str()) == Some(tag2) {
+                        outbound["default"] = serde_json::Value::String(first_candidate);
+                    }
+                }
+            }
+        }
+        assert_eq!(config["endpoints"].as_array().unwrap().len(), 0);
+        let selector2 = config["outbounds"][0].clone();
+        assert_eq!(selector2["default"], "direct");
+        assert_eq!(selector2["outbounds"], serde_json::json!(["direct"]));
+    }
+
+    #[test]
     fn transaction_restores_originals_when_later_commit_fails() {
         let dir = test_dir();
         let first = dir.join("first.json");
@@ -1262,6 +1332,82 @@ mod transaction_tests {
 
         assert!(!profile.exists());
         assert!(!active.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_safe_rule_set_paths_destination_safety() {
+        let dir = test_dir();
+        let (dest_path, temp_path) = safe_rule_set_paths(&dir, "geoip-cn", "binary").unwrap();
+        assert_eq!(dest_path, dir.join("geoip-cn.srs"));
+        assert_eq!(dest_path.parent().unwrap(), dir);
+        assert!(dest_path.starts_with(&dir));
+        assert_eq!(temp_path.parent().unwrap(), dir);
+        assert!(temp_path.starts_with(&dir));
+        assert!(temp_path.to_string_lossy().ends_with(".tmp"));
+
+        let (dest_json, _) = safe_rule_set_paths(&dir, "custom-rules", "source").unwrap();
+        assert_eq!(dest_json, dir.join("custom-rules.json"));
+
+        assert!(safe_rule_set_paths(&dir, "../evil", "binary").is_err());
+        assert!(safe_rule_set_paths(&dir, "CON", "binary").is_err());
+        assert!(safe_rule_set_paths(&dir, "", "binary").is_err());
+        assert!(safe_rule_set_paths(&dir, "C:\\evil", "binary").is_err());
+        assert!(safe_rule_set_paths(&dir, "valid", "unsupported").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_stage_and_commit_rule_set_no_write_for_invalid() {
+        let dir = test_dir();
+
+        // Invalid tags must fail and produce no writes/files
+        let bad_tags = [
+            "../evil",
+            "..\\evil",
+            "..",
+            "",
+            "   ",
+            "CON",
+            "prn",
+            "aux.json",
+            "NUL",
+            "COM1",
+            "C:\\evil",
+            "/etc/passwd",
+            "foo/bar",
+            "foo\\bar",
+            "foo:bar",
+            "tag|pipe",
+            ".hidden",
+            "trailing.",
+        ];
+
+        for &bad_tag in &bad_tags {
+            let res =
+                stage_and_commit_rule_set_content(&dir, bad_tag, "binary", b"malicious content");
+            assert!(res.is_err(), "Expected error for bad tag: {}", bad_tag);
+        }
+
+        // Verify no files were created in dir
+        let entries = std::fs::read_dir(&dir).unwrap().collect::<Vec<_>>();
+        assert!(
+            entries.is_empty(),
+            "Directory must be empty after invalid attempts"
+        );
+
+        // Valid tag must write successfully and leave no temp files
+        let dest =
+            stage_and_commit_rule_set_content(&dir, "geoip-cn", "binary", b"valid binary content")
+                .unwrap();
+        assert!(dest.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"valid binary content");
+
+        // Verify only the destination file exists (no leftover .tmp files)
+        let entries = std::fs::read_dir(&dir).unwrap().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].as_ref().unwrap().path(), dest);
+
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -1690,6 +1836,282 @@ pub async fn update_node(
     .await
 }
 
+/// Deletes an existing node from the active/profile configuration by its tag.
+/// If connected, validates and restarts/reloads sing-box with the updated config.
+#[tauri::command]
+pub async fn delete_node(app: tauri::AppHandle, tag: String) -> Result<(), String> {
+    let config_path = get_active_config_path(&app)?;
+    if !config_path.exists() {
+        return Err("No active configuration found".to_string());
+    }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read config file: {}", e))?;
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config file: {}", e))?;
+
+    let mut removed = false;
+
+    // 1. Remove from outbounds
+    if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+        let initial_len = outbounds.len();
+        outbounds.retain(|o| {
+            let t = o.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if t == "selector" || t == "direct" || t == "block" || t == "dns" {
+                return true;
+            }
+            o.get("tag").and_then(|v| v.as_str()) != Some(&tag)
+        });
+        if outbounds.len() < initial_len {
+            removed = true;
+        }
+    }
+
+    // 2. Remove from endpoints (e.g. WireGuard)
+    if let Some(endpoints) = config.get_mut("endpoints").and_then(|e| e.as_array_mut()) {
+        let initial_len = endpoints.len();
+        endpoints.retain(|ep| ep.get("tag").and_then(|v| v.as_str()) != Some(&tag));
+        if endpoints.len() < initial_len {
+            removed = true;
+        }
+    }
+
+    if !removed {
+        return Err(format!(
+            "Node with tag '{}' not found in configuration",
+            tag
+        ));
+    }
+
+    // 3. Remove from selector outbounds list
+    let mut next_selected_tag: Option<String> = None;
+    if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+        for outbound in outbounds.iter_mut() {
+            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+                let mut first_candidate = "direct".to_string();
+                if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+                    list.retain(|v| v.as_str() != Some(&tag));
+                    if list.is_empty() {
+                        list.push(serde_json::Value::String("direct".to_string()));
+                    }
+                    if let Some(first) = list.iter().find_map(|v| v.as_str()) {
+                        first_candidate = first.to_string();
+                    }
+                }
+                let is_current_default =
+                    outbound.get("default").and_then(|d| d.as_str()) == Some(&tag);
+                if is_current_default {
+                    outbound["default"] = serde_json::Value::String(first_candidate.clone());
+                    next_selected_tag = if first_candidate != "direct" {
+                        Some(first_candidate)
+                    } else {
+                        None
+                    };
+                } else if let Some(def) = outbound.get("default").and_then(|d| d.as_str()) {
+                    next_selected_tag = Some(def.to_string());
+                }
+            }
+        }
+    }
+
+    let pretty_config = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config to JSON: {}", e))?;
+
+    // 4. Validate before committing
+    let temp_path = get_temp_config_path(&app)?;
+    std::fs::write(&temp_path, &pretty_config)
+        .map_err(|e| format!("Failed to write temp config: {}", e))?;
+    let validation_res = validate_singbox_config(&app, &temp_path).await;
+    let _ = std::fs::remove_file(&temp_path);
+    validation_res?;
+
+    // 5. Stage files transactionally
+    let mut files = vec![(config_path.clone(), pretty_config.as_bytes().to_vec())];
+    let active_profile_id = get_active_profile_id(&app)?;
+    if let Some(profile_id) = active_profile_id.as_deref() {
+        let profile_path = get_profile_config_path(&app, profile_id)?;
+        if profile_path.exists() {
+            files.push((profile_path, pretty_config.as_bytes().to_vec()));
+        }
+
+        let mut profiles_path = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        profiles_path.push("profiles.json");
+        if profiles_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&profiles_path) {
+                if let Ok(mut p_json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let total_nodes = extract_nodes_from_config(&config).len() as u32;
+                    if let Some(arr) = p_json.get_mut("profiles").and_then(|p| p.as_array_mut()) {
+                        if let Some(target) = arr
+                            .iter_mut()
+                            .find(|p| p.get("id").and_then(|i| i.as_str()) == Some(profile_id))
+                        {
+                            target["nodeCount"] = serde_json::Value::Number(total_nodes.into());
+                            if target.get("selectedNodeTag").and_then(|t| t.as_str()) == Some(&tag)
+                            {
+                                target["selectedNodeTag"] = match &next_selected_tag {
+                                    Some(t) => serde_json::Value::String(t.clone()),
+                                    None => serde_json::Value::Null,
+                                };
+                            }
+                            let now_ms = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64;
+                            target["lastUpdated"] = serde_json::Value::Number(now_ms.into());
+                            if let Ok(serialized) = serde_json::to_vec_pretty(&p_json) {
+                                files.push((profiles_path, serialized));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let state = app.state::<crate::state::ProxyState>();
+    let connected =
+        state.get_status() == crate::state::ConnectionStatus::Connected && state.is_running();
+    let mode_override = state
+        .effective_proxy_mode
+        .lock()
+        .map_err(|error| format!("state_lock_poisoned: {}", error))?
+        .clone();
+    let previous_selected_tag = get_selected_outbound_tag(&app);
+
+    commit_and_apply_with_rollback(
+        files,
+        connected,
+        |restoring| {
+            crate::commands::proxy::try_reload_proxy_config_with_mode(
+                &app,
+                if restoring {
+                    previous_selected_tag.clone()
+                } else {
+                    next_selected_tag.clone()
+                },
+                mode_override.clone(),
+            )
+        },
+        || state.get_status() == crate::state::ConnectionStatus::Connected && state.is_running(),
+    )
+    .await
+}
+
+/// Creates an empty manual profile with no initial proxy nodes.
+/// Produces a valid sing-box fallback configuration (with direct fallback),
+/// registers the profile in profiles.json as type "manual", and sets it active if needed.
+#[tauri::command]
+pub async fn create_empty_profile(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+    name: String,
+) -> Result<ProfileMeta, String> {
+    let profile_name = if name.trim().is_empty() {
+        "Manual Profile".to_string()
+    } else {
+        name.trim().to_string()
+    };
+
+    let profile_id = uuid::Uuid::new_v4().to_string();
+
+    // 1. Generate empty sing-box config
+    let (proxy_mode, dns, wifi) = read_basic_settings(&app);
+    let listen_address = if wifi { "0.0.0.0" } else { "127.0.0.1" };
+    let dns_address = crate::config::resolve_dns_address(dns.as_deref());
+    let tun_settings = load_tun_settings(&app);
+    let mixed_port = state.get_settings().mixed_port;
+    let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
+    let generated_config = generate_singbox_config(
+        mixed_port,
+        Vec::new(),
+        &proxy_mode,
+        &dns_address,
+        listen_address,
+        &tun_settings,
+        None,
+        &user_rules,
+        &rule_sets,
+        &app_data_dir,
+    )?;
+
+    // 2. Validate empty config
+    let temp_path = get_temp_config_path(&app)?;
+    std::fs::write(&temp_path, &generated_config)
+        .map_err(|e| format!("Failed to write temp config: {}", e))?;
+    let validation = validate_singbox_config(&app, &temp_path).await;
+    let _ = std::fs::remove_file(&temp_path);
+    validation.map_err(|e| format!("Validation of empty config failed: {}", e))?;
+
+    // 3. Write profile config
+    let profile_path = get_profile_config_path(&app, &profile_id)?;
+    std::fs::write(&profile_path, generated_config.as_bytes())
+        .map_err(|e| format!("Failed to write profile config: {}", e))?;
+
+    // 4. Update profiles.json
+    let now_ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let mut profiles_path = app_data_dir;
+    profiles_path.push("profiles.json");
+
+    let mut profiles_json = if profiles_path.exists() {
+        let content = std::fs::read_to_string(&profiles_path).unwrap_or_else(|_| "{}".to_string());
+        serde_json::from_str::<serde_json::Value>(&content)
+            .unwrap_or_else(|_| serde_json::json!({ "profiles": [] }))
+    } else {
+        serde_json::json!({ "profiles": [] })
+    };
+
+    let new_profile_entry = serde_json::json!({
+        "id": profile_id,
+        "name": profile_name,
+        "type": "manual",
+        "importedAt": now_ms,
+        "lastUpdated": now_ms,
+        "nodeCount": 0,
+        "selectedNodeTag": null
+    });
+
+    let is_first_profile = profiles_json
+        .get("profiles")
+        .and_then(|p| p.as_array())
+        .is_none_or(|arr| arr.is_empty());
+
+    if let Some(arr) = profiles_json
+        .get_mut("profiles")
+        .and_then(|p| p.as_array_mut())
+    {
+        arr.push(new_profile_entry);
+    } else {
+        profiles_json["profiles"] = serde_json::json!([new_profile_entry]);
+    }
+
+    if is_first_profile {
+        profiles_json["activeProfileId"] = serde_json::Value::String(profile_id.clone());
+        let active_path = get_active_config_path(&app)?;
+        let _ = std::fs::write(&active_path, generated_config.as_bytes());
+    }
+
+    let updated_bytes = serde_json::to_vec_pretty(&profiles_json)
+        .map_err(|e| format!("Failed to serialize profiles.json: {}", e))?;
+    std::fs::write(&profiles_path, updated_bytes)
+        .map_err(|e| format!("Failed to write profiles.json: {}", e))?;
+
+    Ok(ProfileMeta {
+        id: profile_id,
+        name: profile_name,
+        imported_at: now_ms,
+        node_count: 0,
+    })
+}
+
 /// Deletes the per-profile config file for a given profile ID.
 #[tauri::command]
 pub fn delete_profile_config(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
@@ -1914,6 +2336,71 @@ pub fn get_active_profile_id(app: &tauri::AppHandle) -> Result<Option<String>, S
     Ok(None)
 }
 
+/// Resolves and validates safe destination and temporary paths for a rule-set file within `rule_set_dir`.
+/// Guarantees that neither path can escape the target `rule_set_dir` directory.
+pub fn safe_rule_set_paths(
+    rule_set_dir: &std::path::Path,
+    tag: &str,
+    format: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    crate::config::rules::validate_rule_set_tag(tag)?;
+
+    let extension = match format {
+        "binary" => "srs",
+        "source" | "json" => "json",
+        _ => return Err(format!("Unsupported rule-set format: {}", format)),
+    };
+    let filename = format!("{}.{}", tag, extension);
+    let dest_path = rule_set_dir.join(&filename);
+
+    let temp_filename = format!("{}.{}.{}.tmp", tag, extension, uuid::Uuid::new_v4());
+    let temp_path = rule_set_dir.join(&temp_filename);
+
+    for path in [&dest_path, &temp_path] {
+        if !path.starts_with(rule_set_dir) {
+            return Err("Rule-set destination path escapes rule_set directory".to_string());
+        }
+        if path.parent() != Some(rule_set_dir) {
+            return Err(
+                "Rule-set destination path is not an immediate child of rule_set directory"
+                    .to_string(),
+            );
+        }
+        for comp in path.components() {
+            if matches!(comp, std::path::Component::ParentDir) {
+                return Err(
+                    "Rule-set destination path contains parent directory traversal".to_string(),
+                );
+            }
+        }
+    }
+
+    Ok((dest_path, temp_path))
+}
+
+/// Atomically stages and commits downloaded rule-set bytes to disk after verifying path safety.
+pub fn stage_and_commit_rule_set_content(
+    rule_set_dir: &std::path::Path,
+    tag: &str,
+    format: &str,
+    bytes: &[u8],
+) -> Result<PathBuf, String> {
+    let (dest_path, temp_path) = safe_rule_set_paths(rule_set_dir, tag, format)?;
+
+    std::fs::create_dir_all(rule_set_dir)
+        .map_err(|e| format!("Failed to create rule_set directory: {}", e))?;
+
+    std::fs::write(&temp_path, bytes)
+        .map_err(|e| format!("Failed to write rule-set temporary file: {}", e))?;
+
+    if let Err(e) = std::fs::rename(&temp_path, &dest_path) {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(format!("Failed to commit rule-set file: {}", e));
+    }
+
+    Ok(dest_path)
+}
+
 #[tauri::command]
 pub async fn update_rule_set(
     app: tauri::AppHandle,
@@ -1930,24 +2417,33 @@ pub async fn update_rule_set(
     let tag = &rule_set.tag;
     let format = &rule_set.format;
 
+    // Validate tag and destination safety BEFORE network fetch and BEFORE filesystem writes
+    crate::config::rules::validate_rule_set_tag(tag)?;
+
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut rule_set_dir = app_data_dir;
+    rule_set_dir.push("rule_set");
+    safe_rule_set_paths(&rule_set_dir, tag, format)?;
+
     // 2. Fetch the file securely using SSRF-safe bounded fetcher
     let bytes = crate::config::subscription::fetch_subscription_content(&url)
         .await
         .map_err(|e| format!("Failed to download rule set: {}", e))?;
 
-    // 3. Save it to app_data_dir/rule_set/<tag>.<extension>
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let mut rule_set_dir = app_data_dir.clone();
-    rule_set_dir.push("rule_set");
-    std::fs::create_dir_all(&rule_set_dir)
-        .map_err(|e| format!("Failed to create rule_set directory: {}", e))?;
+    if bytes.is_empty() {
+        return Err("Downloaded rule set is empty".to_string());
+    }
 
-    let extension = if format == "binary" { "srs" } else { "json" };
-    let mut dest_path = rule_set_dir;
-    dest_path.push(format!("{}.{}", tag, extension));
+    // 3. Format validation
+    if format == "source" || format == "json" {
+        serde_json::from_slice::<serde_json::Value>(&bytes)
+            .map_err(|e| format!("Rule set JSON format validation failed: {}", e))?;
+    } else if format == "binary" && bytes.len() < 8 {
+        return Err("Binary rule set file is truncated or invalid".to_string());
+    }
 
-    std::fs::write(&dest_path, &bytes)
-        .map_err(|e| format!("Failed to write rule-set cache file: {}", e))?;
+    // 4. Atomically stage and commit to app_data_dir/rule_set/<tag>.<extension>
+    stage_and_commit_rule_set_content(&rule_set_dir, tag, format, &bytes)?;
 
     Ok(())
 }

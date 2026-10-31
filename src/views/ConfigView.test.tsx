@@ -57,4 +57,42 @@ describe('Profiles import', () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledWith('import_config', expect.objectContaining({ content: 'https://example.com/config' }));
     expect(screen.getByRole('button', { name: /My Config/ })).toBeTruthy();
   });
+
+  it('creates an empty manual profile via the empty profile button', async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'create_empty_profile') return { id: 'manual-1', name: 'Manual Profile', type: 'manual', importedAt: 1, lastUpdated: 1, nodeCount: 0 };
+      if (command === 'get_profile_outbounds') return [];
+      return null;
+    });
+    render(<ConfigView />);
+    fireEvent.click(screen.getByText('Add your first profile'));
+    fireEvent.click(screen.getByText('Empty profile'));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Add a profile' })).toBeNull());
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('create_empty_profile', { name: 'Manual Profile' });
+  });
+
+  it('deletes a node when confirmed', async () => {
+    const { ask } = await import('@tauri-apps/plugin-dialog');
+    vi.mocked(ask).mockResolvedValue(true);
+    useProfileStore.setState({
+      profiles: [{ id: 'p1', name: 'Profile 1', type: 'manual', importedAt: 1, lastUpdated: 1, nodeCount: 1, selectedNodeTag: 'node-1' }],
+      activeProfileId: 'p1',
+      selectedProfileId: 'p1',
+      nodes: [{ tag: 'node-1', type: 'vmess', server: '1.2.3.4', server_port: 443 }],
+    });
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'delete_node') return undefined;
+      if (command === 'get_profile_outbounds') return [];
+      return null;
+    });
+
+    const { container } = render(<ConfigView />);
+    const deleteBtn = container.querySelector('md-icon-button[aria-label="Delete node-1"]') as HTMLElement;
+    expect(deleteBtn).toBeTruthy();
+    fireEvent.click(deleteBtn);
+    await waitFor(() => {
+      expect(ask).toHaveBeenCalledWith(expect.stringContaining('Delete node "node-1"?'), expect.anything());
+      expect(vi.mocked(invoke)).toHaveBeenCalledWith('delete_node', { tag: 'node-1' });
+    });
+  });
 });

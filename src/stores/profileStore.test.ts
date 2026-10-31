@@ -31,7 +31,7 @@ beforeEach(() => {
   });
   useConnectionStore.setState({ connectionStatus: 'connected', isConnected: true });
   useSettingsStore.setState({
-    settings: { ...useSettingsStore.getState().settings, geoLookupEnabled: false },
+    settings: { ...useSettingsStore.getState().settings, apiEnabled: false, geoLookupEnabled: false },
   });
 });
 
@@ -186,5 +186,124 @@ describe('profile auto-update interval', () => {
         expect.objectContaining({ id: 'first', autoUpdateInterval: 360 }),
       ])
     );
+  });
+});
+
+describe('empty profile and node management', () => {
+  it('creates an empty manual profile and sets it as active', async () => {
+    const emptyMeta = {
+      id: 'empty-1',
+      name: 'My Manual Profile',
+      type: 'manual' as const,
+      importedAt: Date.now(),
+      lastUpdated: Date.now(),
+      nodeCount: 0,
+    };
+    native.mockImplementation(async (command) => {
+      if (command === 'create_empty_profile') return emptyMeta;
+      if (command === 'get_profile_outbounds') return [];
+      return undefined;
+    });
+    vi.mocked(storeHelper.reloadProfiles).mockResolvedValue([
+      profile('first'),
+      profile('second'),
+      { ...emptyMeta, selectedNodeTag: null },
+    ]);
+
+    await useProfileStore.getState().createEmptyProfile('My Manual Profile');
+
+    expect(native).toHaveBeenCalledWith('create_empty_profile', { name: 'My Manual Profile' });
+    expect(storeHelper.setActiveProfileId).toHaveBeenCalledWith('empty-1');
+    expect(useProfileStore.getState().activeProfileId).toBe('empty-1');
+  });
+
+  it('deletes a node and refreshes outbounds', async () => {
+    native.mockImplementation(async (command) => {
+      if (command === 'delete_node') return undefined;
+      if (command === 'get_profile_outbounds') return [];
+      return undefined;
+    });
+
+    await useProfileStore.getState().deleteNode('node-to-delete');
+
+    expect(native).toHaveBeenCalledWith('delete_node', { tag: 'node-to-delete' });
+    expect(native).toHaveBeenCalledWith('get_profile_outbounds', expect.anything());
+  });
+
+  it('tests URL latency when connected with Clash API enabled', async () => {
+    useConnectionStore.setState({ isConnected: true, connectionStatus: 'connected' });
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: true } });
+    native.mockImplementation(async (command) => {
+      if (command === 'test_all_nodes_url_latency') {
+        return [{ tag: 'node-1', latencyMs: 120, error: null }];
+      }
+      return undefined;
+    });
+
+    await useProfileStore.getState().testAllNodes();
+
+    expect(native).toHaveBeenCalledWith('test_all_nodes_url_latency', { profileId: 'first' });
+    expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
+      latencyMs: 120,
+      error: null,
+    });
+  });
+
+  it('falls back to TCP latency if an enabled Clash API request fails', async () => {
+    useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: true } });
+    native.mockImplementation(async (command) => {
+      if (command === 'test_all_nodes_url_latency') throw new Error('controller unavailable');
+      if (command === 'test_all_nodes') {
+        return [{ tag: 'node-1', latencyMs: 45, error: null }];
+      }
+      return undefined;
+    });
+
+    await useProfileStore.getState().testAllNodes();
+
+    expect(native).toHaveBeenCalledWith('test_all_nodes_url_latency', { profileId: 'first' });
+    expect(native).toHaveBeenCalledWith('test_all_nodes', { profileId: 'first' });
+    expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
+      latencyMs: 45,
+      error: null,
+    });
+  });
+
+  it('tests TCP latency when connected with Clash API disabled', async () => {
+    useConnectionStore.setState({ isConnected: true, connectionStatus: 'connected' });
+    native.mockImplementation(async (command) => {
+      if (command === 'test_all_nodes') {
+        return [{ tag: 'node-1', latencyMs: 45, error: null }];
+      }
+      return undefined;
+    });
+
+    await useProfileStore.getState().testAllNodes();
+
+    expect(native).not.toHaveBeenCalledWith('test_all_nodes_url_latency', expect.anything());
+    expect(native).toHaveBeenCalledWith('test_all_nodes', { profileId: 'first' });
+    expect(useProfileStore.getState().latencyResults['node-1']).toEqual({
+      latencyMs: 45,
+      error: null,
+    });
+  });
+
+  it('falls back to TCP ping when disconnected', async () => {
+    useConnectionStore.setState({ isConnected: false, connectionStatus: 'disconnected' });
+    native.mockImplementation(async (command) => {
+      if (command === 'test_all_nodes') {
+        return [{ tag: 'node-2', latencyMs: 45, error: null }];
+      }
+      return undefined;
+    });
+
+    await useProfileStore.getState().testAllNodes();
+
+    expect(native).not.toHaveBeenCalledWith('test_all_nodes_url_latency', expect.anything());
+    expect(native).toHaveBeenCalledWith('test_all_nodes', { profileId: 'first' });
+    expect(useProfileStore.getState().latencyResults['node-2']).toEqual({
+      latencyMs: 45,
+      error: null,
+    });
   });
 });

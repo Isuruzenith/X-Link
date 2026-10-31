@@ -68,6 +68,8 @@ interface ProfileState {
   selectProfile: (profileId: string) => Promise<void>;
   refreshSubscription: (profileId: string) => Promise<void>;
   setProfileAutoUpdateInterval: (profileId: string, intervalMinutes: number) => Promise<void>;
+  createEmptyProfile: (name: string) => Promise<void>;
+  deleteNode: (tag: string) => Promise<void>;
   fetchNodeGeo: (server: string, tag: string) => Promise<void>;
   clearNodeGeoCache: () => void;
 }
@@ -530,16 +532,34 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   testAllNodes: async () => {
     const pid = get().selectedProfileId || get().activeProfileId;
     const logStore = useLogStore.getState();
+    const isConnected = useConnectionStore.getState().isConnected;
+    const apiEnabled = useSettingsStore.getState().settings.apiEnabled;
     if (!pid) return;
 
     set({ isTestingLatency: true, latencyResults: {} });
-    logStore.pushSystemLog('Testing latency for all nodes...');
+    logStore.pushSystemLog(isConnected && apiEnabled ? 'Testing true proxy URL latency for all nodes...' : 'Testing TCP latency for all nodes...');
 
     try {
-      const results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
-        'test_all_nodes',
-        { profileId: pid }
-      );
+      let results: Array<{ tag: string; latencyMs: number | null; error: string | null }>;
+      if (isConnected && apiEnabled) {
+        try {
+          results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
+            'test_all_nodes_url_latency',
+            { profileId: pid }
+          );
+        } catch {
+          logStore.pushSystemLog('Proxy URL latency unavailable; falling back to TCP latency.');
+          results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
+            'test_all_nodes',
+            { profileId: pid }
+          );
+        }
+      } else {
+        results = await invoke<Array<{ tag: string; latencyMs: number | null; error: string | null }>>(
+          'test_all_nodes',
+          { profileId: pid }
+        );
+      }
 
       const latencyMap: Record<string, { latencyMs: number | null; error: string | null }> = {};
       for (const r of results) {
@@ -554,6 +574,43 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       logStore.pushSystemLog(`Latency test failed: ${err}`);
     } finally {
       set({ isTestingLatency: false });
+    }
+  },
+
+  createEmptyProfile: async (name: string) => {
+    const logStore = useLogStore.getState();
+    try {
+      const profileName = name.trim() || 'Manual Profile';
+      const meta = await invoke<Profile>('create_empty_profile', { name: profileName });
+      const updatedProfiles = await storeHelper.reloadProfiles();
+      set({
+        profiles: updatedProfiles,
+        activeProfileId: meta.id,
+        selectedProfileId: meta.id,
+      });
+      await storeHelper.setActiveProfileId(meta.id);
+      logStore.pushSystemLog(`Manual profile "${meta.name}" created.`);
+      useToastStore.getState().addToast('success', `Manual profile "${meta.name}" created.`, 'Profile Created');
+      await get().refreshNodes(meta.id);
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to create manual profile: ${err}`);
+      useToastStore.getState().addToast('error', `Failed to create profile: ${err}`, 'Creation Failed');
+    }
+  },
+
+  deleteNode: async (tag: string) => {
+    const logStore = useLogStore.getState();
+    try {
+      await invoke('delete_node', { tag });
+      logStore.pushSystemLog(`Node "${tag}" deleted.`);
+      useToastStore.getState().addToast('success', `Node "${tag}" deleted.`, 'Node Deleted');
+      const pid = get().selectedProfileId || get().activeProfileId;
+      if (pid) {
+        await get().refreshNodes(pid);
+      }
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to delete node: ${err}`);
+      useToastStore.getState().addToast('error', `Failed to delete node: ${err}`, 'Delete Failed');
     }
   },
 

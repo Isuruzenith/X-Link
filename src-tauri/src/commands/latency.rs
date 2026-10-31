@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
+use tauri::Manager;
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -204,6 +205,211 @@ pub async fn test_all_nodes(
     Ok(results)
 }
 
+fn controller_for_latency(settings: &crate::state::UserSettings) -> Result<(u16, &str), String> {
+    if !settings.api_enabled || settings.api_secret.trim().is_empty() {
+        return Err("Clash API is disabled; use TCP latency testing instead.".to_string());
+    }
+    Ok((settings.api_port, &settings.api_secret))
+}
+
+/// Tests true proxy URL latency through a specific node tag via sing-box's Clash API.
+/// This measures the real end-to-end handshake and HTTP round-trip through the proxy tunnel,
+/// distinct from basic TCP connection timing.
+#[tauri::command]
+pub async fn test_proxy_url_latency(
+    app: tauri::AppHandle,
+    tag: String,
+    test_url: Option<String>,
+) -> Result<u32, String> {
+    let state = app.state::<crate::state::ProxyState>();
+    if !state.is_running() {
+        return Err(
+            "Proxy core is not running. Please connect to test true URL latency.".to_string(),
+        );
+    }
+
+    let settings = state.get_settings();
+    let (api_port, api_secret) = controller_for_latency(&settings)?;
+
+    let url_to_test =
+        test_url.unwrap_or_else(|| "http://cp.cloudflare.com/generate_204".to_string());
+    let encoded_tag =
+        percent_encoding::utf8_percent_encode(&tag, percent_encoding::NON_ALPHANUMERIC).to_string();
+    let query_url = format!(
+        "http://127.0.0.1:{}/proxies/{}/delay?url={}&timeout=5000",
+        api_port, encoded_tag, url_to_test
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+        .map_err(|e| format!("Client creation failed: {}", e))?;
+
+    let resp = client
+        .get(&query_url)
+        .header("Authorization", format!("Bearer {}", api_secret))
+        .send()
+        .await
+        .map_err(|e| format!("Proxy delay query failed: {}", e))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Proxy URL test failed (HTTP {}): {}", status, body));
+    }
+
+    let val: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let delay = val.get("delay").and_then(|d| d.as_u64()).ok_or_else(|| {
+        val.get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown error from proxy core")
+            .to_string()
+    })?;
+
+    Ok(delay as u32)
+}
+
+/// Tests true proxy URL latency for all nodes via sing-box Clash API when running.
+#[tauri::command]
+pub async fn test_all_nodes_url_latency(
+    app: tauri::AppHandle,
+    profile_id: Option<String>,
+    test_url: Option<String>,
+) -> Result<Vec<LatencyResult>, String> {
+    let state = app.state::<crate::state::ProxyState>();
+    if !state.is_running() {
+        return Err(
+            "Proxy core is not running. Please connect to test proxy URL latency.".to_string(),
+        );
+    }
+    controller_for_latency(&state.get_settings())?;
+
+    let nodes = if let Some(pid) = profile_id {
+        crate::commands::config::get_profile_outbounds(app.clone(), pid)?
+    } else {
+        crate::commands::config::get_config_outbounds(app.clone())?
+    };
+
+    let url_to_test =
+        test_url.unwrap_or_else(|| "http://cp.cloudflare.com/generate_204".to_string());
+    let mut handles = Vec::new();
+
+    for node in nodes {
+        let tag = node
+            .get("tag")
+            .and_then(|t| t.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let app_handle = app.clone();
+        let url_clone = url_to_test.clone();
+        handles.push(tokio::spawn(async move {
+            match test_proxy_url_latency(app_handle, tag.clone(), Some(url_clone)).await {
+                Ok(ms) => LatencyResult {
+                    tag,
+                    latency_ms: Some(ms),
+                    error: None,
+                },
+                Err(e) => LatencyResult {
+                    tag,
+                    latency_ms: None,
+                    error: Some(e),
+                },
+            }
+        }));
+    }
+
+    let mut results = Vec::new();
+    for handle in handles {
+        if let Ok(res) = handle.await {
+            results.push(res);
+        }
+    }
+    Ok(results)
+}
+
+/// Selects the HTTP-capable proxy port to use for URL latency testing or health checks.
+/// When `use_separate_ports` is true, the dedicated HTTP listener port (`http_port`) is used.
+/// When `use_separate_ports` is false, the unified mixed listener port (`mixed_port`) is used.
+/// Returns an error if the selected port is absent or invalid (0).
+pub fn select_active_proxy_port(
+    use_separate_ports: bool,
+    http_port: Option<u16>,
+    mixed_port: Option<u16>,
+) -> Result<u16, String> {
+    let (port_opt, mode_name) = if use_separate_ports {
+        (http_port, "HTTP")
+    } else {
+        (mixed_port, "mixed")
+    };
+
+    match port_opt {
+        Some(0) => Err(format!(
+            "Configured {} proxy port is invalid (0)",
+            mode_name
+        )),
+        Some(port) => Ok(port),
+        None => Err(format!("Configured {} proxy port is missing", mode_name)),
+    }
+}
+
+/// Convenience helper to select the HTTP-capable proxy port directly from `UserSettings`.
+pub fn active_proxy_http_port_from_settings(
+    settings: &crate::state::UserSettings,
+) -> Result<u16, String> {
+    select_active_proxy_port(
+        settings.use_separate_ports,
+        Some(settings.http_port),
+        Some(settings.mixed_port),
+    )
+}
+
+/// Executes an end-to-end HTTP request through a local HTTP-capable proxy listener.
+/// Accepts any 2xx response status or 204 No Content.
+pub async fn execute_active_proxy_url_test(
+    proxy_port: u16,
+    url: &str,
+    timeout: Duration,
+) -> Result<u32, String> {
+    let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{}", proxy_port))
+        .map_err(|e| format!("Failed to configure proxy: {}", e))?;
+    let client = reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(timeout)
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
+    let start = Instant::now();
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    if !resp.status().is_success() && resp.status().as_u16() != 204 {
+        return Err(format!("Proxy responded with status {}", resp.status()));
+    }
+    Ok(start.elapsed().as_millis() as u32)
+}
+
+/// Tests end-to-end connectivity and HTTP latency through the currently active proxy tunnel
+/// via the local HTTP-capable listener (HTTP port in separate-port mode, mixed port otherwise).
+#[tauri::command]
+pub async fn test_active_proxy_url(
+    app: tauri::AppHandle,
+    test_url: Option<String>,
+) -> Result<u32, String> {
+    let state = app.state::<crate::state::ProxyState>();
+    if !state.is_running() {
+        return Err("Proxy core is not running.".to_string());
+    }
+    let settings = state.get_settings();
+    let proxy_port = active_proxy_http_port_from_settings(&settings)?;
+    let url = test_url.unwrap_or_else(|| "http://cp.cloudflare.com/generate_204".to_string());
+
+    execute_active_proxy_url_test(proxy_port, &url, Duration::from_secs(6)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +530,160 @@ mod tests {
         assert!(ip.is_some());
         let ip_addr = ip.unwrap();
         assert!(ip_addr.is_ipv4() || ip_addr.is_ipv6());
+    }
+
+    #[test]
+    fn test_controller_for_latency_requires_enabled_authenticated_api() {
+        let mut settings = crate::state::UserSettings::default();
+        assert!(controller_for_latency(&settings).is_err());
+
+        settings.api_enabled = true;
+        settings.api_secret.clear();
+        assert!(controller_for_latency(&settings).is_err());
+
+        settings.api_secret = "token".to_string();
+        assert_eq!(controller_for_latency(&settings), Ok((9090, "token")));
+    }
+
+    #[test]
+    fn test_select_active_proxy_port_modes() {
+        // Mixed mode (separate ports false) -> mixed_port
+        let port = select_active_proxy_port(false, Some(7890), Some(7892));
+        assert_eq!(port, Ok(7892));
+
+        // Separate ports mode (separate ports true) -> http_port
+        let port = select_active_proxy_port(true, Some(7890), Some(7892));
+        assert_eq!(port, Ok(7890));
+    }
+
+    #[test]
+    fn test_select_active_proxy_port_absent_and_ignored() {
+        // Mixed mode requires mixed_port; http_port can be absent
+        let port = select_active_proxy_port(false, None, Some(7892));
+        assert_eq!(port, Ok(7892));
+
+        let port_err = select_active_proxy_port(false, Some(7890), None);
+        assert!(port_err.is_err());
+        assert!(port_err
+            .unwrap_err()
+            .contains("mixed proxy port is missing"));
+
+        // Separate ports mode requires http_port; mixed_port can be absent
+        let port = select_active_proxy_port(true, Some(7890), None);
+        assert_eq!(port, Ok(7890));
+
+        let port_err = select_active_proxy_port(true, None, Some(7892));
+        assert!(port_err.is_err());
+        assert!(port_err.unwrap_err().contains("HTTP proxy port is missing"));
+    }
+
+    #[test]
+    fn test_select_active_proxy_port_invalid_zero() {
+        let err_mixed = select_active_proxy_port(false, Some(7890), Some(0));
+        assert!(err_mixed.is_err());
+        assert!(err_mixed
+            .unwrap_err()
+            .contains("mixed proxy port is invalid (0)"));
+
+        let err_http = select_active_proxy_port(true, Some(0), Some(7892));
+        assert!(err_http.is_err());
+        assert!(err_http
+            .unwrap_err()
+            .contains("HTTP proxy port is invalid (0)"));
+    }
+
+    #[test]
+    fn test_active_proxy_http_port_from_settings() {
+        let mut settings = crate::state::UserSettings::default();
+        // Default settings has use_separate_ports = false, mixed_port = 7892, http_port = 7890
+        assert_eq!(active_proxy_http_port_from_settings(&settings), Ok(7892));
+
+        settings.use_separate_ports = true;
+        assert_eq!(active_proxy_http_port_from_settings(&settings), Ok(7890));
+
+        settings.http_port = 0;
+        assert!(active_proxy_http_port_from_settings(&settings).is_err());
+
+        settings.use_separate_ports = false;
+        settings.mixed_port = 0;
+        assert!(active_proxy_http_port_from_settings(&settings).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_active_proxy_url_test_mock_success() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local test proxy");
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let latency = execute_active_proxy_url_test(
+            port,
+            "http://example.com/generate_204",
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(latency.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_active_proxy_url_test_mock_error_status() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local test proxy");
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let response =
+                    "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let latency = execute_active_proxy_url_test(
+            port,
+            "http://example.com/generate_204",
+            Duration::from_secs(2),
+        )
+        .await;
+        assert!(latency.is_err());
+        assert!(latency
+            .unwrap_err()
+            .contains("Proxy responded with status 502"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_active_proxy_url_test_unreachable_port() {
+        let port = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+
+        let result = execute_active_proxy_url_test(
+            port,
+            "http://example.com/generate_204",
+            Duration::from_millis(500),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Request failed"));
     }
 }

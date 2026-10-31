@@ -24,7 +24,7 @@ export function ConfigView() {
     latencyResults, isTestingLatency, refreshingProfileId, activatingNodeTag, nodeGeoCache,
     setImportName, setImportContent, setImportError, pasteClipboard, pickFileAndImport, importConfig,
     selectNode, deleteProfile, testAllNodes, selectProfile, refreshSubscription,
-    setProfileAutoUpdateInterval,
+    setProfileAutoUpdateInterval, createEmptyProfile, deleteNode,
   } = useProfileStore();
   const isConnected = useConnectionStore((state) => state.isConnected);
   const openEditor = useNodeEditorStore((state) => state.openEditor);
@@ -64,6 +64,19 @@ export function ConfigView() {
     if (confirmed) await deleteProfile(profile.id);
   };
 
+  const handleCreateEmpty = async () => {
+    const name = importName.trim() || 'Manual Profile';
+    await createEmptyProfile(name);
+    setShowImport(false);
+  };
+
+  const handleDeleteNode = async (tag: string) => {
+    const confirmed = await ask(`Delete node "${tag}"? This cannot be undone.`, {
+      title: 'Delete Node', kind: 'warning',
+    });
+    if (confirmed) await deleteNode(tag);
+  };
+
   return (
     <ViewShell title="Profiles" subtitle="Choose a configuration and select the server that carries your traffic"
       actions={<Button onClick={() => setShowImport((open) => !open)} aria-expanded={showImport} aria-controls="profile-import-panel">
@@ -76,9 +89,14 @@ export function ConfigView() {
               <h2 id="import-heading">Add a profile</h2>
               <p>Paste a share link, subscription URL or configuration, or choose a file.</p>
             </div>
-            <Button variant="outline" onClick={() => void handleFileImport()} disabled={isImporting}>
-              <Icon name="upload_file" aria-hidden="true" /> Choose file
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => void handleCreateEmpty()} disabled={isImporting} title="Create an empty manual profile">
+                <Icon name="note_add" aria-hidden="true" /> Empty profile
+              </Button>
+              <Button variant="outline" onClick={() => void handleFileImport()} disabled={isImporting}>
+                <Icon name="upload_file" aria-hidden="true" /> Choose file
+              </Button>
+            </div>
           </div>
           <form className="profiles-import-form" onSubmit={(event) => { event.preventDefault(); if (trimmedContent && !urlError && !isImporting) void handleImport(); }}>
             <FormInput label="Profile name (optional)" value={importName} onChange={setImportName} />
@@ -213,9 +231,14 @@ export function ConfigView() {
                       {latency && <span className="server-latency" title={latency.error || undefined}>{latency.latencyMs !== null ? `${latency.latencyMs} ms` : 'Timeout'}</span>}
                     </button>
                     {selectedProfile.id === activeProfileId && (
-                      <Button variant="ghost" size="icon" aria-label={`Edit ${node.tag}`} title={`Edit ${node.tag}`} onClick={() => openEditor(node)}>
-                        <Icon name="edit" aria-hidden="true" />
-                      </Button>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" aria-label={`Edit ${node.tag}`} title={`Edit ${node.tag}`} onClick={() => openEditor(node)}>
+                          <Icon name="edit" aria-hidden="true" />
+                        </Button>
+                        <Button variant="ghost" size="icon" aria-label={`Delete ${node.tag}`} title={`Delete ${node.tag}`} onClick={() => void handleDeleteNode(node.tag)}>
+                          <Icon name="delete" aria-hidden="true" />
+                        </Button>
+                      </div>
                     )}
                   </div>
                 );

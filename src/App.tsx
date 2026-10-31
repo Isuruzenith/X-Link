@@ -338,7 +338,7 @@ export default function App() {
       }
     }, 1000);
     return () => clearInterval(poll);
-  }, [setIsConnected, setConnectionStatus, setEffectiveProxyMode, setUptime, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
+  }, [setIsConnected, setConnectionStatus, setEffectiveProxyMode, setUptime, setCoreMetrics, updateTrafficStats, resetTrafficStats, recordTraffic, recordNewConnection]);
 
   // Debounced window resize event listener
   useEffect(() => {

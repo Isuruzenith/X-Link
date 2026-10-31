@@ -16,12 +16,17 @@ pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -
         "169.254.0.0/16".to_string(),
         "fc00::/7".to_string(),
         "fe80::/10".to_string(),
+        "1.1.1.1/32".to_string(),
+        "8.8.8.8/32".to_string(),
     ];
 
     if let Ok(ip) = dns_address.parse::<IpAddr>() {
-        match ip {
-            IpAddr::V4(addr) => addresses.push(format!("{}/32", addr)),
-            IpAddr::V6(addr) => addresses.push(format!("{}/128", addr)),
+        let cidr = match ip {
+            IpAddr::V4(addr) => format!("{}/32", addr),
+            IpAddr::V6(addr) => format!("{}/128", addr),
+        };
+        if !addresses.contains(&cidr) {
+            addresses.push(cidr);
         }
     }
 
@@ -282,7 +287,20 @@ pub fn select_best_dns_server(adapters: &[DetectedAdapter]) -> Option<IpAddr> {
     }
 
     fn is_valid_dns(ip: &IpAddr) -> bool {
-        !ip.is_loopback() && !ip.is_unspecified() && !is_tun_or_xlink_ip(ip)
+        if ip.is_loopback() || ip.is_unspecified() || is_tun_or_xlink_ip(ip) {
+            return false;
+        }
+        if let IpAddr::V6(v6) = ip {
+            let segs = v6.segments();
+            // Filter link-local (fe80::/10), site-local deprecated (fec0::/10), and multicast (ff00::/8)
+            let is_link_local = (segs[0] & 0xffc0) == 0xfe80;
+            let is_site_local = (segs[0] & 0xffc0) == 0xfec0;
+            let is_multicast = (segs[0] & 0xff00) == 0xff00;
+            if is_link_local || is_site_local || is_multicast {
+                return false;
+            }
+        }
+        true
     }
 
     fn is_xlink_or_tun_adapter(adapter: &DetectedAdapter) -> bool {
@@ -299,11 +317,24 @@ pub fn select_best_dns_server(adapters: &[DetectedAdapter]) -> Option<IpAddr> {
         .filter(|a| a.is_operational && !is_xlink_or_tun_adapter(a))
         .collect();
 
+    let find_adapter_dns = |a: &DetectedAdapter| -> Option<IpAddr> {
+        if a.has_ipv4_gateway {
+            if let Some(dns) = a
+                .dns_servers
+                .iter()
+                .find(|ip| ip.is_ipv4() && is_valid_dns(ip))
+            {
+                return Some(*dns);
+            }
+        }
+        a.dns_servers.iter().find(|ip| is_valid_dns(ip)).copied()
+    };
+
     // 1. Physical adapter with default gateway
     for a in &operational {
         if a.is_physical && (a.has_ipv4_gateway || a.has_ipv6_gateway) {
-            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
-                return Some(*dns);
+            if let Some(dns) = find_adapter_dns(a) {
+                return Some(dns);
             }
         }
     }
@@ -311,8 +342,8 @@ pub fn select_best_dns_server(adapters: &[DetectedAdapter]) -> Option<IpAddr> {
     // 2. Physical adapter without gateway
     for a in &operational {
         if a.is_physical {
-            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
-                return Some(*dns);
+            if let Some(dns) = find_adapter_dns(a) {
+                return Some(dns);
             }
         }
     }
@@ -320,16 +351,16 @@ pub fn select_best_dns_server(adapters: &[DetectedAdapter]) -> Option<IpAddr> {
     // 3. Any operational adapter with gateway
     for a in &operational {
         if a.has_ipv4_gateway || a.has_ipv6_gateway {
-            if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
-                return Some(*dns);
+            if let Some(dns) = find_adapter_dns(a) {
+                return Some(dns);
             }
         }
     }
 
     // 4. Any operational adapter with DNS
     for a in &operational {
-        if let Some(dns) = a.dns_servers.iter().find(|ip| is_valid_dns(ip)) {
-            return Some(*dns);
+        if let Some(dns) = find_adapter_dns(a) {
+            return Some(dns);
         }
     }
 
@@ -740,6 +771,66 @@ mod tests {
         assert!(
             excludes_v6.contains(&"2001:db8::53/128".to_string()),
             "Excludes must contain detected /128 IPv6 DNS"
+        );
+        assert!(
+            excludes.contains(&"1.1.1.1/32".to_string()),
+            "Excludes must contain bootstrap DNS 1.1.1.1/32"
+        );
+        assert!(
+            excludes.contains(&"8.8.8.8/32".to_string()),
+            "Excludes must contain bootstrap DNS 8.8.8.8/32"
+        );
+    }
+
+    #[test]
+    fn test_select_best_dns_server_prefers_ipv4_on_dual_stack_with_ipv4_gateway() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+
+        let adapters = vec![DetectedAdapter {
+            name: "Wi-Fi".to_string(),
+            description: "Intel Wi-Fi 6".to_string(),
+            is_physical: true,
+            is_operational: true,
+            has_ipv4_gateway: true,
+            has_ipv6_gateway: true,
+            dns_servers: vec![
+                IpAddr::V6("2402:4000::2".parse::<Ipv6Addr>().unwrap()),
+                IpAddr::V6("2402:4000::1".parse::<Ipv6Addr>().unwrap()),
+                IpAddr::V4(Ipv4Addr::new(192, 168, 8, 1)),
+            ],
+        }];
+
+        let selected = select_best_dns_server(&adapters);
+        assert_eq!(
+            selected,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 8, 1))),
+            "Dual-stack adapter with IPv4 gateway should prefer IPv4 DNS server"
+        );
+    }
+
+    #[test]
+    fn test_select_best_dns_server_filters_link_local_and_site_local_ipv6() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+
+        let adapters = vec![DetectedAdapter {
+            name: "Wi-Fi".to_string(),
+            description: "Wi-Fi Adapter".to_string(),
+            is_physical: true,
+            is_operational: true,
+            has_ipv4_gateway: false,
+            has_ipv6_gateway: true,
+            dns_servers: vec![
+                IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap()),
+                IpAddr::V6("fec0:0:0:ffff::1".parse::<Ipv6Addr>().unwrap()),
+                IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            ],
+        }];
+
+        let selected = select_best_dns_server(&adapters);
+        assert_eq!(
+            selected,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))),
+            "Should skip link-local and deprecated site-local IPv6 DNS"
         );
     }
 }

@@ -614,7 +614,9 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
                 .output();
 
             if enabled {
-                log::debug!("Skipping set_runas_admin(true) in debug mode to prevent cargo error 740");
+                log::debug!(
+                    "Skipping set_runas_admin(true) in debug mode to prevent cargo error 740"
+                );
                 return Ok(());
             }
         }
@@ -659,6 +661,109 @@ pub fn set_runas_admin(enabled: bool) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessInfo {
+    pub name: String,
+    pub pid: u32,
+}
+
+#[cfg(target_os = "windows")]
+pub fn list_running_processes() -> Vec<ProcessInfo> {
+    #[repr(C)]
+    struct PROCESSENTRY32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(dw_flags: u32, th32_process_id: u32) -> isize;
+        fn Process32FirstW(h_snapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
+        fn Process32NextW(h_snapshot: isize, lppe: *mut PROCESSENTRY32W) -> i32;
+        fn CloseHandle(h_object: isize) -> i32;
+    }
+
+    const TH32CS_SNAPPROCESS: u32 = 0x00000002;
+    let mut procs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == 0 || snapshot == -1 {
+            return procs;
+        }
+
+        let mut entry = std::mem::zeroed::<PROCESSENTRY32W>();
+        entry.dw_size = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                let null_pos = entry
+                    .sz_exe_file
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(entry.sz_exe_file.len());
+                let exe_name = String::from_utf16_lossy(&entry.sz_exe_file[..null_pos]);
+                let trimmed = exe_name.trim();
+                if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
+                    procs.push(ProcessInfo {
+                        name: trimmed.to_string(),
+                        pid: entry.th32_process_id,
+                    });
+                }
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    procs.sort_by_key(|p| p.name.to_lowercase());
+    procs
+}
+
+#[cfg(target_os = "linux")]
+pub fn list_running_processes() -> Vec<ProcessInfo> {
+    let mut procs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Ok(entries) = std::fs::read_dir("/proc") {
+        for entry in entries.flatten() {
+            if let Ok(name) = entry.file_name().into_string() {
+                if let Ok(pid) = name.parse::<u32>() {
+                    let comm_path = entry.path().join("comm");
+                    if let Ok(comm) = std::fs::read_to_string(comm_path) {
+                        let trimmed = comm.trim().to_string();
+                        if !trimmed.is_empty() && seen.insert(trimmed.to_lowercase()) {
+                            procs.push(ProcessInfo { name: trimmed, pid });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    procs.sort_by_key(|p| p.name.to_lowercase());
+    procs
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+pub fn list_running_processes() -> Vec<ProcessInfo> {
+    Vec::new()
+}
+
+#[tauri::command]
+pub fn get_running_processes() -> Result<Vec<ProcessInfo>, String> {
+    Ok(list_running_processes())
 }
 
 #[cfg(test)]
@@ -750,6 +855,17 @@ mod tests {
     fn test_set_runas_admin_debug_mode_safe() {
         // In debug mode, calling set_runas_admin(true) should succeed without leaving RUNASADMIN
         assert!(set_runas_admin(true).is_ok());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn test_list_running_processes_returns_processes() {
+        let procs = list_running_processes();
+        assert!(
+            !procs.is_empty(),
+            "Running processes list should not be empty"
+        );
+        assert!(procs.iter().all(|p| !p.name.is_empty()));
     }
 
     #[test]

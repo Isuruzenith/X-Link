@@ -96,11 +96,7 @@ pub fn get_process_metrics(pid: u32) -> (u64, f32) {
             ppsmem_counters: *mut PROCESS_MEMORY_COUNTERS,
             cb: u32,
         ) -> i32;
-        fn OpenProcess(
-            dw_desired_access: u32,
-            b_inherit_handle: i32,
-            dw_process_id: u32,
-        ) -> isize;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> isize;
         fn CloseHandle(h_object: isize) -> i32;
         fn GetProcessTimes(
             h_process: isize,
@@ -139,13 +135,7 @@ pub fn get_process_metrics(pid: u32) -> (u64, f32) {
         peak_pagefile_usage: 0,
     };
 
-    let mem_ok = unsafe {
-        K32GetProcessMemoryInfo(
-            handle,
-            &mut mem_counters,
-            mem_counters.cb,
-        )
-    };
+    let mem_ok = unsafe { K32GetProcessMemoryInfo(handle, &mut mem_counters, mem_counters.cb) };
 
     let memory_bytes = if mem_ok != 0 {
         mem_counters.working_set_size as u64
@@ -184,7 +174,8 @@ pub fn get_process_metrics(pid: u32) -> (u64, f32) {
                     let num_cpus = std::thread::available_parallelism()
                         .map(|n| n.get())
                         .unwrap_or(1) as f64;
-                    let pct = ((delta_proc_100ns as f64) / (elapsed_100ns as f64) / num_cpus) * 100.0;
+                    let pct =
+                        ((delta_proc_100ns as f64) / (elapsed_100ns as f64) / num_cpus) * 100.0;
                     (pct as f32).clamp(0.0, 100.0)
                 } else {
                     0.0
@@ -204,25 +195,100 @@ pub fn get_process_metrics(pid: u32) -> (u64, f32) {
     (memory_bytes, cpu_percent)
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn get_process_metrics(_pid: u32) -> (u64, f32) {
-    #[cfg(target_os = "linux")]
-    {
-        let status_path = format!("/proc/{}/status", _pid);
-        if let Ok(content) = std::fs::read_to_string(status_path) {
-            for line in content.lines() {
-                if line.starts_with("VmRSS:") {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        if let Ok(kb) = parts[1].parse::<u64>() {
-                            return (kb * 1024, 0.0);
-                        }
-                    }
-                }
+#[cfg(target_os = "linux")]
+fn parse_linux_process_times(stat: &str) -> Option<(u64, u64)> {
+    // The comm field may contain spaces and parentheses, so find its closing delimiter first.
+    let fields: Vec<_> = stat
+        .get(stat.rfind(')')? + 1..)?
+        .split_whitespace()
+        .collect();
+    let user_ticks = fields.get(11)?.parse::<u64>().ok()?;
+    let system_ticks = fields.get(12)?.parse::<u64>().ok()?;
+    let start_ticks = fields.get(19)?.parse::<u64>().ok()?;
+    Some((user_ticks.saturating_add(system_ticks), start_ticks))
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_process_metrics(pid: u32) -> (u64, f32) {
+    let status = match std::fs::read_to_string(format!("/proc/{pid}/status")) {
+        Ok(status) => status,
+        Err(_) => return (0, 0.0),
+    };
+    let memory_bytes = status
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("VmRSS:")?
+                .split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()
+        })
+        .unwrap_or(0)
+        .saturating_mul(1024);
+    let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat,
+        Err(_) => return (memory_bytes, 0.0),
+    };
+    let Some((ticks, start_ticks)) = parse_linux_process_times(&stat) else {
+        return (memory_bytes, 0.0);
+    };
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks_per_second <= 0 {
+        return (memory_bytes, 0.0);
+    }
+    static LAST_CPU: std::sync::Mutex<Option<(u32, u64, std::time::Instant, u64)>> =
+        std::sync::Mutex::new(None);
+    let now = std::time::Instant::now();
+    let mut last = LAST_CPU.lock().unwrap();
+    let cpu_percent = match *last {
+        Some((last_pid, last_start, at, last_ticks))
+            if last_pid == pid && last_start == start_ticks && ticks >= last_ticks =>
+        {
+            let seconds = now.duration_since(at).as_secs_f64();
+            let cores = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            if seconds > 0.0 {
+                ((ticks - last_ticks) as f64 / ticks_per_second as f64 / seconds / cores as f64
+                    * 100.0)
+                    .clamp(0.0, 100.0) as f32
+            } else {
+                0.0
             }
         }
+        _ => 0.0,
+    };
+    *last = Some((pid, start_ticks, now, ticks));
+    (memory_bytes, cpu_percent)
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_process_metrics(output: &str, cores: usize) -> Option<(u64, f32)> {
+    let mut fields = output.split_whitespace();
+    let resident_kb = fields.next()?.parse::<u64>().ok()?;
+    let cpu_per_core = fields.next()?.parse::<f32>().ok()?;
+    if !cpu_per_core.is_finite() || cpu_per_core < 0.0 || fields.next().is_some() {
+        return None;
     }
-    (0, 0.0)
+    Some((
+        resident_kb.saturating_mul(1024),
+        (cpu_per_core / cores.max(1) as f32).clamp(0.0, 100.0),
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub fn get_process_metrics(pid: u32) -> (u64, f32) {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "rss=", "-o", "%cpu="])
+        .output();
+    let Ok(output) = output else { return (0, 0.0) };
+    if !output.status.success() {
+        return (0, 0.0);
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    parse_macos_process_metrics(&String::from_utf8_lossy(&output.stdout), cores).unwrap_or((0, 0.0))
 }
 
 // Global variable to keep track of connection start time
@@ -373,15 +439,39 @@ mod startup_tests {
     fn test_get_process_metrics_self() {
         let current_pid = std::process::id();
         let (mem, cpu) = super::get_process_metrics(current_pid);
-        #[cfg(target_os = "windows")]
-        {
-            assert!(mem > 0, "Current process memory should be > 0 bytes, got {}", mem);
-            assert!(cpu >= 0.0 && cpu <= 100.0, "CPU percent should be 0-100%, got {}", cpu);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (mem, cpu);
-        }
+        assert!(
+            mem > 0,
+            "Current process memory should be > 0 bytes, got {}",
+            mem
+        );
+        assert!(
+            (0.0..=100.0).contains(&cpu),
+            "CPU percent should be 0-100%, got {}",
+            cpu
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_cpu_parser_handles_spaces_in_process_name_and_rejects_short_stat() {
+        let mut fields = vec!["0"; 22];
+        fields[11] = "14";
+        fields[12] = "6";
+        fields[19] = "123";
+        let stat = format!("42 (my (proxy) process) {}", fields.join(" "));
+        assert_eq!(super::parse_linux_process_times(&stat), Some((20, 123)));
+        assert_eq!(super::parse_linux_process_times("42 (process) S 1"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_metrics_parser_normalizes_cpu_and_rejects_invalid_values() {
+        assert_eq!(
+            super::parse_macos_process_metrics("2048 50.0", 2),
+            Some((2097152, 25.0))
+        );
+        assert_eq!(super::parse_macos_process_metrics("2048 -2", 2), None);
+        assert_eq!(super::parse_macos_process_metrics("garbage", 2), None);
     }
 }
 
@@ -490,23 +580,34 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
         }
         3 => {
             // Attempt 4 (attempt = 3): DNS Fallback (Switch DNS rules resolving proxy domains to direct query via public bootstrap dns)
-            // First, add public DNS servers detoured direct
+            // First, add public DNS servers detoured direct using modern sing-box typed format
             if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
                 if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
-                    // Check if already contains bootstrap-dns tags
+                    // Update local-dns to point to fallback public DNS
+                    for server in servers.iter_mut() {
+                        if server.get("tag").and_then(|t| t.as_str()) == Some("local-dns") {
+                            *server = crate::config::generator::parse_dns_server(
+                                "local-dns",
+                                FALLBACK_DNS_PRIMARY,
+                                Some("direct"),
+                            );
+                        }
+                    }
+
+                    // Add bootstrap-dns tags if not already present
                     if !servers.iter().any(|s| {
                         s.get("tag").and_then(|t| t.as_str()) == Some("fallback-bootstrap-1")
                     }) {
-                        servers.push(serde_json::json!({
-                            "tag": "fallback-bootstrap-1",
-                            "address": FALLBACK_DNS_PRIMARY,
-                            "detour": "direct"
-                        }));
-                        servers.push(serde_json::json!({
-                            "tag": "fallback-bootstrap-2",
-                            "address": FALLBACK_DNS_SECONDARY,
-                            "detour": "direct"
-                        }));
+                        servers.push(crate::config::generator::parse_dns_server(
+                            "fallback-bootstrap-1",
+                            FALLBACK_DNS_PRIMARY,
+                            Some("direct"),
+                        ));
+                        servers.push(crate::config::generator::parse_dns_server(
+                            "fallback-bootstrap-2",
+                            FALLBACK_DNS_SECONDARY,
+                            Some("direct"),
+                        ));
                     }
                 }
 
@@ -516,6 +617,51 @@ fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> R
                         // Find rule containing domain list
                         if rule.get("domain").is_some() {
                             rule["server"] = serde_json::json!("fallback-bootstrap-1");
+                        }
+                    }
+                }
+            }
+
+            // Ensure route.default_domain_resolver points to the fallback DNS
+            if let Some(route) = config_val.get_mut("route").and_then(|r| r.as_object_mut()) {
+                route.insert(
+                    "default_domain_resolver".to_string(),
+                    serde_json::json!("fallback-bootstrap-1"),
+                );
+            }
+
+            // Explicitly set domain_resolver on outbound proxy nodes so node dialling uses fallback DNS
+            if let Some(outbounds) = config_val
+                .get_mut("outbounds")
+                .and_then(|o| o.as_array_mut())
+            {
+                for outbound in outbounds {
+                    let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if ob_type != "direct" && ob_type != "block" && ob_type != "dns" {
+                        outbound["domain_resolver"] = serde_json::json!("fallback-bootstrap-1");
+                    }
+                }
+            }
+
+            // Ensure fallback DNS IPs are excluded from TUN interface routing
+            if let Some(inbounds) = config_val
+                .get_mut("inbounds")
+                .and_then(|i| i.as_array_mut())
+            {
+                for inbound in inbounds {
+                    if inbound.get("type").and_then(|t| t.as_str()) == Some("tun") {
+                        if let Some(excludes) = inbound
+                            .get_mut("route_exclude_address")
+                            .and_then(|e| e.as_array_mut())
+                        {
+                            let fb1 = serde_json::json!(format!("{}/32", FALLBACK_DNS_PRIMARY));
+                            let fb2 = serde_json::json!(format!("{}/32", FALLBACK_DNS_SECONDARY));
+                            if !excludes.contains(&fb1) {
+                                excludes.push(fb1);
+                            }
+                            if !excludes.contains(&fb2) {
+                                excludes.push(fb2);
+                            }
                         }
                     }
                 }
@@ -566,11 +712,15 @@ pub fn get_proxy_status(
     let tun_enabled = status == crate::state::ConnectionStatus::Connected
         && effective_proxy_mode.as_deref() == Some("tun");
 
-    let core_pid = state
-        .child_process
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|child| child.pid()));
+    let core_pid = if status == crate::state::ConnectionStatus::Connected {
+        state
+            .child_process
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|child| child.pid()))
+    } else {
+        None
+    };
 
     let (memory_bytes, cpu_percent) = if let Some(pid) = core_pid {
         get_process_metrics(pid)
@@ -726,19 +876,31 @@ pub async fn prepare_and_patch_config(
     let mut final_config_val: serde_json::Value = serde_json::from_str(&generated_config)
         .map_err(|e| format!("Generated config is invalid JSON: {}", e))?;
 
-    // Always inject Clash API experimental settings (required for dashboard, speed metrics, and connection monitoring)
-    let mut clash_api = serde_json::json!({
-        "external_controller": format!("127.0.0.1:{}", api_port)
-    });
-    if !api_secret.is_empty() {
-        clash_api["secret"] = serde_json::Value::String(api_secret.clone());
+    // Inject Clash API experimental settings if enabled and authenticated
+    if let Some(clash_api) = build_clash_api_config(
+        settings.api_enabled,
+        settings.api_port,
+        &settings.api_secret,
+        settings.api_cors,
+    ) {
+        let mut exp = final_config_val
+            .get("experimental")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        exp["clash_api"] = clash_api;
+        final_config_val["experimental"] = exp;
+    } else if let Some(exp) = final_config_val
+        .get_mut("experimental")
+        .and_then(|e| e.as_object_mut())
+    {
+        exp.remove("clash_api");
+        if exp.is_empty() {
+            final_config_val
+                .as_object_mut()
+                .unwrap()
+                .remove("experimental");
+        }
     }
-    // Allow CORS so the Tauri frontend (tauri://localhost) can communicate with the API
-    clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
-
-    final_config_val["experimental"] = serde_json::json!({
-        "clash_api": clash_api
-    });
 
     // Safe Overwrite (Transactional Write): Validate first
     let temp_config_path = config_path.with_extension("json.tmp");
@@ -761,6 +923,40 @@ pub async fn prepare_and_patch_config(
         .map_err(|e| format!("Failed to finalize active config write: {}", e))?;
 
     Ok((config_path, proxy_mode, api_port, api_secret))
+}
+
+/// Pure controller policy: builds the sing-box `experimental.clash_api` configuration.
+///
+/// Security constraints:
+/// 1. Controller is never enabled without authentication (requires a non-empty `api_secret`).
+/// 2. If `api_enabled` is false, returns `None` (controller is not started).
+/// 3. CORS wildcard (`*`) is never set when `api_cors` is false.
+pub fn build_clash_api_config(
+    api_enabled: bool,
+    api_port: u16,
+    api_secret: &str,
+    api_cors: bool,
+) -> Option<serde_json::Value> {
+    if !api_enabled {
+        return None;
+    }
+
+    let trimmed_secret = api_secret.trim();
+    if trimmed_secret.is_empty() {
+        // Controller must never start enabled without auth
+        return None;
+    }
+
+    let mut clash_api = serde_json::json!({
+        "external_controller": format!("127.0.0.1:{}", api_port),
+        "secret": trimmed_secret,
+    });
+
+    if api_cors {
+        clash_api["access_control_allow_origin"] = serde_json::json!(["*"]);
+    }
+
+    Some(clash_api)
 }
 
 #[allow(dead_code)]
@@ -821,7 +1017,7 @@ pub async fn switch_node_hot(
         .and_then(|mode| mode.clone());
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
-    let api_enabled = settings.api_enabled;
+    let api_enabled = settings.api_enabled && !api_secret.trim().is_empty();
 
     if state.get_status() == crate::state::ConnectionStatus::Connected && api_enabled {
         let (config_path, _, _, _) = match prepare_and_patch_config(
@@ -1264,100 +1460,115 @@ pub async fn toggle_proxy(
         }
     }
 
-    // Spawn background traffic monitoring task
-    let app_handle = app.clone();
-    let api_secret_clone = api_secret.clone();
-    tokio::spawn(async move {
-        let state_clone = app_handle.state::<crate::state::ProxyState>();
-        let client = reqwest::Client::new();
-        let url = format!("http://127.0.0.1:{}/connections", api_port);
-        let mut prev_upload = 0u64;
-        let mut prev_download = 0u64;
-        let mut consecutive_failures = 0;
+    // Spawn background traffic monitoring task only when API controller is active
+    let is_api_active = state.get_settings().api_enabled && !api_secret.trim().is_empty();
+    if is_api_active {
+        let app_handle = app.clone();
+        let api_secret_clone = api_secret.clone();
+        tokio::spawn(async move {
+            let state_clone = app_handle.state::<crate::state::ProxyState>();
+            let client = reqwest::Client::new();
+            let url = format!("http://127.0.0.1:{}/connections", api_port);
+            let mut prev_upload = 0u64;
+            let mut prev_download = 0u64;
+            let mut consecutive_failures = 0;
 
-        loop {
-            if !state_clone.is_running() {
-                break;
-            }
+            loop {
+                if !state_clone.is_running() {
+                    break;
+                }
 
-            let mut req = client.get(&url);
-            if !api_secret_clone.is_empty() {
-                req = req.header("Authorization", format!("Bearer {}", api_secret_clone));
-            }
+                let mut req = client.get(&url);
+                if !api_secret_clone.is_empty() {
+                    req = req.header("Authorization", format!("Bearer {}", api_secret_clone));
+                }
 
-            match req.send().await {
-                Ok(resp) => {
-                    #[derive(serde::Deserialize)]
-                    struct ConnectionsResponse {
-                        #[serde(rename = "uploadTotal")]
-                        upload_total: u64,
-                        #[serde(rename = "downloadTotal")]
-                        download_total: u64,
-                        connections: Vec<serde_json::Value>,
+                match req.send().await {
+                    Ok(resp) => {
+                        #[derive(serde::Deserialize)]
+                        struct ConnectionsResponse {
+                            #[serde(rename = "uploadTotal")]
+                            upload_total: u64,
+                            #[serde(rename = "downloadTotal")]
+                            download_total: u64,
+                            connections: Vec<serde_json::Value>,
+                        }
+
+                        if let Ok(data) = resp.json::<ConnectionsResponse>().await {
+                            consecutive_failures = 0;
+                            let mut up_speed = 0u64;
+                            let mut down_speed = 0u64;
+
+                            if prev_upload > 0 && data.upload_total >= prev_upload {
+                                up_speed = data.upload_total - prev_upload;
+                            }
+                            if prev_download > 0 && data.download_total >= prev_download {
+                                down_speed = data.download_total - prev_download;
+                            }
+
+                            prev_upload = data.upload_total;
+                            prev_download = data.download_total;
+
+                            if let Ok(mut up_b) = state_clone.upload_bytes.lock() {
+                                *up_b = data.upload_total;
+                            }
+                            if let Ok(mut down_b) = state_clone.download_bytes.lock() {
+                                *down_b = data.download_total;
+                            }
+                            if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+                                *up_s = up_speed;
+                            }
+                            if let Ok(mut down_s) = state_clone.download_speed.lock() {
+                                *down_s = down_speed;
+                            }
+                            if let Ok(mut conn) = state_clone.active_connections.lock() {
+                                *conn = data.connections.len() as u32;
+                            }
+
+                            // Update tray tooltip with live speed
+                            crate::tray::update_tray_tooltip(&app_handle);
+                        } else {
+                            consecutive_failures += 1;
+                        }
                     }
-
-                    if let Ok(data) = resp.json::<ConnectionsResponse>().await {
-                        consecutive_failures = 0;
-                        let mut up_speed = 0u64;
-                        let mut down_speed = 0u64;
-
-                        if prev_upload > 0 && data.upload_total >= prev_upload {
-                            up_speed = data.upload_total - prev_upload;
-                        }
-                        if prev_download > 0 && data.download_total >= prev_download {
-                            down_speed = data.download_total - prev_download;
-                        }
-
-                        prev_upload = data.upload_total;
-                        prev_download = data.download_total;
-
-                        if let Ok(mut up_b) = state_clone.upload_bytes.lock() {
-                            *up_b = data.upload_total;
-                        }
-                        if let Ok(mut down_b) = state_clone.download_bytes.lock() {
-                            *down_b = data.download_total;
-                        }
-                        if let Ok(mut up_s) = state_clone.upload_speed.lock() {
-                            *up_s = up_speed;
-                        }
-                        if let Ok(mut down_s) = state_clone.download_speed.lock() {
-                            *down_s = down_speed;
-                        }
-                        if let Ok(mut conn) = state_clone.active_connections.lock() {
-                            *conn = data.connections.len() as u32;
-                        }
-
-                        // Update tray tooltip with live speed
-                        crate::tray::update_tray_tooltip(&app_handle);
-                    } else {
+                    Err(_) => {
                         consecutive_failures += 1;
                     }
                 }
-                Err(_) => {
-                    consecutive_failures += 1;
+
+                if consecutive_failures > TRAFFIC_MAX_CONSECUTIVE_FAILURES {
+                    break;
                 }
+
+                tokio::time::sleep(std::time::Duration::from_secs(TRAFFIC_POLL_INTERVAL_SECS))
+                    .await;
             }
 
-            if consecutive_failures > TRAFFIC_MAX_CONSECUTIVE_FAILURES {
-                break;
-            }
+            if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+                *up_s = 0;
+            };
+            if let Ok(mut down_s) = state_clone.download_speed.lock() {
+                *down_s = 0;
+            };
+            if let Ok(mut conn) = state_clone.active_connections.lock() {
+                *conn = 0;
+            };
 
-            tokio::time::sleep(std::time::Duration::from_secs(TRAFFIC_POLL_INTERVAL_SECS)).await;
-        }
-
-        if let Ok(mut up_s) = state_clone.upload_speed.lock() {
+            // Reset tooltip on disconnect
+            crate::tray::update_tray_tooltip(&app_handle);
+        });
+    } else {
+        if let Ok(mut up_s) = state.upload_speed.lock() {
             *up_s = 0;
-        };
-        if let Ok(mut down_s) = state_clone.download_speed.lock() {
+        }
+        if let Ok(mut down_s) = state.download_speed.lock() {
             *down_s = 0;
-        };
-        if let Ok(mut conn) = state_clone.active_connections.lock() {
+        }
+        if let Ok(mut conn) = state.active_connections.lock() {
             *conn = 0;
-        };
-
-        // Reset tooltip on disconnect
-        crate::tray::update_tray_tooltip(&app_handle);
-    });
+        }
+        crate::tray::update_tray_tooltip(&app);
+    }
 
     // Enable system proxy if the final connection mode is 'system' (either by default or as a fallback)
     if current_mode == "system" {
@@ -1387,18 +1598,18 @@ pub async fn toggle_proxy(
 pub async fn get_active_connections(
     state: State<'_, crate::state::ProxyState>,
 ) -> Result<serde_json::Value, String> {
-    if !state.is_running() {
+    let settings = state.get_settings();
+    if !state.is_running() || !settings.api_enabled || settings.api_secret.trim().is_empty() {
         return Ok(serde_json::json!({ "connections": [] }));
     }
-    let api_port = state.get_settings().api_port;
-    let api_secret = state.get_settings().api_secret.clone();
+    let api_port = settings.api_port;
+    let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections", api_port);
 
     let client = reqwest::Client::new();
-    let mut req = client.get(&url);
-    if !api_secret.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_secret));
-    }
+    let req = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_secret));
 
     match req.send().await {
         Ok(resp) => {
@@ -1417,18 +1628,18 @@ pub async fn close_connection(
     id: String,
     state: State<'_, crate::state::ProxyState>,
 ) -> Result<(), String> {
-    if !state.is_running() {
+    let settings = state.get_settings();
+    if !state.is_running() || !settings.api_enabled || settings.api_secret.trim().is_empty() {
         return Ok(());
     }
-    let api_port = state.get_settings().api_port;
-    let api_secret = state.get_settings().api_secret.clone();
+    let api_port = settings.api_port;
+    let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections/{}", api_port, id);
 
     let client = reqwest::Client::new();
-    let mut req = client.delete(&url);
-    if !api_secret.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_secret));
-    }
+    let req = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", api_secret));
 
     match req.send().await {
         Ok(_) => Ok(()),
@@ -1440,21 +1651,165 @@ pub async fn close_connection(
 pub async fn close_all_connections(
     state: State<'_, crate::state::ProxyState>,
 ) -> Result<(), String> {
-    if !state.is_running() {
+    let settings = state.get_settings();
+    if !state.is_running() || !settings.api_enabled || settings.api_secret.trim().is_empty() {
         return Ok(());
     }
-    let api_port = state.get_settings().api_port;
-    let api_secret = state.get_settings().api_secret.clone();
+    let api_port = settings.api_port;
+    let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections", api_port);
 
     let client = reqwest::Client::new();
-    let mut req = client.delete(&url);
-    if !api_secret.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_secret));
-    }
+    let req = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", api_secret));
 
     match req.send().await {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_patch_config_for_fallback_dns_attempt_3() {
+        let temp_dir = std::env::temp_dir();
+        let config_path =
+            temp_dir.join(format!("test_patch_fallback_{}.json", uuid::Uuid::new_v4()));
+
+        let initial_config = serde_json::json!({
+            "dns": {
+                "servers": [
+                    { "tag": "local-dns", "type": "local", "detour": "direct" },
+                    { "tag": "remote-dns", "type": "https", "server": "https://1.1.1.1/dns-query", "detour": "proxy" }
+                ],
+                "rules": [
+                    { "domain": ["zoomconnector.duckdns.org"], "server": "local-dns" }
+                ]
+            },
+            "inbounds": [
+                {
+                    "type": "tun",
+                    "tag": "tun-in",
+                    "route_exclude_address": ["192.168.1.1/32"]
+                }
+            ],
+            "outbounds": [
+                {
+                    "type": "vless",
+                    "tag": "proxy-node",
+                    "server": "zoomconnector.duckdns.org",
+                    "server_port": 443
+                },
+                {
+                    "type": "direct",
+                    "tag": "direct"
+                }
+            ],
+            "route": {
+                "default_domain_resolver": "local-dns"
+            }
+        });
+
+        std::fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&initial_config).unwrap(),
+        )
+        .unwrap();
+
+        // Run Attempt 3 (DNS Fallback)
+        let result = patch_config_for_fallback(&config_path, 3);
+        assert!(result.is_ok(), "patch_config_for_fallback should succeed");
+
+        let patched_content = std::fs::read_to_string(&config_path).unwrap();
+        let patched: serde_json::Value = serde_json::from_str(&patched_content).unwrap();
+
+        let _ = std::fs::remove_file(&config_path);
+
+        // 1. Verify fallback servers exist with modern format
+        let servers = patched["dns"]["servers"].as_array().unwrap();
+        let fb1 = servers
+            .iter()
+            .find(|s| s["tag"] == "fallback-bootstrap-1")
+            .unwrap();
+        assert_eq!(fb1["type"], "udp");
+        assert_eq!(fb1["server"], FALLBACK_DNS_PRIMARY);
+        assert_eq!(fb1["server_port"], 53);
+        assert_eq!(fb1["detour"], "direct");
+        assert!(
+            fb1.get("address").is_none(),
+            "Must not use legacy address field"
+        );
+
+        // 2. Verify local-dns is updated to fallback public DNS
+        let local_dns = servers.iter().find(|s| s["tag"] == "local-dns").unwrap();
+        assert_eq!(local_dns["type"], "udp");
+        assert_eq!(local_dns["server"], FALLBACK_DNS_PRIMARY);
+
+        // 3. Verify domain rule points to fallback-bootstrap-1
+        let rules = patched["dns"]["rules"].as_array().unwrap();
+        assert_eq!(rules[0]["server"], "fallback-bootstrap-1");
+
+        // 4. Verify route.default_domain_resolver is updated
+        assert_eq!(
+            patched["route"]["default_domain_resolver"],
+            "fallback-bootstrap-1"
+        );
+
+        // 5. Verify outbound proxy node domain_resolver is updated
+        let outbounds = patched["outbounds"].as_array().unwrap();
+        let proxy_node = outbounds.iter().find(|o| o["tag"] == "proxy-node").unwrap();
+        assert_eq!(proxy_node["domain_resolver"], "fallback-bootstrap-1");
+
+        // 6. Verify route_exclude_address contains bootstrap DNS
+        let inbounds = patched["inbounds"].as_array().unwrap();
+        let tun = &inbounds[0];
+        let excludes = tun["route_exclude_address"].as_array().unwrap();
+        assert!(excludes
+            .iter()
+            .any(|e| e == &serde_json::json!(format!("{}/32", FALLBACK_DNS_PRIMARY))));
+        assert!(excludes
+            .iter()
+            .any(|e| e == &serde_json::json!(format!("{}/32", FALLBACK_DNS_SECONDARY))));
+    }
+
+    #[test]
+    fn test_clash_api_config_disabled() {
+        assert!(build_clash_api_config(false, 9090, "secret123", false).is_none());
+        assert!(build_clash_api_config(false, 9090, "secret123", true).is_none());
+        assert!(build_clash_api_config(false, 9090, "", false).is_none());
+    }
+
+    #[test]
+    fn test_clash_api_config_empty_or_missing_secret() {
+        // Controller must never start enabled without authentication
+        assert!(build_clash_api_config(true, 9090, "", false).is_none());
+        assert!(build_clash_api_config(true, 9090, "   ", false).is_none());
+        assert!(build_clash_api_config(true, 9090, "", true).is_none());
+    }
+
+    #[test]
+    fn test_clash_api_config_enabled_with_auth() {
+        let config = build_clash_api_config(true, 9090, "sec-token-xyz", false).unwrap();
+        assert_eq!(config["external_controller"], "127.0.0.1:9090");
+        assert_eq!(config["secret"], "sec-token-xyz");
+    }
+
+    #[test]
+    fn test_clash_api_config_origin_setting() {
+        // When api_cors is false: wildcard * must not be present or permitted
+        let no_cors = build_clash_api_config(true, 9090, "sec-token-xyz", false).unwrap();
+        assert!(
+            no_cors.get("access_control_allow_origin").is_none(),
+            "CORS wildcard must not be default/permitted when api_cors is false"
+        );
+
+        // When api_cors is true: explicitly allows wildcard
+        let with_cors = build_clash_api_config(true, 9090, "sec-token-xyz", true).unwrap();
+        let origins = with_cors["access_control_allow_origin"].as_array().unwrap();
+        assert_eq!(origins, &vec![serde_json::json!("*")]);
     }
 }

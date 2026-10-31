@@ -3,4 +3,5 @@ pub mod geo;
 pub mod latency;
 pub mod logs;
 pub mod proxy;
+pub mod subscription_schedule;
 pub mod system;

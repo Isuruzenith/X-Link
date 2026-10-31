@@ -152,6 +152,45 @@ pub fn has_block_rule(user_rules: &[RoutingRule]) -> bool {
         .any(|r| r.enabled.unwrap_or(true) && r.outbound == "block")
 }
 
+/// Windows reserved device names that cannot be used as file stems or names.
+pub const RESERVED_DEVICE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Validates that an untrusted rule-set tag is safe for file naming and path resolution.
+/// Rejects empty, oversized, path traversal, path separators, colons, control characters,
+/// and Windows reserved device names.
+pub fn validate_rule_set_tag(tag: &str) -> Result<(), String> {
+    if tag.is_empty() {
+        return Err("Rule-set tag cannot be empty".to_string());
+    }
+    if tag.len() > 64 {
+        return Err("Rule-set tag is too long (maximum 64 characters)".to_string());
+    }
+    if tag.starts_with('.') || tag.ends_with('.') {
+        return Err("Rule-set tag cannot start or end with a dot".to_string());
+    }
+    if tag.contains("..") {
+        return Err("Rule-set tag cannot contain consecutive dots ('..')".to_string());
+    }
+    if tag.contains('/') || tag.contains('\\') || tag.contains(':') {
+        return Err("Rule-set tag cannot contain path separators or colons".to_string());
+    }
+    for c in tag.chars() {
+        if !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+            return Err(format!("Rule-set tag contains invalid character '{}'", c));
+        }
+    }
+    let stem = tag.split('.').next().unwrap_or(tag);
+    for &reserved in RESERVED_DEVICE_NAMES {
+        if stem.eq_ignore_ascii_case(reserved) || tag.eq_ignore_ascii_case(reserved) {
+            return Err(format!("Rule-set tag '{}' is a reserved device name", tag));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +290,75 @@ mod tests {
     fn test_invalid_port_returns_none() {
         let rule = make_rule("port", "not_a_number", "direct");
         assert!(build_singbox_rule(&rule, true, true).is_none());
+    }
+
+    #[test]
+    fn test_validate_rule_set_tag_valid_names() {
+        assert!(validate_rule_set_tag("geoip-cn").is_ok());
+        assert!(validate_rule_set_tag("geosite-google").is_ok());
+        assert!(validate_rule_set_tag("my_rule_set").is_ok());
+        assert!(validate_rule_set_tag("custom-123").is_ok());
+        assert!(validate_rule_set_tag("adblock.v2").is_ok());
+    }
+
+    #[test]
+    fn test_validate_rule_set_tag_invalid_empty_and_oversized() {
+        assert!(validate_rule_set_tag("").is_err());
+        let normal_64 = "a".repeat(64);
+        assert!(validate_rule_set_tag(&normal_64).is_ok());
+        let oversized_65 = "a".repeat(65);
+        assert!(validate_rule_set_tag(&oversized_65).is_err());
+    }
+
+    #[test]
+    fn test_validate_rule_set_tag_path_traversal_and_separators() {
+        assert!(validate_rule_set_tag("../evil").is_err());
+        assert!(validate_rule_set_tag("..\\evil").is_err());
+        assert!(validate_rule_set_tag("..").is_err());
+        assert!(validate_rule_set_tag(".").is_err());
+        assert!(validate_rule_set_tag("/etc/passwd").is_err());
+        assert!(validate_rule_set_tag("\\Windows\\System32").is_err());
+        assert!(validate_rule_set_tag("C:\\evil").is_err());
+        assert!(validate_rule_set_tag("C:/evil").is_err());
+        assert!(validate_rule_set_tag("foo/bar").is_err());
+        assert!(validate_rule_set_tag("foo\\bar").is_err());
+        assert!(validate_rule_set_tag("foo:bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_rule_set_tag_reserved_device_names() {
+        assert!(validate_rule_set_tag("CON").is_err());
+        assert!(validate_rule_set_tag("con").is_err());
+        assert!(validate_rule_set_tag("PRN").is_err());
+        assert!(validate_rule_set_tag("prn").is_err());
+        assert!(validate_rule_set_tag("AUX").is_err());
+        assert!(validate_rule_set_tag("aux").is_err());
+        assert!(validate_rule_set_tag("NUL").is_err());
+        assert!(validate_rule_set_tag("nul").is_err());
+        assert!(validate_rule_set_tag("COM1").is_err());
+        assert!(validate_rule_set_tag("com9").is_err());
+        assert!(validate_rule_set_tag("LPT1").is_err());
+        assert!(validate_rule_set_tag("lpt9").is_err());
+        assert!(validate_rule_set_tag("CON.txt").is_err());
+        assert!(validate_rule_set_tag("aux.srs").is_err());
+
+        // Normal tags containing substring of reserved names are allowed
+        assert!(validate_rule_set_tag("con-cn").is_ok());
+        assert!(validate_rule_set_tag("auxiliary").is_ok());
+        assert!(validate_rule_set_tag("connect").is_ok());
+    }
+
+    #[test]
+    fn test_validate_rule_set_tag_illegal_characters() {
+        assert!(validate_rule_set_tag("tag|pipe").is_err());
+        assert!(validate_rule_set_tag("tag?wild").is_err());
+        assert!(validate_rule_set_tag("tag*star").is_err());
+        assert!(validate_rule_set_tag("tag<angle").is_err());
+        assert!(validate_rule_set_tag("tag>angle").is_err());
+        assert!(validate_rule_set_tag("tag\"quote").is_err());
+        assert!(validate_rule_set_tag("tag name").is_err());
+        assert!(validate_rule_set_tag(".leading_dot").is_err());
+        assert!(validate_rule_set_tag("trailing_dot.").is_err());
+        assert!(validate_rule_set_tag("double..dot").is_err());
     }
 }
