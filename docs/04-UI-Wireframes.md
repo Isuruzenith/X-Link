@@ -13,9 +13,10 @@ updated: 2026-11-03
 
 **Navigation**: [[00-Home-MOC]] | **Prev**: [[03-UI-Components-and-Views]] | **Next**: [[05-Rust-Backend-Architecture]] | **Related**: [[02-Frontend-UI-Architecture]]
 
-> [!NOTE] Window Geometry
+> [!NOTE] Window Geometry & Cross-Platform Ergonomics
 > Default native window dimensions (`src-tauri/tauri.conf.json`): **1080 × 700 px** (Minimum: **900 × 620 px**).
 > The layout is divided into a fixed **220px Left Navigation Rail (`NavRail`)** and a flexible **860px+ Main Viewport (`ViewShell`)**.
+> On **macOS**, `"titleBarStyle": "Overlay"` is enabled with a **72px top padding/inset (`pt-[72px]`)** in `NavRail` and primary headers to provide full clearance for native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
 
 ---
 
@@ -47,7 +48,7 @@ updated: 2026-11-03
 |  | [🇺🇸] US-West-1 |  |                                          | ========================-------- | |
 |  +----------------+  |                                          +----------------------------------+ |
 |  sing-box v1.13.14   |                                                        (ToastContainer.tsx)   |
-|  X-Link v0.6.0       |                                                                               |
+|  X-Link v0.8.0       |                                                                               |
 +----------------------+-------------------------------------------------------------------------------+
 ```
 
@@ -57,18 +58,17 @@ updated: 2026-11-03
 
 ```text
 +------------------------------------------------------------------------------------------------------+
-|  Dashboard                                     [Profile: Premium Sub v] [Mode: TUN] [● Protected 01:24:10]
+|  Dashboard            [Profile: Premium Sub v] [Outbound: ⚡ Auto-Fastest v] [Mode: TUN] [● Protected 01:24:10]
 |  Connect, switch servers and watch live traffic                                                      |
 +------------------------------------------------------------------------------------------------------+
-|  [!] (Conditional Banner) TUN mode needs Administrator rights; connecting now will use System Proxy  |
-|                                                                                     [ Run as Admin ] |
+|  [!] (Conditional Banner) TUN mode requires elevated helper privileges               [ Grant Privileges ]
 +------------------------------------------------------------------------------------------------------+
 |  HERO CONTROL STRIP (.dashboard-control-strip)                                                       |
 |  +----------------------------------------+--------------------------------------------------------+ |
 |  |  +--------------+                      |  Download        |  Upload          |  Active | Engine | |
 |  |  |   ( ⏻ )      |  Connected           |  14.2 MB/s       |  1.8 MB/s        |  42     | 38 MB  | |
-|  |  | Disconnect   |  🇺🇸 US-West-Reality  |  1.42 GB total   |  184.5 MB total  |  :7892  | 1.2%   | |
-|  |  +--------------+  [⚡ URL Test: 84ms] |                  |                  |  Mixed  | PID 912| |
+|  |  | Disconnect   |  ⚡ Auto-Fastest      |  1.42 GB total   |  184.5 MB total  |  :7892  | 1.2%   | |
+|  |  +--------------+  -> SG-02 (42ms URL) |                  |                  |  Mixed  | PID 912| |
 |  +----------------------------------------+--------------------------------------------------------+ |
 |                                                                                                      |
 |  MAIN SPLIT GRID (.dashboard-main-grid)                                                              |
@@ -210,31 +210,40 @@ updated: 2026-11-03
 
 ```text
 +------------------------------------------------------------------------------------------------------+
-|  Routing                             [● Connected — edits restart tunnel] [+ Add Rule] [+ Add Rule Set]
-|  Decide which domains, IPs and apps use the proxy or connect directly                                |
+|  Routing                             [● Connected — edits restart tunnel] [+ Add Rule] [+ Add Group] [+ Add Rule Set]
+|  Decide which domains, IPs and apps use the proxy, groups, or connect directly                       |
 +------------------------------------------------------------------------------------------------------+
 |  ROUTING PRIMARY COLUMN (.routing-primary)          |  ROUTING ASIDE (.routing-aside)                |
 |  +-----------------------------------------------+  |  +-------------------------------------------+ |
-|  | (Inline Editor when +Add Rule or Edit open)   |  |  | Global Routing Policy  [Requires restart] | |
-|  | Match Type          | Target Action           |  |  |-------------------------------------------| |
-|  | [ Process Name   v] | [ Direct             v] |  |  | Default Route (Final Outbound)            | |
-|  | Pick running process: [ chrome.exe         v] |  |  | [ Proxy (Tunnel all unmatched traffic) v] | |
-|  | Process name (.exe):  [ chrome.exe          ] |  |  |                                           | |
-|  | Notes:                [ Bypass browser      ] |  |  | Bypass LAN & Private Networks        [●]  | |
-|  | [ ] Invert Match        [Cancel] [Save Rule]  |  |  | Send local network traffic directly       | |
+|  | Outbound Groups                           [2] |  |  | Global Routing Policy  [Requires restart] | |
+|  |-----------------------------------------------|  |  |-------------------------------------------| |
+|  | ⚡ Auto-Fastest            [urltest] (300s)   |  |  | Default Route (Final Outbound)            | |
+|  |   Members: [SG-01] [SG-02] [HK-01]        ✎ 🗑|  |  | [ ⚡ Auto-Fastest                      v] | |
+|  | 🛡 Fallback-Pool           [fallback]         |  |  |                                           | |
+|  |   Members: [US-West] [Home-WG]            ✎ 🗑|  |  | Bypass LAN & Private Networks        [●]  | |
+|  +-----------------------------------------------+  |  | Send local network traffic directly       | |
+|                                                     |  +-------------------------------------------+ |
+|  +-----------------------------------------------+  |                                                |
+|  | (Inline Editor when +Add Rule or Edit open)   |  |  +-------------------------------------------+ |
+|  | Match Type          | Target Action           |  |  | Rule Sets                             [1] | |
+|  | [ Process Name   v] | [ ⚡ Auto-Fastest    v] |  |  |-------------------------------------------| |
+|  | Pick running process: [ chrome.exe         v] |  |  | geosite-ads                               | |
+|  | Process name (.exe):  [ chrome.exe          ] |  |  | remote · binary                      🔄 🗑| |
+|  | Notes:                [ Route browser via pool]  |  | https://.../geosite-category-ads-all.srs  | |
+|  | [ ] Invert Match        [Cancel] [Save Rule]  |  |  | Updated: 11/03/2026, 09:00 AM             | |
 |  +-----------------------------------------------+  |  +-------------------------------------------+ |
 |                                                     |                                                |
-|  +-----------------------------------------------+  |  +-------------------------------------------+ |
-|  | Routing Rules                             [4] |  |  | Rule Sets                             [1] | |
-|  |-----------------------------------------------|  |  |-------------------------------------------| |
-|  | #  | On  | Type         | Value     | Route   |  |  | geosite-ads                               | |
-|  |----+-----+--------------+-----------+---------|  |  | remote · binary                      🔄 🗑| |
-|  | #1 | [●] | [GEOIP]      | private   | [DIRECT]|✎🗑|  | https://.../geosite-category-ads-all.srs  | |
-|  |    |     |              | Bypass LAN|         |  |  | Updated: 11/03/2026, 09:00 AM             | |
-|  |----+-----+--------------+-----------+---------|  |  +-------------------------------------------+ |
+|  +-----------------------------------------------+  |                                                |
+|  | Routing Rules                             [4] |  |                                                |
+|  |-----------------------------------------------|  |                                                |
+|  | #  | On  | Type         | Value     | Route   |  |                                                |
+|  |----+-----+--------------+-----------+---------|  |                                                |
+|  | #1 | [●] | [GEOIP]      | private   | [DIRECT]|✎🗑|                                                |
+|  |    |     |              | Bypass LAN|         |  |                                                |
+|  |----+-----+--------------+-----------+---------|  |                                                |
 |  | #2 | [●] | [GEOSITE]    | private   | [DIRECT]|✎🗑|                                                |
 |  |----+-----+--------------+-----------+---------|  |                                                |
-|  | #3 | [●] | [PROCESS]    | steam.exe | [DIRECT]|✎🗑|                                                |
+|  | #3 | [●] | [PROCESS]    | chrome.exe| [GROUP] |✎🗑|                                                |
 |  |----+-----+--------------+-----------+---------|  |                                                |
 |  | #4 | [●] | [PROTOCOL]   | dns       | [DNS]   |✎🗑|                                                |
 |  +-----------------------------------------------+  |                                                |
@@ -310,7 +319,7 @@ updated: 2026-11-03
 |                    |  | Node Geolocation Lookup      [ ]  | [ ☀ Light  |  🌙 Dark  |  🖥 System ]   | |
 |                    |  |-----------------------------------+----------------------------------------+ |
 |                    |  | Connection Optimization           | [Logo] X-Link Empowered by sing-box    | |
-|                    |  | Enable Multiplexing (Mux)    [ ]  |                                [v0.6.0]| |
+|                    |  | Enable Multiplexing (Mux)    [ ]  |                                [v0.8.0]| |
 |                    |  +-----------------------------------+----------------------------------------+ |
 |                    |                                                                                 |
 |                    |  === [2. TUN MODE TAB] ===                                                      |
@@ -345,9 +354,21 @@ updated: 2026-11-03
 |                    |  | System Health & Bundle                                      [Privacy Safe] | |
 |                    |  | [Admin: Yes] [Core: Running] [Mode: TUN] [Conflicts: None]                 | |
 |                    |  | [📋 Generate Diagnostics] [Copy JSON] [⬇ Download Report]  [Show Preview]  | |
+|                    |  | (Includes embedded 500-record DNS exchange & routing decision ring buffers)| |
 |                    |  |----------------------------------------------------------------------------| |
-|                    |  | Configuration Backup & Restore                          [Contains secrets] | |
+|                    |  | Configuration Backup & Restore (Encrypted v2)           [Contains secrets] | |
+|                    |  | Passphrase (Optional): [ •••••••••••••••• ]                                | |
 |                    |  | [⬇ Export backup]  [📂 Inspect backup file]                                | |
+|                    |  |                                                                            | |
+|                    |  | [!] Inspecting "xlink-backup-20261103.enc.json":                           | |
+|                    |  |     Format: v2 (AES-256-GCM + Argon2id) · Requires Passphrase: Yes         | |
+|                    |  |     [ Passphrase Prompt Modal: Enter Passphrase to Unlock Archive ]        | |
+|                    |  |     Unlocked Content: 2 profiles, 18 rules, app settings                   | |
+|                    |  |     Select sections to restore:                                            | |
+|                    |  |     [✓] Profiles and node configs                                          | |
+|                    |  |     [✓] Application settings                                               | |
+|                    |  |     [✓] Custom routing rules and rule-sets                                 | |
+|                    |  |     [  🔄 Restore Selected Sections (Disabled while connected)  ]         | |
 |                    |  |----------------------------------------------------------------------------| |
 |                    |  | Routing Rule & DNS Simulation                                   [Simulate] | |
 |                    |  | Destination: [ google.com                                 ] [▶ Simulate]   | |

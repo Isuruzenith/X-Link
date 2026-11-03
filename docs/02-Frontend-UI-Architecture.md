@@ -27,7 +27,10 @@ The X-Link frontend (`src/`) is a single-page desktop application engineered for
 - **Material Web (`@material/web ^2.4.1`) & Material Symbols**:
   - Uses Google's `<md-icon>` custom element wrapped in `src/components/ui/icon.tsx` (`<Icon name="..." size={16} />`) rendering the **Material Symbols Rounded** variable icon font.
 - **Radix / Base UI Primitives (`@base-ui/react`, `class-variance-authority`, `clsx`, `tailwind-merge`)**: Powers accessible primitives in `src/components/ui/` (`Button`, `Card`, `Badge`, `Sheet`, `Switch`, `Select`, `Table`, `ScrollArea`, `Separator`, `Input`).
-- **Virtualized Rendering (`react-window ^2.2.7`)**: Powers `LogsView.tsx` to render up to 2,000 syntax-highlighted log lines at `28px` fixed row height with zero DOM bloat.
+- **Virtualized Rendering (`react-window ^2.2.7`)**: Powers both `LogsView.tsx` (up to 2,000 syntax-highlighted log lines) and `ConnectionsView.tsx` (real-time active sockets table) at fixed row heights with zero DOM bloat and 60 FPS scrolling.
+- **Cross-Platform Window Ergonomics**:
+  - `tauri.conf.json` configures `"titleBarStyle": "Overlay"` for macOS.
+  - Runtime macOS detection (`/Mac/.test(navigator.userAgent || '')`) injects a 72px top padding/inset (`pt-[72px]`) into `NavRail` and primary view headers to accommodate native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
 
 ### Theme Architecture (`dark` | `light` | `system`)
 - Controlled by `useSettingsStore().setTheme(theme)`.

@@ -16,7 +16,7 @@ updated: 2026-11-03
 
 ---
 
-## 1. Complete Tauri `invoke()` Command Reference (38 Commands)
+## 1. Complete Tauri `invoke()` Command Reference (49 Commands)
 
 All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handler![...]`. Note that Tauri v2 automatically maps Rust `snake_case` parameter names to JavaScript `camelCase` keys in the `invoke('cmd', { camelCaseArg })` payload.
 
@@ -29,9 +29,11 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `reload_active_config` | `{ selectedOutboundTag: string \| null }` | `string` (`"reloaded"`) | Validates candidate config first; if connected, stops old child and restarts with rollback protection. |
 | `switch_node_hot` | `{ tag: string }` | `string` (`"switched"`) | Hot-switches the active node via Clash API `PUT /proxies/proxy` if `apiEnabled` & connected; otherwise cold-restarts. |
 | `get_traffic_stats` | `{}` | `TrafficStats` (`uploadSpeed`, `downloadSpeed`, `uploadTotal`, `downloadTotal`, `activeConnections`, `corePid`, `memoryBytes`, `cpuPercent`) | Queries Clash API `/connections` + `sysinfo` for live 1-second telemetry. |
-| `get_active_connections` | `{}` | `serde_json::Value` (`{ connections: ConnectionEntry[] }`) | Proxies `GET http://127.0.0.1:{apiPort}/connections` with Bearer auth. |
+| `get_active_connections` | `{}` | `ConnectionsPayload` (`connections: ActiveConnection[]`, `totalConnections`, `downloadTotal`, `uploadTotal`) | Proxies `GET http://127.0.0.1:{apiPort}/connections` with 800ms timeout and top-100 throughput windowing. |
 | `close_connection` | `{ id: string }` | `()` | Proxies `DELETE http://127.0.0.1:{apiPort}/connections/{id}`. |
 | `close_all_connections` | `{}` | `()` | Proxies `DELETE http://127.0.0.1:{apiPort}/connections`. |
+| `get_proxy_group_status` | `{ group: string }` | `ProxyGroupInfo` (`group`, `winningTag`, `delay?`) | Queries Clash API `GET /proxies/{group}` to resolve current winning node and latency for automated Outbound Groups. |
+| `get_diagnostic_traces` | `{}` | `DiagnosticTracesPayload` (`dnsQueries: DnsLogEntry[]`, `traces: TraceEntry[]`) | Retrieves live ring-buffered telemetry (500 records each) for DNS query exchanges and routing rule matches. |
 
 ---
 
@@ -50,7 +52,7 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `delete_profile_config` | `{ profileId: string }` | `string` (`"deleted"`) | Deletes `profiles/{profileId}.json` (refuses if `profileId` is still the active profile of a running session). |
 | `get_profile_outbounds` | `{ profileId: string }` | `ProxyNode[]` | Reads user-selectable proxy outbounds from `profiles/{profileId}.json`. |
 | `get_config_outbounds` | `{}` | `ProxyNode[]` | Reads user-selectable proxy outbounds from `configs/active.json`. |
-| `get_active_outbound` | `{}` | `ProxyNode` | Returns the currently selected default outbound node in `configs/active.json`. |
+| `get_active_outbound` | `{}` | `ProxyNode` | Returns the currently selected default outbound node in `configs/active.json`, verifying Outbound Groups before fallback. |
 | `update_node` | `{ newOutbound: Value }` | `string` (`"updated"`) | Inserts or updates a node by `tag` in both `configs/active.json` and `profiles/{activeProfileId}.json`, validates via `sing-box check`, and reloads if connected. |
 | `delete_node` | `{ tag: string }` | `string` (`"deleted"`) | Deletes a node by `tag` from the active profile and `active.json`, updates `nodeCount`/`selectedNodeTag`, and reloads if connected. |
 | `update_rule_set` | `{ ruleSetId: string, url: string }` | `string` (saved file path) | Downloads a remote `.srs` or `.json` rule-set file into `app_data_dir()/rule-sets/`. |
@@ -62,16 +64,17 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | Command Name | JS Arguments (`camelCase`) | Return Type | Description |
 | :--- | :--- | :--- | :--- |
 | `get_singbox_version` | `{}` | `string` | Runs `sing-box version`, caches the semver string (`"1.13.14"`), and returns it. |
-| `get_app_version` | `{}` | `string` | Returns `env!("CARGO_PKG_VERSION")` (`"0.6.0"`). |
+| `get_app_version` | `{}` | `string` | Returns `env!("CARGO_PKG_VERSION")` (`"0.8.0"`). |
 | `is_minimized_launch` | `{}` | `boolean` | Returns `true` if process was started with `--minimized`. |
 | `show_window` | `{}` | `()` | Reveals, unminimizes, and focuses the `"main"` WebView window. |
 | `check_port_conflict` | `{ ports: u16[] }` | `u16 \| null` | Returns the first port in `ports` bound by an external process (ignoring X-Link's own `sing-box` child). |
 | `check_port_status` | `{ ports: u16[] }` | `Record<u16, 'free' \| 'own' \| 'external'>` | Classifies each port as `free`, bound by X-Link (`own`), or bound by another app (`external`). |
-| `set_autostart` | `{ enabled: boolean }` | `()` | Writes/removes `X-Link` (`"path\to\x-link.exe" --minimized`) in `HKCU\...\Run` on Windows. |
-| `check_tun_support` | `{}` | `boolean` | Returns `true` if the current process is elevated (Administrator on Windows / `euid == 0` on Unix). |
-| `request_elevation` | `{}` | `()` | Relaunches X-Link via UAC `Start-Process -Verb RunAs` and exits the current instance. |
+| `set_autostart` | `{ enabled: boolean }` | `()` | Configures desktop autostart across Windows (Registry), macOS (LaunchAgent), and Linux (XDG autostart). |
+| `check_tun_support` | `{}` | `boolean` | Backward-compatible boolean check returning `true` only if `check_tun_support_status == Supported`. |
+| `check_tun_support_status` | `{}` | `TunSupportStatus` (`'supported' \| 'requiresElevation' \| 'driverMissing' \| 'unsupported'`) | Structured readiness check verifying drivers (`wintun.dll`), helper binaries, and OS elevation state. |
+| `request_elevation` | `{}` | `()` | Requests platform-specific elevation (`RunAs` on Windows, staged sudoers helper on macOS, `pkexec setcap` on Linux). |
 | `set_runas_admin` | `{ enabled: boolean }` | `()` | Sets/removes `RUNASADMIN` compatibility flag in Windows Registry. |
-| `get_running_processes` | `{}` | `string[]` | Returns sorted, deduplicated `.exe` process names via `sysinfo` for the Routing rule picker. |
+| `get_running_processes` | `{}` | `string[]` | Returns sorted, deduplicated process names via `sysinfo` for the Routing rule picker. |
 | `get_buffered_logs` | `{}` | `string[]` | Returns all lines currently stored in `ProxyState.log_buffer`. |
 
 ---
@@ -86,11 +89,11 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `test_all_nodes_url_latency` | `{ profileId?: string, url?: string, timeoutMs?: u64 }` | `LatencyResult[]` | Runs concurrent Clash API `/delay` tests across all nodes (max **6** concurrent via `Semaphore`). |
 | `test_active_proxy_url` | `{ url?: string, timeoutMs?: u64 }` | `u64` (ms) | Tests end-to-end delay of the master `"proxy"` selector via Clash API. |
 | `lookup_node_geo` | `{ server: string }` | `NodeGeoInfo` | Consent-gated (`settings.geoLookupEnabled == true`) lookup of literal **public** IPs via `https://freeipapi.com/api/json/{ip}`. Never sends domain names or private IPs. |
-| `export_system_diagnostics` | `{}` | `DiagnosticsReport` | Generates a sanitized JSON health bundle with `[REDACTED]` secrets and scrubbed IPs/UUIDs in recent logs. |
+| `export_system_diagnostics` | `{}` | `DiagnosticsReport` | Generates a sanitized JSON health bundle with `[REDACTED]` secrets, scrubbed IPs, and embedded DNS/trace buffers. |
 | `simulate_routing` | `{ destination: string }` | `RoutingSimulationResult` | Offline evaluator explaining which rule (`ip_cidr`, `domain_suffix`, `geoip`, `geosite`, LAN bypass, or `finalOutbound`) and DNS strategy matches a target host/IP. |
-| `export_config_backup` | `{}` | `ConfigBackupArchive` | Exports `settings.json`, `profiles.json`, `profiles/*.json`, and `routing.json` into a single JSON archive (`schemaVersion: 1`). |
-| `validate_backup_archive` | `{ archive: ConfigBackupArchive }` | `BackupValidationResult` | Validates backup schema version, profile UUIDs, and rule counts before restore. |
-| `import_config_backup` | `{ archive: ConfigBackupArchive, options: RestoreOptions }` | `{ message: string }` | Atomically restores selected sections (`restoreSettings`, `restoreProfiles`, `restoreRouting`) while disconnected. |
+| `export_config_backup` | `{ passphrase?: string \| null }` | `Value` (JSON envelope) | Exports settings, profiles, and routing into an encrypted v2 archive (AES-256-GCM + Argon2id) or unencrypted v1 JSON. |
+| `validate_backup_archive` | `{ archive: Value, passphrase?: string \| null }` | `BackupValidationResult` | Validates archive envelope, enforcing cryptographic bounds (`1024 KiB <= memoryCost <= 65536 KiB`, `iterations <= 10`, `parallelism = 1`). Returns `requiresPassphrase: true` challenge on encrypted archives when no passphrase is provided. |
+| `import_config_backup` | `{ archive: Value, options: RestoreOptions, passphrase?: string \| null }` | `RestoreResult` (`{ message: string }`) | Decrypts and restores selected sections while disconnected, preventing lock-ordering deadlocks and emitting `config-backup-restored`. |
 
 ---
 
@@ -105,6 +108,7 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `node-switched` | `tray.rs` (Tray radio menu click) | `{ profileId: string, tag: string }` | Calls `useProfileStore.getState().syncNodeFromTray(profileId, tag)`. |
 | `subscription-auto-updated` | `commands/subscription_schedule.rs` | `{ profileId: string, profileName: string, nodeCount: usize }` | Reloads profiles (`storeHelper.reloadProfiles()`), refreshes nodes, and shows info toast. |
 | `subscription-update-error` | `commands/subscription_schedule.rs` | `{ profileId: string, profileName: string, error: string }` | Logs error and shows warning toast. |
+| `config-backup-restored` | `commands/backup.rs` | `()` | Reloads all frontend stores (`storeHelper.reload*()`) and refreshes Zustand state after backup restoration. |
 
 ---
 

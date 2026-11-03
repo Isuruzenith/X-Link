@@ -126,13 +126,14 @@ flowchart LR
 The primary operational command center (`noScroll` flex layout):
 1. **Header Actions**:
    - **Active Profile Selector Dropdown** (when $>1$ profile exists) allowing instant profile switching.
-   - **Active Mode Pill**: Shows `"TUN"` or `"System Proxy"`, plus `"Fallback: System Proxy"` if TUN fell back.
+   - **Primary Egress Selector**: Lists user Outbound Groups (`urltest`, `fallback`, `selector`) alongside individual profile proxy nodes. When an Outbound Group is active, queries `get_proxy_group_status` to display the dynamic winning node and latency ("Auto-Fastest -> Singapore 02 - 42ms").
+   - **Active Mode Pill**: Shows `"TUN"` or `"System Proxy"`.
    - **Connection Status Pill**: Shows `"Protected · HH:MM:SS"` (green), `"Connecting..."` (amber), or `"Unprotected"` (muted).
 2. **Conditional Alert Banners**:
-   - **Elevation Warning Banner**: Shown when `settings.proxyMode === 'tun' && !isElevated`. Displays *"TUN mode needs Administrator rights; connecting now will use System Proxy"* with a **"Run as Admin"** button (`requestElevation`).
+   - **Elevation Warning Banner**: Shown when `settings.proxyMode === 'tun' && tunSupportStatus === 'requiresElevation'`. Displays *"TUN mode requires elevated helper privileges"* with a **"Grant Privileges"** button (`requestElevation`).
    - **Port Conflict Banner**: Shown when `conflictingPorts.length > 0`. Lists conflicting ports (`7890`, `7892`, etc.) with a **"Change Ports"** button that navigates to `Settings`.
 3. **Hero Control Strip (`.dashboard-control-strip`)**:
-   - **Left (`Connect Action`)**: Large Connect/Disconnect button (`is-connected` / `is-connecting` / `is-disconnected`), connection state heading (`"Connected"` / `"Ready to Connect"` / `"Import a Profile"`), active server tag, and quick action buttons (**"Test Active Tunnel"** URL delay check `test_active_proxy_url` when connected, or **"Import Profile"** when empty).
+   - **Left (`Connect Action`)**: Large Connect/Disconnect button (`is-connected` / `is-connecting` / `is-disconnected`), connection state heading (`"Connected"` / `"Ready to Connect"` / `"Import a Profile"`), active server/group tag, and quick action buttons (**"Test Active Tunnel"** URL delay check `test_active_proxy_url` when connected, or **"Import Profile"** when empty).
    - **Right (`Live Telemetry Strip`)**:
      - `Download`: Live speed (`MB/s`) + cumulative download (`GB`).
      - `Upload`: Live speed (`MB/s`) + cumulative upload (`GB`).
@@ -176,24 +177,27 @@ Manages subscription profiles, manual profiles, and configuration imports:
 ---
 
 ### 4.3 `RoutingView` (`src/views/RoutingView.tsx`)
-Configures domain/IP/process split-tunneling rules and remote rule-sets:
+Configures domain/IP/process split-tunneling rules, Outbound Groups, and remote rule-sets:
 1. **Header Actions**:
    - **"Connected — edits restart tunnel"** badge when `isConnected`.
-   - **"+ Add Rule"** button and **"+ Add Rule Set"** button.
+   - **"+ Add Rule"** button, **"+ Add Outbound Group"** button, and **"+ Add Rule Set"** button.
 2. **Main 2-Column Layout (`.routing-layout`)**:
    - **Left Column (`.routing-primary`)**:
      - **Inline Rule Editor Card** (when adding or editing a rule):
        - `Match Type` (`domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `ip_cidr`, `geoip`, `geosite`, `port`, `port_range`, `protocol`, `process_name`, `rule_set`, `network`, `package_name`).
-       - `Target Action` (`proxy`, `direct`, `block`, `dns`).
+       - `Target Action` selector: Supports standard actions (`proxy`, `direct`, `block`, `dns`) plus dynamically listing any configured Outbound Group tags.
        - `Match Value` input:
          - When `type === 'process_name'`, displays a **"Pick running process"** dropdown populated via `invoke('get_running_processes')` alongside a custom `.exe` input!
          - When `type === 'geoip'` or `'geosite'`, displays quick-pick chips (`private`, `cn`, `us`, `google`, `youtube`, `netflix`, `openai`, `category-ads-all`, etc.).
        - `Notes` input and `Invert Match` checkbox.
+     - **Outbound Groups Card**:
+       - Lists configured Outbound Groups (`urltest`, `fallback`, `selector`) with type badge, member count, and test interval (floor 300s).
+       - Create/edit modal allows defining `tag`, `type`, member nodes selector (capped at 10 for automated pools), and health-check interval.
      - **Routing Rules Table Card**:
-       - Lists all rules in priority order (`#1`, `#2`, ...) with `Enable/Disable` `<Switch>`, `Type` badge, `Value` (plus `NOT` badge if inverted), `Route` action badge (`PROXY` primary, `DIRECT` green, `BLOCK` red, `DNS` outline), `Edit`, and `Delete` buttons.
+       - Lists all rules in priority order (`#1`, `#2`, ...) with `Enable/Disable` `<Switch>`, `Type` badge, `Value` (plus `NOT` badge if inverted), `Route` action badge (handled via `BadgeOutbound` supporting standard actions and custom group fallback variants `bg-secondary text-secondary-foreground`), `Edit`, and `Delete` buttons.
    - **Right Column (`.routing-aside`)**:
      - **Global Routing Policy Card**:
-       - `Default Route (Final Outbound)` selector (`Proxy`, `Direct`, `Block`).
+       - `Default Route (Final Outbound)` selector (`Proxy`, `Direct`, `Block`, or custom Outbound Group).
        - `Bypass LAN & Private Networks` switch (`settings.bypassLan`).
      - **Rule Sets Card**:
        - Lists remote/local `.srs`/`.json` rule sets (`geosite-cn`, etc.) with **"Update"** (`updateRuleSet`) and **"Delete"** buttons, plus an inline form to add new remote/local rule sets.
@@ -201,13 +205,17 @@ Configures domain/IP/process split-tunneling rules and remote rule-sets:
 ---
 
 ### 4.4 `ConnectionsView` (`src/views/ConnectionsView.tsx`)
-Real-time socket inspector polling `get_active_connections` every `1000ms` while connected:
-1. **Header Actions**: **"Close All"** destructive button (`close_all_connections` with confirmation dialog).
-2. **Toolbar**:
+Real-time socket inspector polling `get_active_connections` every `1000ms` while connected and visible:
+1. **Lifecycle & Polling Guards**:
+   - Polling loop is view-gated: only polls while the component is mounted and `document.visibilityState === 'visible'`.
+   - Protects against connection churn with an 800ms read timeout and a 10-second circuit breaker on consecutive timeouts.
+2. **Header Actions**: **"Close All"** destructive button (`close_all_connections` with confirmation dialog).
+3. **Toolbar**:
    - Search input (`Host, IP or rule...`) using `useDeferredValue` for lag-free filtering.
    - `SegmentedControl` filter: `All Tunnels` | `Proxy Tunnels` | `Direct Tunnels`.
-   - Active socket counter (`X / Y active sockets`).
-3. **Connections Table**:
+   - Active socket counter (`X / Y active sockets`, windowed to top-100 highest throughput).
+4. **Virtualized Connections Table**:
+   - Rendered using `react-window` `<List rowHeight={36} overscanCount={10} />` for smooth 60 FPS scrolling under heavy socket traffic.
    - Sortable columns (`Destination`, `Network / Matched Rule`, `Live speed`, `Total data`, `Uptime`, `Kill`).
    - Computes per-connection `upSpeed` and `downSpeed` deltas across 1-second snapshots using `prevBytesRef`.
    - Each row (`ConnectionRow`, memoized) shows `host:port`, network badge (`TCP`/`UDP`), inbound type (`tun-in`/`mixed-in`), outbound chain badge (`proxy › Node-1` or `direct`), matched rule expression, live speeds, total bytes, duration, and a per-socket **Kill (`close`)** button (`close_connection`).
@@ -248,6 +256,9 @@ Organized into a 2-column `.settings-layout` with a left secondary navigation ba
 5. **`API` (`api`)**:
    - `Enable External API` switch (auto-generates a 128-bit `apiSecret` if empty), `API Port` (`9090`), `API secret token` input with regenerate button, `Allow CORS` switch, and a live **Yacd UI** launch link + **"Copy Token"** button when connected.
 6. **`Diagnostics` (`diagnostics`)**:
-   - **System Health & Bundle Card**: 4 status tiles (`Elevation`, `Proxy Core`, `Current Mode`, `Port Conflicts`) + **"Generate Diagnostics"**, **"Copy JSON"**, **"Download Report"**, and collapsible sanitized JSON preview (`export_system_diagnostics`).
-   - **Configuration Backup & Restore Card**: **"Export backup"** (`export_config_backup`) and **"Inspect backup file"** (`validate_backup_archive`) with selective checkboxes (`Profiles and node configs`, `App settings`, `Routing rules`) and **"Restore selected sections"** (`import_config_backup`, enabled only when disconnected).
+   - **System Health & Bundle Card**: 4 status tiles (`Elevation`, `Proxy Core`, `Current Mode`, `Port Conflicts`) + **"Generate Diagnostics"**, **"Copy JSON"**, **"Download Report"**, and collapsible sanitized JSON preview (`export_system_diagnostics` embedding 500-record `dnsQueries` and `traces` ring buffers).
+   - **Configuration Backup & Restore Card**:
+     - **"Export backup"** (`export_config_backup`): Supports optional passphrase encryption (AES-256-GCM + Argon2id).
+     - **"Inspect backup file"** (`validate_backup_archive`): Validates envelope parameters. If `requiresPassphrase: true`, presents a passphrase challenge modal before revealing archive contents. Safely guards unauthenticated profile previews with `(backupValidation.profileNames ?? []).length > 0`.
+     - **Selective Restore** (`import_config_backup`): Checkboxes (`Profiles and node configs`, `App settings`, `Routing rules`) and **"Restore selected sections"** (enabled only when disconnected, listens for `config-backup-restored` event to synchronize Zustand stores).
    - **Routing Rule & DNS Simulation Card**: Input any domain or IP (`e.g. 192.168.1.1, google.com`) and click **"Simulate"** (`simulate_routing`) to inspect the exact `matchedOutbound`, `matchedRuleType`, `matchReason`, `isLanBypass`, and `dnsStrategy`.

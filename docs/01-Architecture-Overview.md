@@ -18,14 +18,14 @@ updated: 2026-11-03
 
 ## 1. High-Level System Topology
 
-X-Link operates as a **3-tier local desktop architecture**:
-1. **Presentation & State Layer (React 19 WebView)**: Renders the 6 application views, manages optimistic UI state in 8 Zustand stores, and persists user preferences/metadata via `@tauri-apps/plugin-store`.
-2. **Orchestration & OS Control Plane (Tauri v2 Rust Core)**: Compiles user settings + profiles + routing rules into a hardened `sing-box` JSON configuration, validates it via a pre-flight sidecar check, manages Windows OS state (WinINet system proxy, UAC elevation, IP Helper DNS discovery, process port inspection), and supervises the `sing-box` child process.
-3. **Data Plane (`sing-box v1.13.14` Sidecar + `wintun.dll`)**: Executes actual packet capture (TUN or HTTP/SOCKS/Mixed listeners), DNS resolution (FakeIP + remote DoH/DoT/DoQ + local bypass), protocol encryption (VLESS, VMess, Hysteria2, TUIC, etc.), and exposes a local Clash-compatible REST API (`127.0.0.1:9090`) for real-time telemetry and zero-downtime hot node switching.
+X-Link operates as a hardened **3-tier cross-platform desktop architecture** across Windows, macOS, and Linux:
+1. **Presentation & State Layer (React 19 WebView)**: Renders the 6 application views using Material 3 ergonomics (including a 72px top window inset on macOS for native traffic lights), manages optimistic state across 8 Zustand stores, and persists user preferences via `@tauri-apps/plugin-store`.
+2. **Orchestration & OS Control Plane (Tauri v2 Rust Core)**: Compiles settings, profiles, Outbound Groups, and routing rules into a validated `sing-box` JSON configuration. Enforces Kahn's Directed Acyclic Graph (DAG) cycle validation, manages OS network state via `PlatformNetworkManager` (WinINet on Windows, networksetup on macOS, GSettings on Linux), supervises child processes via platform-native lifecycle primitives (Windows Job Objects, Linux `PR_SET_PDEATHSIG`, macOS root companion supervisor), and streams ring-buffered telemetry.
+3. **Data Plane (`sing-box v1.13.14` Sidecar + Platform Drivers)**: Captures network packets (TUN mode via `wintun.dll` on Windows, dynamic kernel `utun` interfaces on macOS, or unprivileged capabilities on Linux; or System Proxy listeners on `7890`/`7891`/`7892`), resolves DNS (FakeIP + DoH/DoT + local bypass), executes multi-protocol encryption, and serves the Clash-compatible REST API (`127.0.0.1:9090`) with an 800ms read timeout and connection pooling.
 
 ```mermaid
 flowchart TB
-    subgraph UI["Frontend (React 19 + TypeScript + Zustand)"]
+    subgraph UI["Frontend Presentation Tier (React 19 + TypeScript + Zustand + Material 3)"]
         Views["6 Views: Dashboard, Profiles, Routing, Connections, Logs, Settings"]
         Stores["8 Zustand Stores (connection, profile, routing, settings, nodeEditor, stats, log, toast)"]
         Applier["Connected-Apply Policy (800ms Debounce + Rollback)"]
@@ -34,24 +34,26 @@ flowchart TB
     end
 
     subgraph IPC["Tauri v2 IPC Bridge + Plugin Store"]
-        Invoke["38 Tauri invoke() Commands"]
-        Events["7 Tauri emit()/listen() Events"]
+        Invoke["49 Tauri invoke() Commands"]
+        Events["8 Tauri emit()/listen() Events"]
         DiskStore["AppData JSON Files (settings.json, profiles.json, routing.json, stats.json)"]
     end
 
-    subgraph Rust["Rust Backend (src-tauri)"]
+    subgraph Rust["Rust Backend Application Tier (src-tauri)"]
         Cmds["Command Handlers (proxy, config, system, latency, geo, diagnostics, backup)"]
         Gen["Config Engine (Adapters -> Rules -> Generator -> Validator)"]
-        ProxyState["ProxyState (Mutex<Child>, Status, LogBuffer, PreviewToken)"]
-        OS["OS Integration (WinINet Proxy, IpHlpApi DNS, UAC, Tray)"]
+        DAG["Kahn's DAG Cycle Validator (validator.rs)"]
+        ProxyState["ProxyState (Mutex<SidecarChild>, Ring Buffers, Persistent Clash Client)"]
+        OS["PlatformNetworkManager (Windows WinINet/Jobs, Darwin Sudoers/kqueue, Linux PDEATHSIG)"]
+        Supervisors["Process Supervisors (xlink-darwin-supervisor, xlink-linux-supervisor)"]
         Scheduler["Subscription Auto-Update Scheduler (60s Ticker)"]
     end
 
-    subgraph DataPlane["Native Sidecar Data Plane"]
-        SingBox["sing-box v1.13.14 (Owned Child Process)"]
-        Wintun["wintun.dll (Virtual TUN Adapter)"]
+    subgraph DataPlane["Native Sidecar Network Tier"]
+        SingBox["sing-box v1.13.14 (Process Supervisor Child)"]
+        TunDriver["TUN Drivers (wintun.dll / utun / setcap helpers)"]
         ClashAPI["Clash REST API (127.0.0.1:9090 Bearer Auth)"]
-        SingBox --- Wintun
+        SingBox --- TunDriver
         SingBox --- ClashAPI
     end
 
@@ -59,12 +61,14 @@ flowchart TB
     UI <-->|"storeHelper"| DiskStore
     IPC <--> Cmds
     Cmds <--> Gen
+    Gen <--> DAG
     Cmds <--> ProxyState
     Cmds <--> OS
+    OS <--> Supervisors
     Gen <-->|"Read/WriteTransactional"| DiskStore
     Gen -->|"sing-box check -c"| SingBox
-    Cmds -->|"spawn / kill"| SingBox
-    Cmds <-->|"HTTP GET/PUT/DELETE"| ClashAPI
+    Supervisors -->|"spawn / kill / stdin EOF"| SingBox
+    ProxyState <-->|"HTTP GET/PUT/DELETE"| ClashAPI
     Scheduler --> Cmds
 ```
 

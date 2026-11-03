@@ -40,16 +40,21 @@ updated: 2026-11-03
 - **Rule**: `@tauri-apps/plugin-store` caches JSON files in memory in the JavaScript runtime. Whenever a Rust command writes directly to `profiles.json`, `settings.json`, or `routing.json` on disk (e.g., `create_empty_profile`, `refresh_subscription`, `apply_previewed_subscription_refresh`, `import_config_backup`, or background `subscription-auto-updated`), the frontend **must** call `await storeHelper.reloadProfiles()` / `reloadSettings()` / `reloadRouting()` (`store.reload({ ignoreDefaults: true })`) before reading from the store or calling `store.save()`.
 - **Why**: If the frontend calls `store.save()` without reloading after a native write, the stale in-memory JS cache will overwrite and erase the changes written by Rust!
 
-### Invariant 4: Ownership-Scoped Sidecar Process Control
-- **Where**: `src-tauri/src/commands/proxy.rs` (`stop_owned_singbox_child`) & `src-tauri/src/lib.rs` (`RunEvent::Exit`)
-- **Rule**: Only terminate the `CommandChild` stored in `ProxyState.child`. Never execute `taskkill /F /IM sing-box.exe` or `pkill sing-box`.
-- **Why**: Killing processes by image name is unsafe and can terminate unrelated processes on the user's machine.
+### Invariant 4: Parent Death Binding & Zombie Prevention
+- **Where**: `src-tauri/src/state.rs` (`SidecarChild`), `src-tauri/src/os/*.rs`, `src-tauri/src/bin/*-supervisor.rs`
+- **Rule**: Never run blind system-wide termination (`taskkill /F /IM sing-box.exe` or `pkill sing-box`). Instead, bind all child process lifecycles directly to the host OS supervisor:
+  1. **Windows**: The child process is added to a Windows Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, ensuring immediate kernel-level termination upon parent exit.
+  2. **Linux**: Launched via an unprivileged companion supervisor (`xlink-linux-supervisor`) with `libc::PR_SET_PDEATHSIG` set to `SIGTERM`, monitoring parent `stdin` EOF, and escalating to `SIGKILL` after 3 seconds.
+  3. **macOS**: Launched via a root companion supervisor (`xlink-darwin-supervisor`) deployed in `/Library/Application Support/X-Link/helpers/` (mode `0755`, owned by `root:wheel`), invoked via `sudo -n`, and monitored via `kqueue` `EVFILT_PROC` / `NOTE_EXIT` and `stdin` EOF heartbeats.
+  4. **Value-Move Termination**: `SidecarChild::kill(mut self)` consumes `self` by value, closing standard input pipes (`child.stdin.take()`) to trigger clean graceful shutdown with defensive fallback to `child.start_kill()`.
+- **Why**: Eliminates orphan zombie processes across ungraceful parent crashes, power loss, or force-quits without risking termination of unrelated processes on the host machine.
 
-### Invariant 5: Connected-Apply Policy (`live` vs `defer` vs `restart`)
-- **Where**: `src/utils/applyPolicy.ts`, `src/utils/connectedApply.ts`, `src/stores/settingsStore.ts`
+### Invariant 5: Explicit Mode Transitions & Connected-Apply Policy
+- **Where**: `src/utils/applyPolicy.ts`, `src/utils/connectedApply.ts`, `src/stores/connectionStore.ts`, `src/stores/settingsStore.ts`
 - **Rule**:
-  - `proxyMode` is a **`defer`** setting: changing it while connected saves the preference for the next session and must **not** silently restart or switch the active session's mode. Similarly, when connecting with `proxyMode === 'tun'` without Admin rights, pass `modeOverride: 'system'` to `toggle_proxy` instead of overwriting `settings.proxyMode` in `settings.json`.
-  - All `restart`-class settings and routing edits while connected must flow through the `800ms` debounced `createApplier` pipeline so invalid edits or failed restarts automatically roll back to the pre-edit `baseline`.
+  - **No Silent TUN Fallback**: In v0.8.0, silent `modeOverride = 'system'` fallback is strictly forbidden. If TUN mode initiation fails or required OS elevation is missing, the application must present a structured diagnostic error modal rather than silently downgrading the connection security posture.
+  - **Deferred Mode Switching**: `proxyMode` is a **`defer`** setting: changing it while connected saves the preference for the next session and must **not** silently restart or switch the active session's mode.
+  - **Debounced Rollback Pipeline**: All `restart`-class settings and routing edits while connected must flow through the `800ms` debounced `createApplier` pipeline so invalid edits or failed restarts automatically roll back to the pre-edit `baseline`.
 
 ### Invariant 6: Authenticated Local Clash Controller
 - **Where**: `src-tauri/src/config/generator.rs` & `src/utils/store.ts` (`migrateApiSettings`)
