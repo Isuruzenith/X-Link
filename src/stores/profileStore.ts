@@ -27,6 +27,26 @@ export type LatencyTestMode = 'tcp' | 'proxy-url';
 
 type NodeLatencyResult = { latencyMs: number | null; error: string | null; mode: LatencyTestMode };
 
+export interface SubscriptionDiffPreview {
+  profileId: string;
+  profileName: string;
+  oldNodeCount: number;
+  newNodeCount: number;
+  addedNodes: string[];
+  removedNodes: string[];
+  retainedNodeCount: number;
+  currentSelectedTag: string | null;
+  isSelectedNodePreserved: boolean;
+  fallbackSelectedTag: string | null;
+  previewToken: string | null;
+}
+
+export interface ImportPreview {
+  nodeCount: number;
+  nodeTypes: Record<string, number>;
+  sampleNodes: string[];
+}
+
 interface ProfileState {
   // Multi-profile state
   profiles: Profile[];
@@ -52,6 +72,16 @@ interface ProfileState {
   // Subscription refresh state
   refreshingProfileId: string | null;
 
+  // Subscription diff preview state
+  diffPreview: SubscriptionDiffPreview | null;
+  isFetchingDiff: boolean;
+  diffError: string | null;
+
+  // Import preview state
+  importPreview: ImportPreview | null;
+  isPreviewingImport: boolean;
+  importPreviewError: string | null;
+
   // Computed getters
   activeProfile: () => Profile | null;
 
@@ -72,7 +102,11 @@ interface ProfileState {
   testNode: (node: ProxyNode, mode: LatencyTestMode) => Promise<void>;
   updateNodesList: (newNodes: ProxyNode[]) => void;
   selectProfile: (profileId: string) => Promise<void>;
-  refreshSubscription: (profileId: string) => Promise<void>;
+  refreshSubscription: (profileId: string, previewToken?: string) => Promise<void>;
+  fetchSubscriptionDiff: (profileId: string) => Promise<SubscriptionDiffPreview | null>;
+  clearDiffPreview: () => void;
+  previewImportConfig: (content: string) => Promise<ImportPreview | null>;
+  clearImportPreview: () => void;
   setProfileAutoUpdateInterval: (profileId: string, intervalMinutes: number) => Promise<void>;
   createEmptyProfile: (name: string) => Promise<void>;
   deleteNode: (tag: string) => Promise<void>;
@@ -175,6 +209,9 @@ export const getCountryCode = (tag: string): string | null => {
   return null;
 };
 
+let diffRequestId = 0;
+let importPreviewRequestId = 0;
+
 export const useProfileStore = create<ProfileState>((set, get) => ({
   profiles: [],
   activeProfileId: null,
@@ -192,6 +229,12 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   isTestingLatency: false,
   testingNodeTag: null,
   refreshingProfileId: null,
+  diffPreview: null,
+  isFetchingDiff: false,
+  diffError: null,
+  importPreview: null,
+  isPreviewingImport: false,
+  importPreviewError: null,
 
   activeProfile: () => {
     const { profiles, activeProfileId } = get();
@@ -310,6 +353,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
   setImportName: (name) => set({ importName: name }),
   setImportContent: (content) => {
+    get().clearImportPreview();
     set({ importContent: content });
     if (!get().importName.trim()) {
       const tagPart = detectNameFromContent(content);
@@ -700,7 +744,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
   clearNodeGeoCache: () => set({ nodeGeoCache: {} }),
 
-  refreshSubscription: async (profileId: string) => {
+  refreshSubscription: async (profileId: string, previewToken?: string) => {
     const { refreshingProfileId, profiles, selectedProfileId, activeProfileId } = get();
     if (refreshingProfileId) return; // Prevent double invocation
 
@@ -716,7 +760,9 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     logStore.pushSystemLog(`Refreshing subscription for "${profile.name}"...`);
 
     try {
-      const result = await invoke<ImportResult>('refresh_subscription', { profileId });
+      const result = previewToken
+        ? await invoke<ImportResult>('apply_previewed_subscription_refresh', { profileId, previewToken })
+        : await invoke<ImportResult>('refresh_subscription', { profileId });
 
       // Native refresh writes profiles.json; reload the plugin's cached store before reading it.
       const updatedProfiles = await storeHelper.reloadProfiles();
@@ -740,6 +786,67 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     } finally {
       set({ refreshingProfileId: null });
     }
+  },
+
+  fetchSubscriptionDiff: async (profileId: string) => {
+    const { profiles } = get();
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile || profile.type !== 'subscription') return null;
+
+    const requestId = ++diffRequestId;
+    set({ isFetchingDiff: true, diffPreview: null, diffError: null });
+    const logStore = useLogStore.getState();
+    logStore.pushSystemLog(`Calculating subscription update diff for "${profile.name}"...`);
+
+    try {
+      const diff = await invoke<SubscriptionDiffPreview>('preview_subscription_refresh', { profileId });
+      if (requestId !== diffRequestId) return null;
+      set({ diffPreview: diff });
+      return diff;
+    } catch (err) {
+      if (requestId !== diffRequestId) return null;
+      const errMsg = mapImportError(String(err));
+      set({ diffError: errMsg });
+      logStore.pushSystemLog(`Diff preview failed for "${profile.name}": ${errMsg}`);
+      useToastStore.getState().addToast('error', errMsg, 'Diff Preview Failed');
+      return null;
+    } finally {
+      if (requestId === diffRequestId) set({ isFetchingDiff: false });
+    }
+  },
+
+  clearDiffPreview: () => {
+    diffRequestId++;
+    set({ diffPreview: null, diffError: null, isFetchingDiff: false });
+  },
+
+  previewImportConfig: async (content: string) => {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      set({ importPreviewError: 'No content provided for preview' });
+      return null;
+    }
+
+    const requestId = ++importPreviewRequestId;
+    set({ isPreviewingImport: true, importPreview: null, importPreviewError: null });
+    try {
+      const preview = await invoke<ImportPreview>('preview_import_config', { content: trimmed });
+      if (requestId !== importPreviewRequestId || get().importContent.trim() !== trimmed) return null;
+      set({ importPreview: preview });
+      return preview;
+    } catch (err) {
+      if (requestId !== importPreviewRequestId) return null;
+      const errMsg = mapImportError(String(err));
+      set({ importPreviewError: errMsg });
+      return null;
+    } finally {
+      if (requestId === importPreviewRequestId) set({ isPreviewingImport: false });
+    }
+  },
+
+  clearImportPreview: () => {
+    importPreviewRequestId++;
+    set({ importPreview: null, importPreviewError: null, isPreviewingImport: false });
   },
 
   setProfileAutoUpdateInterval: async (profileId: string, intervalMinutes: number) => {

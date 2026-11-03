@@ -2,19 +2,38 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
+import { storeHelper } from '../utils/store';
 import { SettingsView } from './SettingsView';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
+vi.mock('@tauri-apps/plugin-dialog', () => ({ ask: vi.fn() }));
+vi.mock('../utils/store', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../utils/store')>();
+  return { ...original, storeHelper: {
+    ...original.storeHelper,
+    reloadSettings: vi.fn().mockResolvedValue(undefined),
+    reloadProfiles: vi.fn().mockResolvedValue([]),
+    reloadRouting: vi.fn().mockResolvedValue(undefined),
+    getSettings: vi.fn().mockResolvedValue(original.DEFAULT_SETTINGS),
+    getProfiles: vi.fn().mockResolvedValue([]),
+    getActiveProfileId: vi.fn().mockResolvedValue(null),
+    getRoutingRules: vi.fn().mockResolvedValue([]),
+    getRuleSets: vi.fn().mockResolvedValue([]),
+    migrateFromLegacy: vi.fn().mockResolvedValue(undefined),
+  } };
+});
 
 afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(ask).mockResolvedValue(true);
   Object.assign(navigator, {
     clipboard: {
       writeText: vi.fn().mockResolvedValue(undefined),
@@ -35,6 +54,7 @@ beforeEach(() => {
     },
   });
   useConnectionStore.setState({ isConnected: true });
+  vi.mocked(storeHelper.reloadProfiles).mockResolvedValue([]);
 });
 
 describe('SettingsView Diagnostics and Simulation', () => {
@@ -142,5 +162,96 @@ describe('SettingsView Diagnostics and Simulation', () => {
       expect(screen.getByText(/Private IPv4 address matches LAN bypass rule/i)).toBeTruthy();
       expect(screen.getByText(/LAN \/ Direct Bypass/i)).toBeTruthy();
     });
+  });
+
+  it('inspects an archive and requires disconnect before restoring selected sections', async () => {
+    const archive = {
+      metadata: { schemaVersion: 1, appVersion: '0.8.0', exportedAt: 1, platform: 'windows' },
+      profileConfigs: { p1: '{"outbounds":[{"tag":"node","type":"vmess"}]}' },
+      profiles: { profiles: [{ id: 'p1', name: 'Saved profile', type: 'manual' }] },
+      settings: { proxyMode: 'system' },
+    };
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'validate_backup_archive') return {
+        profileCount: 1, profileNames: ['Saved profile'], hasSettings: true, ruleCount: 0,
+        ruleSetCount: 0, appVersion: '0.8.0', exportedAt: 1,
+      };
+      if (command === 'import_config_backup') return { message: 'Restored. Restart the app.' };
+      return null;
+    });
+    const { container } = render(<SettingsView />);
+    fireEvent.click(screen.getByText('Diagnostics'));
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify(archive)], 'backup.json', { type: 'application/json' });
+    Object.defineProperty(file, 'text', { value: async () => JSON.stringify(archive) });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('Profiles: Saved profile')).toBeTruthy());
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('validate_backup_archive', { archive });
+    const restore = screen.getByText('Restore selected sections').closest('md-filled-button')!;
+    expect(restore.hasAttribute('disabled')).toBe(true);
+    useConnectionStore.setState({ isConnected: false, connectionStatus: 'disconnected' });
+    await waitFor(() => expect(restore.hasAttribute('disabled')).toBe(false));
+    fireEvent.click(restore);
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(expect.stringContaining('Restore profiles, settings'), expect.anything()));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('import_config_backup', {
+      archive, options: { restoreSettings: true, restoreProfiles: true, restoreRouting: false },
+    }));
+    await waitFor(() => expect(storeHelper.reloadProfiles).toHaveBeenCalled());
+  });
+
+  it('reports a committed restore accurately when the frontend cache reload fails', async () => {
+    const archive = {
+      metadata: { schemaVersion: 1, appVersion: '0.8.0', exportedAt: 1, platform: 'windows' },
+      settings: { proxyMode: 'system' }, profiles: null, profileConfigs: {}, routing: null,
+    };
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'validate_backup_archive') return {
+        profileCount: 0, profileNames: [], hasSettings: true, ruleCount: 0,
+        ruleSetCount: 0, appVersion: '0.8.0', exportedAt: 1,
+      };
+      if (command === 'import_config_backup') return { message: 'Restored. Restart the app.' };
+      return null;
+    });
+    vi.mocked(storeHelper.reloadSettings).mockRejectedValueOnce(new Error('cache unavailable'));
+    useConnectionStore.setState({ isConnected: false, connectionStatus: 'disconnected' });
+    const { container } = render(<SettingsView />);
+    fireEvent.click(screen.getByText('Diagnostics'));
+    const file = new File([JSON.stringify(archive)], 'backup.json');
+    Object.defineProperty(file, 'text', { value: async () => JSON.stringify(archive) });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('Backup from X-Link 0.8.0')).toBeTruthy());
+    fireEvent.click(screen.getByText('Restore selected sections'));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('import_config_backup', expect.anything()));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Backup restored, but the app could not reload its state'));
+    expect(screen.getByRole('alert').textContent).toContain('Restart the app before reconnecting');
+  });
+
+  it('does not overwrite local state when restore confirmation is cancelled', async () => {
+    vi.mocked(ask).mockResolvedValue(false);
+    vi.mocked(invoke).mockImplementation(async (command) => command === 'validate_backup_archive'
+      ? { profileCount: 0, profileNames: [], hasSettings: true, ruleCount: 0, ruleSetCount: 0, appVersion: '0.8.0', exportedAt: 1 }
+      : null);
+    useConnectionStore.setState({ isConnected: false, connectionStatus: 'disconnected' });
+    const { container } = render(<SettingsView />);
+    fireEvent.click(screen.getByText('Diagnostics'));
+    const archive = { metadata: { schemaVersion: 1, appVersion: '0.8.0', exportedAt: 1, platform: 'windows' }, settings: { proxyMode: 'tun' }, profileConfigs: {} };
+    const file = new File([JSON.stringify(archive)], 'backup.json');
+    Object.defineProperty(file, 'text', { value: async () => JSON.stringify(archive) });
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByText('Backup from X-Link 0.8.0')).toBeTruthy());
+    fireEvent.click(screen.getByText('Restore selected sections'));
+    await waitFor(() => expect(ask).toHaveBeenCalled());
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('import_config_backup', expect.anything());
+  });
+
+  it('rejects invalid backup inspection without invoking restore', async () => {
+    const { container } = render(<SettingsView />);
+    fireEvent.click(screen.getByText('Diagnostics'));
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['not-json'], 'backup.json');
+    Object.defineProperty(file, 'text', { value: async () => 'not-json' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Backup validation failed'));
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('import_config_backup', expect.anything());
   });
 });

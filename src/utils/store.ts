@@ -308,6 +308,16 @@ async function getStatsStore() {
 
 export const storeHelper = {
   // ── SETTINGS ──
+  async reloadSettings(): Promise<void> {
+    const store = await getSettingsStore();
+    await store.reload({ ignoreDefaults: true });
+  },
+
+  async reloadRouting(): Promise<void> {
+    const store = await getRoutingStore();
+    await store.reload({ ignoreDefaults: true });
+  },
+
   async getSettings(): Promise<Settings> {
     try {
       const store = await getSettingsStore();

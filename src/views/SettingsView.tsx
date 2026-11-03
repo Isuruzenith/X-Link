@@ -1,5 +1,6 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { ask } from '@tauri-apps/plugin-dialog';
 import { Icon } from '@/components/ui/icon';
 import { ViewShell } from '../components/ViewShell';
 import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
@@ -7,7 +8,8 @@ import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { useProfileStore } from '../stores/profileStore';
 import type { Settings, DnsMode } from '../utils/store';
-import { generateApiSecret } from '../utils/store';
+import { generateApiSecret, storeHelper } from '../utils/store';
+import { useRoutingStore } from '../stores/routingStore';
 import xLinkLogo from '../assets/X-Link-logo.png';
 import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -55,6 +57,30 @@ export interface DiagnosticsReport {
   recentLogs: string[];
 }
 
+interface ConfigBackupArchive {
+  metadata: { schemaVersion: number; appVersion: string; exportedAt: number; platform: string };
+  settings?: Record<string, unknown>;
+  profiles?: Record<string, unknown>;
+  profileConfigs: Record<string, string>;
+  routing?: Record<string, unknown>;
+}
+
+interface BackupValidationResult {
+  profileCount: number;
+  profileNames: string[];
+  hasSettings: boolean;
+  ruleCount: number;
+  ruleSetCount: number;
+  appVersion: string;
+  exportedAt: number;
+}
+
+interface RestoreOptions {
+  restoreSettings: boolean;
+  restoreProfiles: boolean;
+  restoreRouting: boolean;
+}
+
 export function SettingsView() {
   const {
     settings,
@@ -84,6 +110,104 @@ export function SettingsView() {
   const [diagReport, setDiagReport] = React.useState<DiagnosticsReport | null>(null);
   const [isExportingDiag, setIsExportingDiag] = React.useState(false);
   const [showDiagPreview, setShowDiagPreview] = React.useState(false);
+  const [backupArchive, setBackupArchive] = React.useState<ConfigBackupArchive | null>(null);
+  const [backupValidation, setBackupValidation] = React.useState<BackupValidationResult | null>(null);
+  const [restoreOptions, setRestoreOptions] = React.useState<RestoreOptions>({
+    restoreSettings: true, restoreProfiles: true, restoreRouting: true,
+  });
+  const [isBackingUp, setIsBackingUp] = React.useState(false);
+  const [isRestoring, setIsRestoring] = React.useState(false);
+  const [backupError, setBackupError] = React.useState<string | null>(null);
+  const backupInputRef = React.useRef<HTMLInputElement>(null);
+  const backupSelectionId = React.useRef(0);
+
+  const downloadArchive = (archive: ConfigBackupArchive) => {
+    const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `xlink-backup-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportBackup = async () => {
+    if (isBackingUp) return;
+    setIsBackingUp(true);
+    setBackupError(null);
+    try {
+      const archive = await invoke<ConfigBackupArchive>('export_config_backup');
+      downloadArchive(archive);
+      useToastStore.getState().addToast('success', 'Configuration backup downloaded. Store it securely; it contains credentials.', 'Backup Exported');
+    } catch (error) {
+      setBackupError(`Could not export backup: ${error}`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleChooseBackup = async (file: File | undefined) => {
+    const selectionId = ++backupSelectionId.current;
+    setBackupArchive(null);
+    setBackupValidation(null);
+    setBackupError(null);
+    if (!file) return;
+    setIsBackingUp(true);
+    try {
+      if (file.size > 32 * 1024 * 1024) throw new Error('Backup exceeds the 32 MB limit.');
+      const content = await file.text();
+      if (selectionId !== backupSelectionId.current) return;
+      const archive = JSON.parse(content) as ConfigBackupArchive;
+      const validation = await invoke<BackupValidationResult>('validate_backup_archive', { archive });
+      if (selectionId !== backupSelectionId.current) return;
+      setBackupArchive(archive);
+      setBackupValidation(validation);
+      setRestoreOptions({
+        restoreSettings: validation.hasSettings,
+        restoreProfiles: Boolean(archive.profiles),
+        restoreRouting: Boolean(archive.routing),
+      });
+    } catch (error) {
+      if (selectionId === backupSelectionId.current) setBackupError(`Backup validation failed: ${error}`);
+    } finally {
+      if (selectionId === backupSelectionId.current) setIsBackingUp(false);
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!backupArchive || !backupValidation || isRestoring || isConnected || connectionStatus !== 'disconnected') return;
+    const sections = [restoreOptions.restoreProfiles && 'profiles', restoreOptions.restoreSettings && 'settings', restoreOptions.restoreRouting && 'routing']
+      .filter(Boolean).join(', ');
+    const confirmed = await ask(`Restore ${sections} from this backup? The selected local sections will be overwritten.`, {
+      title: 'Confirm backup restore', kind: 'warning',
+    });
+    if (!confirmed || isConnected || useConnectionStore.getState().connectionStatus !== 'disconnected') return;
+    setIsRestoring(true);
+    setBackupError(null);
+    try {
+      const result = await invoke<{ message: string }>('import_config_backup', { archive: backupArchive, options: restoreOptions });
+      setBackupArchive(null);
+      setBackupValidation(null);
+      try {
+        await Promise.all([
+          storeHelper.reloadSettings(), storeHelper.reloadProfiles(), storeHelper.reloadRouting(),
+        ]);
+        await Promise.all([
+          useSettingsStore.getState().initSettings(),
+          useProfileStore.getState().initProfiles(),
+          useRoutingStore.getState().initRouting(),
+        ]);
+        useToastStore.getState().addToast('success', result.message, 'Backup Restored');
+      } catch (error) {
+        setBackupError(`Backup restored, but the app could not reload its state: ${error}. Restart the app before reconnecting.`);
+      }
+    } catch (error) {
+      setBackupError(`Restore failed: ${error}`);
+    } finally {
+      setIsRestoring(false);
+    }
+  };
 
   const handleSimulate = async () => {
     const dest = simDestination.trim();
@@ -772,6 +896,63 @@ export function SettingsView() {
                     <pre className="p-3 bg-muted/60 rounded-md border border-border/60 text-[10.5px] font-mono overflow-auto max-h-60 text-foreground/90 whitespace-pre">
                       {JSON.stringify(diagReport, null, 2)}
                     </pre>
+                  </div>
+                )}
+              </Card>
+
+              <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
+                <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
+                  <CardTitle className="text-xs font-bold text-foreground">Configuration Backup & Restore</CardTitle>
+                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-amber-600 dark:text-amber-400 border-amber-500/25">Contains secrets</Badge>
+                </CardHeader>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Backups include subscription URLs, proxy passwords and API tokens. Keep the JSON file private. Disconnect before restoring; restart the app before reconnecting.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" disabled={isBackingUp || isRestoring} onClick={() => void handleExportBackup()}>
+                    <Icon name="download" size={14} aria-hidden="true" /> {isBackingUp ? 'Processing…' : 'Export backup'}
+                  </Button>
+                  <input
+                    ref={backupInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    className="sr-only"
+                    aria-label="Choose backup JSON"
+                    onChange={(event) => void handleChooseBackup(event.currentTarget.files?.[0])}
+                  />
+                  <Button type="button" size="sm" variant="outline" disabled={isBackingUp || isRestoring} onClick={() => backupInputRef.current?.click()}>
+                    <Icon name="upload_file" size={14} aria-hidden="true" /> Inspect backup file
+                  </Button>
+                </div>
+                {backupError && <p role="alert" className="material-error">{backupError}</p>}
+                {backupArchive && backupValidation && (
+                  <div className="p-3 bg-muted/40 rounded-lg border border-border/50 flex flex-col gap-3 text-xs">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <p className="font-semibold">Backup from X-Link {backupValidation.appVersion}</p>
+                        <p className="text-muted-foreground">{backupValidation.profileCount} profiles · {backupValidation.ruleCount} routing rules · {backupValidation.ruleSetCount} rule sets</p>
+                        {backupValidation.profileNames.length > 0 && <p className="text-muted-foreground">Profiles: {backupValidation.profileNames.join(', ')}</p>}
+                      </div>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => { backupSelectionId.current++; setBackupArchive(null); setBackupValidation(null); setBackupError(null); }} aria-label="Dismiss backup inspection">Dismiss</Button>
+                    </div>
+                    <fieldset className="flex flex-wrap gap-4" aria-label="Sections to restore">
+                      {([
+                        ['restoreProfiles', 'Profiles and node configs', Boolean(backupArchive.profiles)],
+                        ['restoreSettings', 'App settings', backupValidation.hasSettings],
+                        ['restoreRouting', 'Routing rules', Boolean(backupArchive.routing)],
+                      ] as const).map(([key, label, available]) => (
+                        <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                          <input type="checkbox" checked={restoreOptions[key]} disabled={!available || isRestoring}
+                            onChange={(event) => setRestoreOptions((previous) => ({ ...previous, [key]: event.currentTarget.checked }))} />
+                          {label}
+                        </label>
+                      ))}
+                    </fieldset>
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400">Restoring overwrites the selected local sections. Existing profiles not in this backup may remain on disk, but are removed from the saved profile list.</p>
+                    <Button type="button" size="sm" disabled={isConnected || connectionStatus !== 'disconnected' || isBackingUp || isRestoring || !Object.values(restoreOptions).some(Boolean)} onClick={() => void handleRestoreBackup()}>
+                      <Icon name="settings_backup_restore" size={14} aria-hidden="true" /> {isRestoring ? 'Restoring…' : 'Restore selected sections'}
+                    </Button>
+                    {(isConnected || connectionStatus !== 'disconnected') && <p className="text-destructive text-[11px]">Disconnect the proxy to enable restore.</p>}
                   </div>
                 )}
               </Card>

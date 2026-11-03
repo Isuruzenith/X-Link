@@ -23,6 +23,8 @@ beforeEach(() => {
     profiles: [], activeProfileId: null, selectedProfileId: null, nodes: [], selectedNodeTag: null,
     importName: '', importContent: '', importError: null, importSuccess: false, isImporting: false,
     latencyResults: {}, isTestingLatency: false, testingNodeTag: null,
+    diffPreview: null, diffError: null, isFetchingDiff: false,
+    importPreview: null, importPreviewError: null, isPreviewingImport: false,
   });
   useConnectionStore.setState({ isConnected: false });
   useSettingsStore.setState({ settings: { ...useSettingsStore.getState().settings, apiEnabled: false } });
@@ -126,5 +128,84 @@ describe('Profiles import', () => {
       expect(ask).toHaveBeenCalledWith(expect.stringContaining('Delete node "node-1"?'), expect.anything());
       expect(vi.mocked(invoke)).toHaveBeenCalledWith('delete_node', { tag: 'node-1' });
     });
+  });
+
+  it('previews subscription changes and warns before selected server fallback', async () => {
+    useProfileStore.setState({
+      profiles: [{ id: 'sub', name: 'Provider', type: 'subscription', subscriptionUrl: 'https://example.com/sub', importedAt: 1, lastUpdated: 1, nodeCount: 2, selectedNodeTag: 'old' }],
+      activeProfileId: 'sub', selectedProfileId: 'sub',
+      nodes: [{ tag: 'old', type: 'vmess', server: '192.0.2.1' }],
+    });
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'preview_subscription_refresh') return {
+        profileId: 'sub', profileName: 'Provider', oldNodeCount: 2, newNodeCount: 2,
+        addedNodes: ['new'], removedNodes: ['old'], retainedNodeCount: 1,
+        currentSelectedTag: 'old', isSelectedNodePreserved: false, fallbackSelectedTag: 'new', previewToken: 'preview-123',
+      };
+      if (command === 'apply_previewed_subscription_refresh') return { name: 'Provider', nodeCount: 2 };
+      if (command === 'get_profile_outbounds') return [];
+      return null;
+    });
+    const { container } = render(<ConfigView />);
+    fireEvent.click(container.querySelector('md-icon-button[aria-label="Refresh Provider"]')!);
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Subscription Update Preview' })).toBeTruthy());
+    expect(screen.getByText('Active server removed by provider!')).toBeTruthy();
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('apply_previewed_subscription_refresh', expect.anything());
+    fireEvent.click(screen.getByText('Apply Update'));
+    await waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('apply_previewed_subscription_refresh', { profileId: 'sub', previewToken: 'preview-123' }));
+  });
+
+  it('closes the subscription dialog on Escape and restores focus to refresh', async () => {
+    useProfileStore.setState({
+      profiles: [{ id: 'sub', name: 'Provider', type: 'subscription', subscriptionUrl: 'https://example.com/sub', importedAt: 1, lastUpdated: 1, nodeCount: 1, selectedNodeTag: 'old' }],
+      selectedProfileId: 'sub', activeProfileId: 'sub',
+    });
+    vi.mocked(invoke).mockImplementation(async (command) => command === 'preview_subscription_refresh'
+      ? { profileId: 'sub', profileName: 'Provider', oldNodeCount: 1, newNodeCount: 1,
+        addedNodes: [], removedNodes: [], retainedNodeCount: 1, currentSelectedTag: 'old',
+        isSelectedNodePreserved: true, fallbackSelectedTag: 'old', previewToken: 'token' }
+      : null);
+    const { container } = render(<ConfigView />);
+    const refresh = container.querySelector('md-icon-button[aria-label="Refresh Provider"]') as HTMLElement;
+    fireEvent.click(refresh);
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Subscription Update Preview' })).toBeTruthy());
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Close diff preview'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(refresh);
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('apply_previewed_subscription_refresh', expect.anything());
+  });
+
+  it('ignores an import preview that finishes after its content changes', async () => {
+    let resolvePreview!: (value: unknown) => void;
+    vi.mocked(invoke).mockImplementation(async (command) => command === 'preview_import_config'
+      ? new Promise((resolve) => { resolvePreview = resolve; }) : null);
+    render(<ConfigView />);
+    fireEvent.click(screen.getByText('Add your first profile'));
+    act(() => useProfileStore.getState().setImportContent('first config'));
+    fireEvent.click(screen.getByText('Preview nodes'));
+    act(() => useProfileStore.getState().setImportContent('second config'));
+    await act(async () => resolvePreview({ nodeCount: 1, nodeTypes: { vmess: 1 }, sampleNodes: ['stale'] }));
+    expect(screen.queryByText('Sample servers:')).toBeNull();
+    expect(useProfileStore.getState().importPreview).toBeNull();
+  });
+
+  it('keeps import preview read-only and clears the preview when the content changes', async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'preview_import_config') return {
+        nodeCount: 1, nodeTypes: { vmess: 1 }, sampleNodes: ['node-a'],
+      };
+      return null;
+    });
+    const { container } = render(<ConfigView />);
+    fireEvent.click(screen.getByText('Add your first profile'));
+    act(() => useProfileStore.getState().setImportContent('vmess://example'));
+    fireEvent.click(screen.getByText('Preview nodes'));
+    await waitFor(() => expect(screen.getByText('Sample servers:')).toBeTruthy());
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('import_config', expect.anything());
+    const field = container.querySelector('md-outlined-text-field[id="profile-content"]')!;
+    Object.defineProperty(field, 'value', { value: 'different config', writable: true, configurable: true });
+    fireEvent.input(field);
+    expect(screen.queryByText('Sample servers:')).toBeNull();
   });
 });

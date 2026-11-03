@@ -97,7 +97,13 @@ pub fn run() {
             commands::latency::test_all_nodes_url_latency,
             commands::latency::test_active_proxy_url,
             commands::diagnostics::export_system_diagnostics,
-            commands::diagnostics::simulate_routing
+            commands::diagnostics::simulate_routing,
+            commands::backup::export_config_backup,
+            commands::backup::validate_backup_archive,
+            commands::backup::import_config_backup,
+            commands::config::preview_subscription_refresh,
+            commands::config::apply_previewed_subscription_refresh,
+            commands::config::preview_import_config
         ])
         .setup(|app| {
             // Load and cache settings dynamically on boot

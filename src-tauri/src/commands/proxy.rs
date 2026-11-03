@@ -11,7 +11,7 @@ use tauri_plugin_shell::ShellExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex as AsyncMutex;
 
-fn get_toggle_lock() -> &'static AsyncMutex<()> {
+pub(crate) fn get_toggle_lock() -> &'static AsyncMutex<()> {
     static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| AsyncMutex::new(()))
 }

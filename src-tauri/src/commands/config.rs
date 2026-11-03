@@ -3,10 +3,52 @@ use crate::config::adapters::adapt;
 use crate::config::generator::generate_singbox_config;
 use crate::config::validator::validate_singbox_config;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{Emitter, Manager, State};
 
-static SUBSCRIPTION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static SUBSCRIPTION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+struct SubscriptionSnapshot {
+    profile_id: String,
+    profiles_content: String,
+    current_config: String,
+    outbounds: Vec<crate::config::adapters::SingBoxOutbound>,
+    created_at: Instant,
+}
+
+fn subscription_snapshots() -> &'static Mutex<Option<(String, SubscriptionSnapshot)>> {
+    static SNAPSHOTS: OnceLock<Mutex<Option<(String, SubscriptionSnapshot)>>> = OnceLock::new();
+    SNAPSHOTS.get_or_init(|| Mutex::new(None))
+}
+
+fn take_subscription_snapshot(
+    token: &str,
+    profile_id: &str,
+    profiles_content: &str,
+    current_config_path: &std::path::Path,
+) -> Result<Vec<crate::config::adapters::SingBoxOutbound>, String> {
+    let mut guard = subscription_snapshots()
+        .lock()
+        .map_err(|_| "Subscription preview state is unavailable".to_string())?;
+    if guard
+        .as_ref()
+        .is_none_or(|(stored_token, _)| stored_token != token)
+    {
+        return Err("Subscription preview expired. Preview the update again.".to_string());
+    }
+    let (_, snapshot) = guard.take().expect("checked preview token");
+    drop(guard);
+    if snapshot.created_at.elapsed() > Duration::from_secs(300)
+        || snapshot.profile_id != profile_id
+        || snapshot.profiles_content != profiles_content
+        || std::fs::read_to_string(current_config_path).ok().as_deref()
+            != Some(snapshot.current_config.as_str())
+    {
+        return Err("Subscription changed since preview. Preview the update again.".to_string());
+    }
+    Ok(snapshot.outbounds)
+}
 
 /// Metadata returned to the frontend when importing a profile.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -37,6 +79,9 @@ pub fn get_profile_config_path(
     app: &tauri::AppHandle,
     profile_id: &str,
 ) -> Result<PathBuf, String> {
+    if !crate::commands::backup::is_valid_profile_id(profile_id) {
+        return Err("Invalid profile ID".to_string());
+    }
     let mut path = app
         .path()
         .app_data_dir()
@@ -461,7 +506,27 @@ pub async fn refresh_subscription(
     app: tauri::AppHandle,
     profile_id: String,
 ) -> Result<ProfileMeta, String> {
+    refresh_subscription_internal(app, profile_id, None).await
+}
+
+#[tauri::command]
+pub async fn apply_previewed_subscription_refresh(
+    app: tauri::AppHandle,
+    profile_id: String,
+    preview_token: String,
+) -> Result<ProfileMeta, String> {
+    refresh_subscription_internal(app, profile_id, Some(preview_token)).await
+}
+
+async fn refresh_subscription_internal(
+    app: tauri::AppHandle,
+    profile_id: String,
+    preview_token: Option<String>,
+) -> Result<ProfileMeta, String> {
     let _lock = SUBSCRIPTION_LOCK.lock().await;
+    if !crate::commands::backup::is_valid_profile_id(&profile_id) {
+        return Err("Invalid profile ID".to_string());
+    }
     // 1. Check whether the target profile is active and whether a live restart is required.
     let active_id = get_active_profile_id(&app)?;
     let is_active = active_id.as_deref() == Some(&profile_id);
@@ -522,11 +587,14 @@ pub async fn refresh_subscription(
         .ok_or_else(|| "Profile does not have a subscription URL".to_string())?
         .to_string();
 
-    // 3. Fetch remote subscription content via bounded HTTPS client with SSRF protection
-    let bytes = crate::config::subscription::fetch_subscription_content(&sub_url).await?;
-
-    // 4. Adapt/parse subscription content into outbounds
-    let outbounds = adapt(&bytes)?;
+    // A confirmed preview applies the exact fetched nodes, not a second remote response.
+    let outbounds = if let Some(token) = preview_token {
+        let current_path = get_profile_config_path(&app, &profile_id)?;
+        take_subscription_snapshot(&token, &profile_id, &profiles_content, &current_path)?
+    } else {
+        let bytes = crate::config::subscription::fetch_subscription_content(&sub_url).await?;
+        adapt(&bytes)?
+    };
     if outbounds.is_empty() {
         return Err("Subscription contains no usable proxy nodes.".to_string());
     }
@@ -783,6 +851,231 @@ pub async fn run_subscription_auto_updates(app: tauri::AppHandle) -> Result<Vec<
     }
 
     Ok(refreshed)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionDiffPreview {
+    pub profile_id: String,
+    pub profile_name: String,
+    pub old_node_count: usize,
+    pub new_node_count: usize,
+    pub added_nodes: Vec<String>,
+    pub removed_nodes: Vec<String>,
+    pub retained_node_count: usize,
+    pub current_selected_tag: Option<String>,
+    pub is_selected_node_preserved: bool,
+    pub fallback_selected_tag: Option<String>,
+    pub preview_token: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreview {
+    pub node_count: usize,
+    pub node_types: std::collections::HashMap<String, usize>,
+    pub sample_nodes: Vec<String>,
+}
+
+pub fn calculate_subscription_diff(
+    profile_id: &str,
+    profile_name: &str,
+    current_tags: &[String],
+    current_selected_tag: Option<&str>,
+    new_tags: &[String],
+) -> SubscriptionDiffPreview {
+    let old_set: std::collections::HashSet<&str> =
+        current_tags.iter().map(|s| s.as_str()).collect();
+    let new_set: std::collections::HashSet<&str> = new_tags.iter().map(|s| s.as_str()).collect();
+
+    let added_nodes: Vec<String> = new_tags
+        .iter()
+        .filter(|t| !old_set.contains(t.as_str()))
+        .cloned()
+        .collect();
+
+    let removed_nodes: Vec<String> = current_tags
+        .iter()
+        .filter(|t| !new_set.contains(t.as_str()))
+        .cloned()
+        .collect();
+
+    let retained_node_count = current_tags
+        .iter()
+        .filter(|t| new_set.contains(t.as_str()))
+        .count();
+
+    let is_selected_node_preserved = match current_selected_tag {
+        Some(tag) => new_set.contains(tag),
+        None => true,
+    };
+
+    let fallback_selected_tag = if !is_selected_node_preserved {
+        new_tags.first().cloned()
+    } else {
+        current_selected_tag.map(|s| s.to_string())
+    };
+
+    SubscriptionDiffPreview {
+        profile_id: profile_id.to_string(),
+        profile_name: profile_name.to_string(),
+        old_node_count: current_tags.len(),
+        new_node_count: new_tags.len(),
+        added_nodes,
+        removed_nodes,
+        retained_node_count,
+        current_selected_tag: current_selected_tag.map(|s| s.to_string()),
+        is_selected_node_preserved,
+        fallback_selected_tag,
+        preview_token: None,
+    }
+}
+
+/// Previews the diff (added, removed, retained nodes) resulting from refreshing a subscription profile,
+/// without modifying disk configurations.
+#[tauri::command]
+pub async fn preview_subscription_refresh(
+    app: tauri::AppHandle,
+    profile_id: String,
+) -> Result<SubscriptionDiffPreview, String> {
+    let _lock = SUBSCRIPTION_LOCK.lock().await;
+    if !crate::commands::backup::is_valid_profile_id(&profile_id) {
+        return Err("Invalid profile ID".to_string());
+    }
+    let mut profiles_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    profiles_path.push("profiles.json");
+
+    if !profiles_path.exists() {
+        return Err("profiles.json does not exist".to_string());
+    }
+
+    let profiles_content = std::fs::read_to_string(&profiles_path)
+        .map_err(|e| format!("Failed to read profiles.json: {}", e))?;
+    let profiles_json: serde_json::Value = serde_json::from_str(&profiles_content)
+        .map_err(|e| format!("Failed to parse profiles.json: {}", e))?;
+
+    let profiles_arr = profiles_json
+        .get("profiles")
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "No profiles found in profiles.json".to_string())?;
+
+    let profile_val = profiles_arr
+        .iter()
+        .find(|p| p.get("id").and_then(|id| id.as_str()) == Some(&profile_id))
+        .ok_or_else(|| format!("Profile not found with ID: {}", profile_id))?;
+
+    let profile_name = profile_val
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("Subscription")
+        .to_string();
+
+    let sub_url = profile_val
+        .get("subscriptionUrl")
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| "Profile does not have a subscription URL".to_string())?;
+
+    let current_selected_tag = profile_val.get("selectedNodeTag").and_then(|t| t.as_str());
+
+    let current_config_path = get_profile_config_path(&app, &profile_id)?;
+    let content = std::fs::read_to_string(&current_config_path)
+        .map_err(|error| format!("Failed to read current profile configuration: {}", error))?;
+    let parsed: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| format!("Failed to parse current profile configuration: {}", error))?;
+    parsed
+        .get("outbounds")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "Current profile configuration has no outbounds.".to_string())?;
+    let current_tags: Vec<String> = extract_nodes_from_config(&parsed)
+        .iter()
+        .filter_map(|node| node.get("tag")?.as_str().map(str::to_string))
+        .collect();
+
+    let bytes = crate::config::subscription::fetch_subscription_content(sub_url).await?;
+    let new_outbounds = adapt(&bytes)?;
+    if new_outbounds.is_empty() {
+        return Err("Subscription contains no usable proxy nodes.".to_string());
+    }
+
+    let new_tags: Vec<String> = new_outbounds.iter().map(|o| o.tag.clone()).collect();
+    if std::fs::read_to_string(&profiles_path).ok().as_deref() != Some(profiles_content.as_str())
+        || std::fs::read_to_string(&current_config_path)
+            .ok()
+            .as_deref()
+            != Some(content.as_str())
+    {
+        return Err("Subscription changed during preview. Preview the update again.".to_string());
+    }
+    let mut preview = calculate_subscription_diff(
+        &profile_id,
+        &profile_name,
+        &current_tags,
+        current_selected_tag,
+        &new_tags,
+    );
+    let token = uuid::Uuid::new_v4().to_string();
+    let mut snapshots = subscription_snapshots()
+        .lock()
+        .map_err(|_| "Subscription preview state is unavailable".to_string())?;
+    // Keep one bounded preview at a time; a later preview invalidates an earlier confirmation.
+    *snapshots = Some((
+        token.clone(),
+        SubscriptionSnapshot {
+            profile_id,
+            profiles_content,
+            current_config: content,
+            outbounds: new_outbounds,
+            created_at: Instant::now(),
+        },
+    ));
+    preview.preview_token = Some(token);
+    Ok(preview)
+}
+
+/// Previews parsed nodes and types from a raw configuration or subscription URL before import.
+#[tauri::command]
+pub async fn preview_import_config(content: String) -> Result<ImportPreview, String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Err("Content is empty".to_string());
+    }
+
+    if trimmed.starts_with("http://") {
+        return Err("Insecure HTTP subscription URLs are not supported. Only HTTPS is allowed for security.".to_string());
+    }
+    if trimmed.starts_with("ftp://") || trimmed.starts_with("file://") {
+        return Err(
+            "Unsupported URL scheme. Only HTTPS subscription URLs are supported.".to_string(),
+        );
+    }
+    let bytes = if trimmed.starts_with("https://") {
+        crate::config::subscription::fetch_subscription_content(trimmed).await?
+    } else {
+        if trimmed.len() > 10 * 1024 * 1024 {
+            return Err("Preview content exceeds the 10 MB limit.".to_string());
+        }
+        trimmed.as_bytes().to_vec()
+    };
+
+    let outbounds = adapt(&bytes)?;
+    let mut node_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut sample_nodes = Vec::new();
+
+    for (idx, ob) in outbounds.iter().enumerate() {
+        *node_types.entry(ob.outbound_type.clone()).or_insert(0) += 1;
+        if idx < 10 {
+            sample_nodes.push(ob.tag.clone());
+        }
+    }
+
+    Ok(ImportPreview {
+        node_count: outbounds.len(),
+        node_types,
+        sample_nodes,
+    })
 }
 
 #[cfg(test)]
@@ -1409,6 +1702,74 @@ mod transaction_tests {
         assert_eq!(entries[0].as_ref().unwrap().path(), dest);
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_subscription_preview_token_is_one_time_and_detects_changes() {
+        let dir = std::env::temp_dir().join(format!("xlink_preview_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("profile.json");
+        std::fs::write(&config, "previous").unwrap();
+        let outbound = crate::config::adapters::SingBoxOutbound {
+            outbound_type: "vmess".into(),
+            tag: "new".into(),
+            fields: Default::default(),
+        };
+        let put_snapshot = |token: &str| {
+            *subscription_snapshots().lock().unwrap() = Some((
+                token.into(),
+                SubscriptionSnapshot {
+                    profile_id: "profile".into(),
+                    profiles_content: "profiles".into(),
+                    current_config: "previous".into(),
+                    outbounds: vec![outbound.clone()],
+                    created_at: Instant::now(),
+                },
+            ));
+        };
+        put_snapshot("one");
+        assert!(take_subscription_snapshot("one", "profile", "profiles", &config).is_ok());
+        assert!(take_subscription_snapshot("one", "profile", "profiles", &config).is_err());
+        put_snapshot("two");
+        std::fs::write(&config, "changed").unwrap();
+        assert!(take_subscription_snapshot("two", "profile", "profiles", &config).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_calculate_subscription_diff_preserves_selected_node() {
+        let current = vec![
+            "node-1".to_string(),
+            "node-2".to_string(),
+            "node-3".to_string(),
+        ];
+        let incoming = vec![
+            "node-2".to_string(),
+            "node-3".to_string(),
+            "node-4".to_string(),
+        ];
+
+        let diff =
+            calculate_subscription_diff("sub-1", "My Sub", &current, Some("node-2"), &incoming);
+        assert_eq!(diff.added_nodes, vec!["node-4"]);
+        assert_eq!(diff.removed_nodes, vec!["node-1"]);
+        assert_eq!(diff.retained_node_count, 2);
+        assert!(diff.is_selected_node_preserved);
+        assert_eq!(diff.fallback_selected_tag, Some("node-2".to_string()));
+    }
+
+    #[test]
+    fn test_calculate_subscription_diff_handles_removed_selected_node() {
+        let current = vec!["node-1".to_string(), "node-2".to_string()];
+        let incoming = vec!["node-3".to_string(), "node-4".to_string()];
+
+        let diff =
+            calculate_subscription_diff("sub-1", "My Sub", &current, Some("node-1"), &incoming);
+        assert_eq!(diff.added_nodes, vec!["node-3", "node-4"]);
+        assert_eq!(diff.removed_nodes, vec!["node-1", "node-2"]);
+        assert_eq!(diff.retained_node_count, 0);
+        assert!(!diff.is_selected_node_preserved);
+        assert_eq!(diff.fallback_selected_tag, Some("node-3".to_string()));
     }
 }
 
