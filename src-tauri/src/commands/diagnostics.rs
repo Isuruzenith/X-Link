@@ -456,6 +456,8 @@ pub struct DiagnosticsReport {
     pub profiles: ProfilesDiagnostics,
     pub settings: serde_json::Value,
     pub recent_logs: Vec<String>,
+    pub dns_queries: Vec<crate::state::DnsLogEntry>,
+    pub traces: Vec<crate::state::TraceEntry>,
 }
 
 // ─── TAURI COMMANDS ─────────────────────────────────────────────────────────
@@ -504,7 +506,10 @@ pub async fn export_system_diagnostics(
         None
     };
 
-    let tun_supported = crate::commands::system::check_tun_support(app.clone());
+    let tun_supported = matches!(
+        crate::os::get_network_manager().check_tun_support().await,
+        Ok(crate::os::TunSupportStatus::Supported)
+    );
 
     let proxy_diag = ProxyDiagnostics {
         status: proxy_status_str.to_string(),
@@ -554,6 +559,8 @@ pub async fn export_system_diagnostics(
     let raw_logs = state.get_buffered_logs_snapshot(50);
     let sanitized_logs = raw_logs.iter().map(|l| sanitize_log_line(l)).collect();
 
+    let diag_snapshot = state.get_diagnostic_traces_snapshot();
+
     Ok(DiagnosticsReport {
         timestamp: now,
         app_version,
@@ -565,6 +572,8 @@ pub async fn export_system_diagnostics(
         profiles: profiles_diag,
         settings: sanitized_settings,
         recent_logs: sanitized_logs,
+        dns_queries: diag_snapshot.dns_queries,
+        traces: diag_snapshot.traces,
     })
 }
 

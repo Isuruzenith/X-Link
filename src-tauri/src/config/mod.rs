@@ -85,6 +85,7 @@ pub fn build_route_rules(
     _rule_sets: &[crate::config::rules::RuleSet],
     geosite_db_exists: bool,
     geoip_db_exists: bool,
+    outbound_groups: &[crate::config::rules::OutboundGroup],
 ) -> Vec<Value> {
     let mut rules = vec![serde_json::json!({ "port": 53, "action": "hijack-dns" })];
 
@@ -108,9 +109,12 @@ pub fn build_route_rules(
     // User-defined rules evaluated top-to-bottom
     for rule in user_rules {
         if rule.enabled.unwrap_or(true) {
-            if let Some(json_rule) =
-                crate::config::rules::build_singbox_rule(rule, geosite_db_exists, geoip_db_exists)
-            {
+            if let Some(json_rule) = crate::config::rules::build_singbox_rule(
+                rule,
+                geosite_db_exists,
+                geoip_db_exists,
+                outbound_groups,
+            ) {
                 rules.push(json_rule);
             }
         }
@@ -609,7 +613,7 @@ mod tests {
             update_interval: "1d".to_string(),
         }];
 
-        let rules = build_route_rules(true, true, &user_rules, &rule_sets, true, true);
+        let rules = build_route_rules(true, true, &user_rules, &rule_sets, true, true, &[]);
 
         // rules should contain hijack-dns (port 53), sniff, bypass_lan (ip_is_private & domain_suffix),
         // and our user rule (custom-bypass.com).

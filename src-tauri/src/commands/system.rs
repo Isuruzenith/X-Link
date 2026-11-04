@@ -516,7 +516,7 @@ pub fn check_port_status(
         .child_process
         .lock()
         .ok()
-        .and_then(|guard| guard.as_ref().map(|child| child.pid()));
+        .and_then(|guard| guard.as_ref().and_then(|child| child.pid()));
     Ok(ports
         .into_iter()
         .map(|port| {
@@ -661,168 +661,40 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn check_tun_support(app: tauri::AppHandle) -> bool {
-    #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+pub fn is_tun_supported() -> bool {
+    #[cfg(target_os = "windows")]
     {
-        let _ = app;
-        crate::os::is_elevated()
+        crate::os::is_elevated() && crate::os::windows::find_wintun_dll().is_some()
     }
-
+    #[cfg(target_os = "macos")]
+    {
+        crate::os::is_elevated() || crate::os::darwin::is_darwin_helper_ready()
+    }
     #[cfg(target_os = "linux")]
     {
-        if crate::os::is_elevated() {
-            return true;
-        }
-
-        // Check sidecar capabilities on Linux
-        let current_exe = match std::env::current_exe() {
-            Ok(path) => path,
-            Err(_) => return false,
-        };
-        let current_dir = match current_exe.parent() {
-            Some(path) => path,
-            None => return false,
-        };
-
-        let mut sidecar_path = None;
-        if let Ok(entries) = std::fs::read_dir(current_dir) {
-            for entry in entries.flatten() {
-                let filename = entry.file_name().to_string_lossy().into_owned();
-                if filename.starts_with("sing-box") {
-                    sidecar_path = Some(entry.path());
-                    break;
-                }
-            }
-        }
-
-        let sidecar_path = match sidecar_path {
-            Some(path) => path,
-            None => match app
-                .path()
-                .resolve("resources/sing-box", tauri::path::BaseDirectory::Resource)
-            {
-                Ok(path) => path,
-                Err(_) => return false,
-            },
-        };
-
-        if let Ok(output) = std::process::Command::new("getcap")
-            .arg(&sidecar_path)
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if stdout.contains("cap_net_admin") {
-                return true;
-            }
-        }
-        false
+        crate::os::linux::is_linux_tun_capable()
     }
 }
 
 #[tauri::command]
-pub fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows::core::PCWSTR;
-        use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+pub async fn check_tun_support_status() -> Result<crate::os::TunSupportStatus, String> {
+    crate::os::get_network_manager().check_tun_support().await
+}
 
-        let exe_path =
-            std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
+#[tauri::command]
+pub async fn check_tun_support(_app: tauri::AppHandle) -> bool {
+    matches!(
+        crate::os::get_network_manager().check_tun_support().await,
+        Ok(crate::os::TunSupportStatus::Supported)
+    )
+}
 
-        let mut verb: Vec<u16> = std::ffi::OsStr::new("runas").encode_wide().collect();
-        verb.push(0);
-
-        let mut file: Vec<u16> = exe_path.as_os_str().encode_wide().collect();
-        file.push(0);
-
-        // The elevated process waits for this instance to exit before the
-        // single-instance plugin claims the application mutex.
-        let handoff = format!("--elevation-handoff={}", std::process::id());
-        let mut params: Vec<u16> = std::ffi::OsStr::new(&handoff).encode_wide().collect();
-        params.push(0);
-
-        unsafe {
-            let result = ShellExecuteW(
-                None,
-                PCWSTR(verb.as_ptr()),
-                PCWSTR(file.as_ptr()),
-                PCWSTR(params.as_ptr()),
-                None,
-                SW_SHOW,
-            );
-
-            if result.0 as isize <= 32 {
-                return Err("Elevation request denied or failed".to_string());
-            }
-        }
-
-        // ShellExecuteW only confirms launch. Leave the elevated instance to
-        // claim the mutex after this one finishes its owned-process cleanup.
-        crate::tray::perform_clean_cleanup(&app);
-        std::process::exit(0);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let exe_path =
-            std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
-
-        let script = format!(
-            "do shell script \"'{}'\" with administrator privileges",
-            exe_path.to_str().ok_or("Invalid path encoding")?
-        );
-
-        let _ = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .spawn()
-            .map_err(|e| format!("Failed to run osascript: {}", e))?;
-
-        std::process::exit(0);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let current_dir = current_exe.parent().ok_or("Failed to get exe directory")?;
-
-        let mut sidecar_path = None;
-        if let Ok(entries) = std::fs::read_dir(current_dir) {
-            for entry in entries.flatten() {
-                let filename = entry.file_name().to_string_lossy().into_owned();
-                if filename.starts_with("sing-box") {
-                    sidecar_path = Some(entry.path());
-                    break;
-                }
-            }
-        }
-
-        let sidecar_path = match sidecar_path {
-            Some(path) => path,
-            None => app
-                .path()
-                .resolve("resources/sing-box", tauri::path::BaseDirectory::Resource)
-                .map_err(|e| format!("Failed to resolve sing-box sidecar path: {}", e))?,
-        };
-
-        let output = std::process::Command::new("pkexec")
-            .args([
-                "setcap",
-                "cap_net_admin,cap_net_bind_service=+ep",
-                sidecar_path.to_str().ok_or("Invalid path encoding")?,
-            ])
-            .output()
-            .map_err(|e| format!("Failed to run pkexec: {}", e))?;
-
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr).to_string();
-            return Err(format!("Failed to set capabilities: {}", err.trim()));
-        }
-
-        Ok(())
-    }
+#[tauri::command]
+pub async fn request_elevation(app: tauri::AppHandle) -> Result<(), String> {
+    crate::os::get_network_manager()
+        .request_platform_elevation(&app)
+        .await
 }
 
 #[tauri::command]

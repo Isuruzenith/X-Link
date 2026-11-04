@@ -11,6 +11,41 @@ const MAX_BACKUP_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+pub struct KdfParams {
+    pub memory_cost_kib: u32,
+    pub time_cost: u32,
+    pub parallelism: u32,
+}
+
+impl Default for KdfParams {
+    fn default() -> Self {
+        Self {
+            memory_cost_kib: 64 * 1024,
+            time_cost: 3,
+            parallelism: 1,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupArchiveEnvelope {
+    pub version: u32,
+    pub salt: String,
+    pub nonce: String,
+    pub ciphertext: String,
+    pub kdf_params: KdfParams,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum BackupExportPayload {
+    Encrypted(BackupArchiveEnvelope),
+    Unencrypted(ConfigBackupArchive),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupMetadata {
     pub schema_version: u32,
     pub app_version: String,
@@ -588,9 +623,129 @@ pub fn apply_backup_restore(
     })
 }
 
+pub fn derive_backup_key(
+    passphrase: &str,
+    salt: &[u8],
+    params: &KdfParams,
+) -> Result<[u8; 32], String> {
+    if params.memory_cost_kib < 16 * 1024 || params.memory_cost_kib > 256 * 1024 {
+        return Err("Argon2 memory cost out of bounds (16MB - 256MB).".to_string());
+    }
+    if params.time_cost < 1 || params.time_cost > 10 {
+        return Err("Argon2 time cost out of bounds (1 - 10).".to_string());
+    }
+    if params.parallelism < 1 || params.parallelism > 4 {
+        return Err("Argon2 parallelism out of bounds (1 - 4).".to_string());
+    }
+
+    let argon2_params = argon2::Params::new(
+        params.memory_cost_kib,
+        params.time_cost,
+        params.parallelism,
+        Some(32),
+    )
+    .map_err(|e| format!("Invalid Argon2 parameters: {}", e))?;
+    let argon2 = argon2::Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon2_params,
+    );
+    let mut key = [0u8; 32];
+    argon2
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+        .map_err(|e| format!("Argon2 key derivation failed: {}", e))?;
+    Ok(key)
+}
+
+pub fn encrypt_backup_archive(
+    archive: &ConfigBackupArchive,
+    passphrase: &str,
+) -> Result<BackupArchiveEnvelope, String> {
+    use aes_gcm::aead::rand_core::RngCore;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use base64::prelude::*;
+
+    let mut salt = [0u8; 16];
+    aes_gcm::aead::rand_core::OsRng.fill_bytes(&mut salt);
+    let mut nonce_bytes = [0u8; 12];
+    aes_gcm::aead::rand_core::OsRng.fill_bytes(&mut nonce_bytes);
+
+    let kdf_params = KdfParams::default();
+    let key = derive_backup_key(passphrase, &salt, &kdf_params)?;
+
+    let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| format!("Failed to initialize AES-GCM cipher: {}", e))?;
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+
+    let plaintext = serde_json::to_vec(archive)
+        .map_err(|e| format!("Failed to serialize backup archive: {}", e))?;
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext.as_ref())
+        .map_err(|e| format!("AES-GCM encryption failed: {}", e))?;
+
+    Ok(BackupArchiveEnvelope {
+        version: 2,
+        salt: BASE64_STANDARD.encode(salt),
+        nonce: BASE64_STANDARD.encode(nonce_bytes),
+        ciphertext: BASE64_STANDARD.encode(ciphertext),
+        kdf_params,
+    })
+}
+
+pub fn decrypt_backup_envelope(
+    envelope: &BackupArchiveEnvelope,
+    passphrase: &str,
+) -> Result<ConfigBackupArchive, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use base64::prelude::*;
+
+    let salt = BASE64_STANDARD
+        .decode(&envelope.salt)
+        .map_err(|e| format!("Invalid salt base64: {}", e))?;
+    let nonce_bytes = BASE64_STANDARD
+        .decode(&envelope.nonce)
+        .map_err(|e| format!("Invalid nonce base64: {}", e))?;
+    let ciphertext = BASE64_STANDARD
+        .decode(&envelope.ciphertext)
+        .map_err(|e| format!("Invalid ciphertext base64: {}", e))?;
+
+    let key = derive_backup_key(passphrase, &salt, &envelope.kdf_params)?;
+    let cipher = aes_gcm::Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| format!("Failed to initialize AES-GCM cipher: {}", e))?;
+    let nonce = aes_gcm::Nonce::from_slice(&nonce_bytes);
+
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext.as_ref())
+        .map_err(|_| "Decryption failed. Incorrect passphrase or corrupted backup.".to_string())?;
+
+    serde_json::from_slice(&plaintext)
+        .map_err(|e| format!("Decrypted payload is not a valid ConfigBackupArchive: {}", e))
+}
+
+pub fn resolve_archive_from_value(
+    value: serde_json::Value,
+    passphrase: Option<&str>,
+) -> Result<ConfigBackupArchive, String> {
+    if value.get("version").and_then(|v| v.as_u64()) == Some(2) {
+        let envelope: BackupArchiveEnvelope = serde_json::from_value(value)
+            .map_err(|e| format!("Invalid v2 backup envelope: {}", e))?;
+        let pass = passphrase.unwrap_or("").trim();
+        if pass.is_empty() {
+            return Err("PASSPHRASE_REQUIRED: This backup is encrypted and requires a passphrase.".to_string());
+        }
+        decrypt_backup_envelope(&envelope, pass)
+    } else {
+        serde_json::from_value::<ConfigBackupArchive>(value)
+            .map_err(|e| format!("Invalid backup archive format: {}", e))
+    }
+}
+
 /// Export a complete, validated backup archive of the current X-Link configuration.
 #[tauri::command]
-pub async fn export_config_backup(app: tauri::AppHandle) -> Result<ConfigBackupArchive, String> {
+pub async fn export_config_backup(
+    app: tauri::AppHandle,
+    passphrase: Option<String>,
+) -> Result<BackupExportPayload, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -664,46 +819,58 @@ pub async fn export_config_backup(app: tauri::AppHandle) -> Result<ConfigBackupA
         routing,
     };
     validate_backup_archive_internal(&archive)?;
-    Ok(archive)
+
+    if let Some(pass) = passphrase.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let envelope = encrypt_backup_archive(&archive, pass)?;
+        Ok(BackupExportPayload::Encrypted(envelope))
+    } else {
+        Ok(BackupExportPayload::Unencrypted(archive))
+    }
 }
 
 /// Validate a candidate backup archive without applying any changes.
 #[tauri::command]
 pub fn validate_backup_archive(
-    archive: ConfigBackupArchive,
+    archive: serde_json::Value,
+    passphrase: Option<String>,
 ) -> Result<BackupValidationResult, String> {
-    validate_backup_archive_internal(&archive)
+    let resolved = resolve_archive_from_value(archive, passphrase.as_deref())?;
+    validate_backup_archive_internal(&resolved)
 }
 
 /// Restore selected configuration files, rolling back committed files on a write failure.
 #[tauri::command]
 pub async fn import_config_backup(
     app: tauri::AppHandle,
-    archive: ConfigBackupArchive,
+    archive: serde_json::Value,
+    passphrase: Option<String>,
     options: RestoreOptions,
 ) -> Result<RestoreResult, String> {
-    // Refresh holds the subscription lock while it restarts a connected proxy, which
-    // acquires the toggle lock; keep the same lock order here to avoid deadlock.
+    // Disconnect-before-lock if connected
+    let state = app.state::<crate::state::ProxyState>();
+    if state.get_status() == crate::state::ConnectionStatus::Connected || state.is_running() {
+        crate::commands::proxy::toggle_proxy(app.clone(), state.clone(), false, None, None).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
     let _subscription_lock = crate::commands::config::SUBSCRIPTION_LOCK.lock().await;
     let _connection_lock = crate::commands::proxy::get_toggle_lock().lock().await;
-    let state = app.state::<crate::state::ProxyState>();
-    if state.get_status() != crate::state::ConnectionStatus::Disconnected || state.is_running() {
-        return Err(
-            "Disconnect the proxy before restoring a backup. Restart the app after restoring."
-                .to_string(),
-        );
-    }
+
+    let resolved = resolve_archive_from_value(archive, passphrase.as_deref())?;
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
 
-    let result = apply_backup_restore(&app_data_dir, &archive, &options)?;
+    let result = apply_backup_restore(&app_data_dir, &resolved, &options)?;
 
     // If settings were restored, update in-memory state.
-    if options.restore_settings && archive.settings.is_some() {
+    if options.restore_settings && resolved.settings.is_some() {
         state.reload_settings(&app)?;
     }
+
+    use tauri::Emitter;
+    let _ = app.emit("config-backup-restored", ());
 
     Ok(result)
 }
@@ -1054,5 +1221,119 @@ mod tests {
         assert!(validate_backup_archive_internal(&archive)
             .unwrap_err()
             .contains("not listed in profiles"));
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_v2_roundtrip() {
+        let mut configs = HashMap::new();
+        configs.insert("p1".to_string(), sample_valid_outbound_json());
+        let archive = ConfigBackupArchive {
+            metadata: BackupMetadata {
+                schema_version: 1,
+                app_version: "0.8.0".into(),
+                exported_at: 1,
+                platform: "windows".into(),
+            },
+            settings: Some(serde_json::json!({ "proxyMode": "system" })),
+            profiles: Some(serde_json::json!({
+                "profiles": [{ "id": "p1", "name": "P1", "type": "manual" }],
+                "activeProfileId": "p1"
+            })),
+            profile_configs: configs,
+            routing: None,
+        };
+
+        let passphrase = "SecretPassword123!";
+        let envelope = encrypt_backup_archive(&archive, passphrase)
+            .expect("Encryption should succeed");
+        assert_eq!(envelope.version, 2);
+        assert!(!envelope.ciphertext.is_empty());
+        assert!(!envelope.salt.is_empty());
+        assert!(!envelope.nonce.is_empty());
+
+        let decrypted = decrypt_backup_envelope(&envelope, passphrase)
+            .expect("Decryption with correct password should succeed");
+        assert_eq!(decrypted.metadata.app_version, "0.8.0");
+        assert_eq!(decrypted.profile_configs.len(), 1);
+    }
+
+    #[test]
+    fn test_decrypt_v2_wrong_passphrase() {
+        let mut configs = HashMap::new();
+        configs.insert("p1".to_string(), sample_valid_outbound_json());
+        let archive = ConfigBackupArchive {
+            metadata: BackupMetadata {
+                schema_version: 1,
+                app_version: "0.8.0".into(),
+                exported_at: 1,
+                platform: "windows".into(),
+            },
+            settings: None,
+            profiles: None,
+            profile_configs: configs,
+            routing: None,
+        };
+
+        let envelope = encrypt_backup_archive(&archive, "CorrectPassword").unwrap();
+        let err = decrypt_backup_envelope(&envelope, "WrongPassword").unwrap_err();
+        assert!(err.contains("Decryption failed"));
+    }
+
+    #[test]
+    fn test_kdf_params_bounds_validation() {
+        let mut params = KdfParams::default();
+        params.memory_cost_kib = 1024; // below 16MB minimum
+        let err = derive_backup_key("test", &[0u8; 16], &params).unwrap_err();
+        assert!(err.contains("out of bounds"));
+
+        params = KdfParams::default();
+        params.time_cost = 0; // below 1
+        let err = derive_backup_key("test", &[0u8; 16], &params).unwrap_err();
+        assert!(err.contains("out of bounds"));
+
+        params = KdfParams::default();
+        params.parallelism = 10; // above 4
+        let err = derive_backup_key("test", &[0u8; 16], &params).unwrap_err();
+        assert!(err.contains("out of bounds"));
+    }
+
+    #[test]
+    fn test_resolve_archive_from_v1_raw() {
+        let mut configs = HashMap::new();
+        configs.insert("p1".to_string(), sample_valid_outbound_json());
+        let archive = ConfigBackupArchive {
+            metadata: BackupMetadata {
+                schema_version: 1,
+                app_version: "0.8.0".into(),
+                exported_at: 1,
+                platform: "windows".into(),
+            },
+            settings: None,
+            profiles: None,
+            profile_configs: configs,
+            routing: None,
+        };
+
+        let v1_val = serde_json::to_value(&archive).unwrap();
+        let resolved = resolve_archive_from_value(v1_val, None).expect("Should resolve v1 raw backup");
+        assert_eq!(resolved.metadata.schema_version, 1);
+    }
+
+    #[test]
+    fn test_resolve_archive_v2_requires_passphrase() {
+        let envelope = BackupArchiveEnvelope {
+            version: 2,
+            salt: "salt".into(),
+            nonce: "nonce".into(),
+            ciphertext: "ciphertext".into(),
+            kdf_params: KdfParams::default(),
+        };
+
+        let v2_val = serde_json::to_value(&envelope).unwrap();
+        let err = resolve_archive_from_value(v2_val.clone(), None).unwrap_err();
+        assert!(err.contains("PASSPHRASE_REQUIRED"));
+
+        let err_empty = resolve_archive_from_value(v2_val, Some("   ")).unwrap_err();
+        assert!(err_empty.contains("PASSPHRASE_REQUIRED"));
     }
 }

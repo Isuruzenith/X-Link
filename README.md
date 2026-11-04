@@ -70,7 +70,7 @@ When a connection attempt fails, X-Link doesn't just retry — it systematically
 | 3 | **Native TLS** | Disables uTLS fingerprinting entirely |
 | 4 | **DNS Bootstrap** | Routes proxy DNS through `1.1.1.1` / `8.8.8.8` direct |
 | 5 | **TUN Compatibility** | Relaxes strict routing and interface settings |
-| ⤵️ | **System Proxy Rollback** | If all TUN attempts fail, regenerates config for system proxy mode |
+| ⚠️ | **Strict Mode Diagnostic** | TUN failures halt cleanly and trigger an elevation dialog without silent fallback |
 
 </details>
 

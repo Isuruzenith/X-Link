@@ -1,7 +1,23 @@
 # Changelog
 
-## [0.8.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.2...x-link-v0.8.0) (2026-07-14)
+## [0.8.0](https://github.com/Isuruzenith/X-Link/compare/x-link-v0.7.2...x-link-v0.8.0) (2026-11-04)
 
+### Stable Release Highlights
+
+* **Architecture & OS Subsystems**:
+  * Unified `PlatformNetworkManager` trait with platform-specific asynchronous and synchronous proxy rollback hooks (`restore_system_proxy_sync`).
+  * Dedicated non-root Unix supervisors (`xlink-darwin-supervisor`, `xlink-linux-supervisor`) with stdin heartbeat and kqueue `EVFILT_PROC` / `PR_SET_PDEATHSIG` clean exit escalation.
+  * Windows Job Object binding (`assign_process_to_job_object`) ensuring child process hierarchy cleanup on unexpected termination.
+* **Core Routing Engine & Outbound Groups**:
+  * First-class declarative Outbound Groups (`selector`, `urltest`, `fallback`) with automated health checks and runtime status polling.
+  * Kahn's algorithm topological sort for detour cycle detection, 2-hop depth limits, and UDP-over-HTTP prevention.
+  * Enforced Invariant 5: zero silent fallbacks from TUN to System Proxy, backed by structured error responses and elevation modal triggers.
+* **Telemetry & Real-time Diagnostics**:
+  * In-memory ring buffers capturing live DNS query logs and sing-box route trace matches.
+  * Real-time active connection tracking with top-100 speed windowing, delta rate calculations, and stale connection pruning.
+* **Security & Configuration Backups**:
+  * AES-256-GCM authenticated encryption with Argon2id password-based key derivation for v2 backup envelopes.
+  * Backward compatibility for unencrypted v1 archives, parameter bounds verification, and disconnect-before-lock deadlock avoidance.
 
 ### Features
 

@@ -1,12 +1,145 @@
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 
-/// Maximum lines retained in the Rust-side log buffer.
-const LOG_BUFFER_RUST_MAX: usize = 500;
+/// Maximum lines retained in the Rust-side log buffer and diagnostic ring buffers.
+pub const LOG_BUFFER_RUST_MAX: usize = 500;
+
+pub enum SidecarChild {
+    Shell(CommandChild),
+    #[allow(dead_code)]
+    Tokio(tokio::process::Child),
+}
+
+impl SidecarChild {
+    pub fn pid(&self) -> Option<u32> {
+        match self {
+            Self::Shell(child) => Some(child.pid()),
+            Self::Tokio(child) => child.id(),
+        }
+    }
+
+    pub fn kill(self) -> Result<(), String> {
+        match self {
+            Self::Shell(child) => child.kill().map_err(|e| e.to_string()),
+            Self::Tokio(mut child) => {
+                // Dropping stdin delivers EOF to the root/companion supervisor, which cleanly sends SIGTERM to sing-box
+                if let Some(stdin) = child.stdin.take() {
+                    drop(stdin);
+                } else {
+                    let _ = child.start_kill();
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DnsLogEntry {
+    pub timestamp: u64,
+    pub domain: String,
+    pub qtype: String,
+    pub answers: Vec<String>,
+    pub elapsed_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceEntry {
+    pub timestamp: u64,
+    pub inbound: String,
+    pub outbound: String,
+    pub rule: Option<String>,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectionByteSnapshot {
+    pub upload: u64,
+    pub download: u64,
+    pub recorded_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionMetadata {
+    #[serde(default)]
+    pub network: String,
+    #[serde(default)]
+    pub r#type: String,
+    #[serde(rename = "sourceIP", alias = "sourceIp", default)]
+    pub source_ip: String,
+    #[serde(default)]
+    pub source_port: String,
+    #[serde(rename = "destinationIP", alias = "destinationIp", default)]
+    pub destination_ip: String,
+    #[serde(default)]
+    pub destination_port: String,
+    #[serde(default)]
+    pub host: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveConnection {
+    pub id: String,
+    #[serde(default)]
+    pub metadata: ConnectionMetadata,
+    #[serde(default)]
+    pub upload: u64,
+    #[serde(default)]
+    pub download: u64,
+    #[serde(default)]
+    pub start: String,
+    #[serde(default)]
+    pub chains: Vec<String>,
+    #[serde(default)]
+    pub rule: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub up_speed: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub down_speed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionsPayload {
+    pub download_total: u64,
+    pub upload_total: u64,
+    pub total_connections: usize,
+    pub connections: Vec<ActiveConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyGroupInfo {
+    pub group: String,
+    pub winning_tag: String,
+    pub delay: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticTracesPayload {
+    pub dns_queries: Vec<DnsLogEntry>,
+    pub traces: Vec<TraceEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarSession {
+    pub pid: u32,
+    pub session_id: String,
+    pub proxy_mode: String,
+    pub api_port: u16,
+    pub started_at: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -109,7 +242,7 @@ impl Default for UserSettings {
 
 pub struct ProxyState {
     /// The live sing-box child process, if running
-    pub child_process: Mutex<Option<CommandChild>>,
+    pub child_process: Mutex<Option<SidecarChild>>,
     /// Active session ID to prevent race conditions during restart/hot-swaps
     pub active_session_id: Mutex<Option<String>>,
     /// Connection status
@@ -118,6 +251,14 @@ pub struct ProxyState {
     pub effective_proxy_mode: Mutex<Option<String>>,
     /// Rust-side log ring buffer
     pub log_buffer: Mutex<VecDeque<String>>,
+    /// Ring buffer for parsed DNS exchange records (capped at 500)
+    pub dns_buffer: Mutex<VecDeque<DnsLogEntry>>,
+    /// Ring buffer for parsed routing rule match traces (capped at 500)
+    pub trace_buffer: Mutex<VecDeque<TraceEntry>>,
+    /// Persistent HTTP client for Clash API queries with 800ms read timeout
+    pub clash_client: reqwest::Client,
+    /// Previous byte snapshots per connection ID for rate calculation
+    pub prev_connection_bytes: Mutex<HashMap<String, ConnectionByteSnapshot>>,
     /// Cached User Settings
     pub settings: Mutex<UserSettings>,
     /// Live bandwidth statistics
@@ -134,12 +275,22 @@ pub struct ProxyState {
 
 impl ProxyState {
     pub fn new() -> Self {
+        let clash_client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(800))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
             child_process: Mutex::new(None),
             active_session_id: Mutex::new(None),
             connection_status: Mutex::new(ConnectionStatus::Disconnected),
             effective_proxy_mode: Mutex::new(None),
             log_buffer: Mutex::new(VecDeque::with_capacity(LOG_BUFFER_RUST_MAX)),
+            dns_buffer: Mutex::new(VecDeque::with_capacity(LOG_BUFFER_RUST_MAX)),
+            trace_buffer: Mutex::new(VecDeque::with_capacity(LOG_BUFFER_RUST_MAX)),
+            clash_client,
+            prev_connection_bytes: Mutex::new(HashMap::new()),
             settings: Mutex::new(UserSettings::default()),
             upload_bytes: Mutex::new(0),
             download_bytes: Mutex::new(0),
@@ -381,6 +532,44 @@ impl ProxyState {
             buf.iter().skip(start).cloned().collect()
         } else {
             Vec::new()
+        }
+    }
+
+    /// Append a parsed DNS log entry to the ring buffer (capped at 500).
+    pub fn push_dns_log(&self, entry: DnsLogEntry) {
+        if let Ok(mut buf) = self.dns_buffer.lock() {
+            if buf.len() >= LOG_BUFFER_RUST_MAX {
+                buf.pop_front();
+            }
+            buf.push_back(entry);
+        }
+    }
+
+    /// Append a parsed routing trace entry to the ring buffer (capped at 500).
+    pub fn push_trace(&self, entry: TraceEntry) {
+        if let Ok(mut buf) = self.trace_buffer.lock() {
+            if buf.len() >= LOG_BUFFER_RUST_MAX {
+                buf.pop_front();
+            }
+            buf.push_back(entry);
+        }
+    }
+
+    /// Return a non-destructive snapshot of buffered DNS queries and routing traces.
+    pub fn get_diagnostic_traces_snapshot(&self) -> DiagnosticTracesPayload {
+        let dns_queries = self
+            .dns_buffer
+            .lock()
+            .map(|b| b.iter().cloned().collect())
+            .unwrap_or_default();
+        let traces = self
+            .trace_buffer
+            .lock()
+            .map(|b| b.iter().cloned().collect())
+            .unwrap_or_default();
+        DiagnosticTracesPayload {
+            dns_queries,
+            traces,
         }
     }
 }

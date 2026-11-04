@@ -21,7 +21,13 @@ pub fn perform_clean_cleanup(app: &AppHandle) {
     }
 
     // 3. Clear OS proxy settings
-    let _ = crate::os::disable_system_proxy();
+    let _ = crate::os::get_network_manager().restore_system_proxy_sync();
+
+    // 4. Remove sidecar session file
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        let session_file = app_data_dir.join("sidecar.session.json");
+        let _ = std::fs::remove_file(session_file);
+    }
 }
 
 /// Manually parses settings.json to check closeToTray setting

@@ -152,10 +152,14 @@ impl Default for TunSettings {
     }
 }
 
+pub fn should_include_tun_interface_name(target_os: &str) -> bool {
+    target_os != "macos"
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn generate_singbox_config(
     mixed_port: u16,
-    outbounds: Vec<SingBoxOutbound>,
+    mut outbounds: Vec<SingBoxOutbound>,
     proxy_mode: &str,
     dns_address: &str,
     listen_address: &str,
@@ -164,6 +168,8 @@ pub fn generate_singbox_config(
     user_rules: &[crate::config::rules::RoutingRule],
     rule_sets: &[crate::config::rules::RuleSet],
     app_data_dir: &std::path::Path,
+    outbound_groups: &[crate::config::rules::OutboundGroup],
+    host_dns_servers: &[std::net::IpAddr],
 ) -> Result<String, String> {
     let check_and_cleanup_db = |path: &std::path::Path| -> bool {
         if path.exists() {
@@ -185,6 +191,10 @@ pub fn generate_singbox_config(
     let geoip_db_exists = check_and_cleanup_db(&app_data_dir.join("geoip.db"))
         || check_and_cleanup_db(std::path::Path::new("geoip.db"))
         || check_and_cleanup_db(std::path::Path::new("src-tauri/geoip.db"));
+
+    // Strip dangling detour references gracefully before compilation
+    crate::config::validator::normalize_detour_references(&mut outbounds, outbound_groups);
+
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
         if let Some(server_val) = outbound.fields.get("server") {
@@ -195,31 +205,149 @@ pub fn generate_singbox_config(
     }
     let server_ips = resolve_server_ips(&server_hosts);
 
-    let mut node_tags: Vec<String> = outbounds.iter().map(|n| n.tag.clone()).collect();
+    let dialable_node_tags: Vec<String> = outbounds
+        .iter()
+        .filter(|n| {
+            !matches!(
+                n.outbound_type.as_str(),
+                "direct" | "block" | "dns" | "selector" | "urltest" | "fallback"
+            )
+        })
+        .map(|n| n.tag.clone())
+        .collect();
+
+    let all_node_tags: Vec<String> = outbounds.iter().map(|n| n.tag.clone()).collect();
+    let valid_node_tag_set: std::collections::HashSet<&str> =
+        all_node_tags.iter().map(|s| s.as_str()).collect();
+
+    // Compile OutboundGroups
+    let mut compiled_groups = Vec::new();
+    let mut group_tags = Vec::new();
+
+    for group in outbound_groups {
+        let tag_trimmed = group.tag.trim();
+        if tag_trimmed.is_empty()
+            || crate::config::validator::RESERVED_OUTBOUND_TAGS
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(tag_trimmed))
+            || valid_node_tag_set.contains(tag_trimmed)
+            || group_tags.contains(&group.tag)
+        {
+            continue;
+        }
+
+        let mut valid_members: Vec<String> = group
+            .nodes
+            .iter()
+            .filter(|n| valid_node_tag_set.contains(n.as_str()))
+            .cloned()
+            .collect();
+
+        if matches!(
+            group.r#type,
+            crate::config::rules::OutboundGroupType::Urltest
+                | crate::config::rules::OutboundGroupType::Fallback
+        ) && valid_members.len() > crate::config::validator::MAX_AUTOMATED_GROUP_NODES
+        {
+            valid_members.truncate(crate::config::validator::MAX_AUTOMATED_GROUP_NODES);
+        }
+
+        group_tags.push(group.tag.clone());
+
+        if valid_members.is_empty() {
+            if dialable_node_tags.is_empty() {
+                // No dialable nodes exist: emit as selector pointing to ["direct"], never ["proxy"]
+                compiled_groups.push(serde_json::json!({
+                    "type": "selector",
+                    "tag": group.tag,
+                    "outbounds": ["direct"]
+                }));
+                continue;
+            } else {
+                valid_members = match group.r#type {
+                    crate::config::rules::OutboundGroupType::Urltest
+                    | crate::config::rules::OutboundGroupType::Fallback => dialable_node_tags
+                        .iter()
+                        .take(crate::config::validator::MAX_AUTOMATED_GROUP_NODES)
+                        .cloned()
+                        .collect(),
+                    crate::config::rules::OutboundGroupType::Selector => dialable_node_tags.clone(),
+                };
+            }
+        }
+
+        match group.r#type {
+            crate::config::rules::OutboundGroupType::Urltest
+            | crate::config::rules::OutboundGroupType::Fallback => {
+                let url = group
+                    .url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("https://cp.cloudflare.com/generate_204");
+                let interval = group
+                    .interval
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("600s");
+                let tolerance = group.tolerance.unwrap_or(50);
+
+                compiled_groups.push(serde_json::json!({
+                    "type": "urltest",
+                    "tag": group.tag,
+                    "outbounds": valid_members,
+                    "url": url,
+                    "interval": interval,
+                    "tolerance": tolerance
+                }));
+            }
+            crate::config::rules::OutboundGroupType::Selector => {
+                compiled_groups.push(serde_json::json!({
+                    "type": "selector",
+                    "tag": group.tag,
+                    "outbounds": valid_members
+                }));
+            }
+        }
+    }
+
+    let mut selector_tags: Vec<String> = Vec::new();
+    selector_tags.extend(group_tags);
+    for nt in all_node_tags {
+        if !selector_tags.contains(&nt) {
+            selector_tags.push(nt);
+        }
+    }
 
     // Create the outbounds array
     let mut final_outbounds = Vec::new();
     let mut endpoints = Vec::new();
 
     // Fallback if no outbounds imported yet
-    if node_tags.is_empty() {
-        node_tags.push("direct".to_string());
+    if selector_tags.is_empty() {
+        selector_tags.push("direct".to_string());
     }
 
-    // Assemble selector outbound "proxy"
+    // Assemble master selector outbound "proxy"
     let mut selector = HashMap::new();
     selector.insert("type".to_string(), Value::String("selector".to_string()));
     selector.insert("tag".to_string(), Value::String("proxy".to_string()));
     selector.insert(
         "outbounds".to_string(),
-        Value::Array(node_tags.into_iter().map(Value::String).collect()),
+        Value::Array(selector_tags.iter().cloned().map(Value::String).collect()),
     );
     if let Some(def_tag) = default_outbound_tag {
-        selector.insert("default".to_string(), Value::String(def_tag.to_string()));
+        if selector_tags.iter().any(|t| t == def_tag) {
+            selector.insert("default".to_string(), Value::String(def_tag.to_string()));
+        }
     }
 
-    // First, push our custom selector outbound
+    // First, push our root selector outbound
     final_outbounds.push(Value::Object(selector.into_iter().collect()));
+
+    // Next, push user-defined OutboundGroup outbounds
+    final_outbounds.extend(compiled_groups);
 
     // Push the parsed node outbounds
     for node in outbounds {
@@ -404,8 +532,18 @@ pub fn generate_singbox_config(
 
     let resolved_dns_address = resolve_dns_address(Some(dns_address));
 
-    // Construct the dynamic inbounds array
-    let route_exclude_addresses = build_route_exclude_addresses(&resolved_dns_address, &server_ips);
+    // Construct the dynamic inbounds array, including host_dns_servers in route_exclude_addresses
+    let mut route_exclude_addresses =
+        build_route_exclude_addresses(&resolved_dns_address, &server_ips);
+    for dns_ip in host_dns_servers {
+        let cidr = match dns_ip {
+            std::net::IpAddr::V4(v4) => format!("{}/32", v4),
+            std::net::IpAddr::V6(v6) => format!("{}/128", v6),
+        };
+        if !route_exclude_addresses.contains(&cidr) {
+            route_exclude_addresses.push(cidr);
+        }
+    }
 
     let mut inbounds = Vec::new();
     if tun_settings.use_separate_ports {
@@ -434,7 +572,6 @@ pub fn generate_singbox_config(
         let mut tun_inbound = serde_json::json!({
             "type": "tun",
             "tag": "tun-in",
-            "interface_name": "X-Link",
             "address": [
                 "172.19.0.1/30",
                 "fdfe:dcba:9876::1/126"
@@ -444,6 +581,9 @@ pub fn generate_singbox_config(
             "stack": tun_settings.stack,
             "route_exclude_address": route_exclude_addresses,
         });
+        if should_include_tun_interface_name(std::env::consts::OS) {
+            tun_inbound["interface_name"] = serde_json::json!("X-Link");
+        }
         if tun_settings.mtu != 0 {
             let safe_mtu = if tun_settings.mtu == 1500 {
                 1400
@@ -469,6 +609,7 @@ pub fn generate_singbox_config(
         rule_sets,
         geosite_db_exists,
         geoip_db_exists,
+        outbound_groups,
     );
 
     let mut route_section = serde_json::json!({
@@ -640,7 +781,7 @@ pub fn generate_singbox_config(
     // Construct the complete sing-box configuration
     let mut config = serde_json::json!({
         "log": {
-            "level": "info",
+            "level": "debug",
             "timestamp": true
         },
         "dns": dns_section,
@@ -683,6 +824,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
         let config_local: serde_json::Value = serde_json::from_str(&config_str_local).unwrap();
@@ -704,6 +847,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
         let config_wifi: serde_json::Value = serde_json::from_str(&config_str_wifi).unwrap();
@@ -764,6 +909,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
 
@@ -824,6 +971,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
         let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
@@ -870,6 +1019,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
         let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
@@ -925,6 +1076,8 @@ mod tests {
             &[],
             &rule_sets,
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
 
@@ -974,6 +1127,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
 
@@ -1037,6 +1192,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
 
@@ -1102,6 +1259,8 @@ mod tests {
             &[],
             &[],
             std::path::Path::new(""),
+            &[],
+            &[],
         )
         .unwrap();
         let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
@@ -1111,6 +1270,102 @@ mod tests {
             selector["outbounds"].as_array().unwrap(),
             &vec![serde_json::json!("direct")]
         );
+    }
+
+    #[test]
+    fn test_outbound_groups_compilation_and_pruning_fallback() {
+        use crate::config::rules::{OutboundGroup, OutboundGroupType};
+
+        let outbounds: Vec<super::super::adapters::SingBoxOutbound> = (1..=12)
+            .map(|i| super::super::adapters::SingBoxOutbound {
+                outbound_type: "vless".to_string(),
+                tag: format!("node-{}", i),
+                fields: std::collections::HashMap::new(),
+            })
+            .collect();
+
+        let groups = vec![
+            OutboundGroup {
+                id: "g1".into(),
+                tag: "Auto-Fastest".into(),
+                r#type: OutboundGroupType::Urltest,
+                nodes: vec!["node-1".into(), "node-2".into(), "deleted-node".into()],
+                url: None,
+                interval: None,
+                tolerance: Some(50),
+            },
+            OutboundGroup {
+                id: "g2".into(),
+                tag: "Pruned-Pool".into(),
+                r#type: OutboundGroupType::Fallback,
+                nodes: vec!["non-existent".into()],
+                url: None,
+                interval: Some("300s".into()),
+                tolerance: None,
+            },
+        ];
+
+        let config_str = generate_singbox_config(
+            7890,
+            outbounds,
+            "tun",
+            "1.1.1.1",
+            "127.0.0.1",
+            &TunSettings::default(),
+            Some("Auto-Fastest"),
+            &[],
+            &[],
+            std::path::Path::new(""),
+            &groups,
+            &["9.9.9.9".parse().unwrap()],
+        )
+        .unwrap();
+
+        let config: serde_json::Value = serde_json::from_str(&config_str).unwrap();
+        assert_eq!(config["log"]["level"], "debug");
+
+        let outbounds_arr = config["outbounds"].as_array().unwrap();
+        let root_proxy = outbounds_arr.iter().find(|o| o["tag"] == "proxy").unwrap();
+        assert_eq!(root_proxy["default"], "Auto-Fastest");
+        let root_members = root_proxy["outbounds"].as_array().unwrap();
+        assert_eq!(root_members[0], "Auto-Fastest");
+        assert_eq!(root_members[1], "Pruned-Pool");
+
+        let auto_group = outbounds_arr
+            .iter()
+            .find(|o| o["tag"] == "Auto-Fastest")
+            .unwrap();
+        assert_eq!(auto_group["type"], "urltest");
+        assert_eq!(auto_group["interval"], "600s");
+        assert_eq!(
+            auto_group["outbounds"],
+            serde_json::json!(["node-1", "node-2"])
+        );
+
+        // Pruned-Pool had all members pruned, so it falls back to the first 10 dialable nodes
+        let pruned_group = outbounds_arr
+            .iter()
+            .find(|o| o["tag"] == "Pruned-Pool")
+            .unwrap();
+        assert_eq!(pruned_group["type"], "urltest");
+        assert_eq!(pruned_group["outbounds"].as_array().unwrap().len(), 10);
+
+        // Verify host DNS server was added to TUN route_exclude_address
+        let tun_in = config["inbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["type"] == "tun")
+            .unwrap();
+        let excludes = tun_in["route_exclude_address"].as_array().unwrap();
+        assert!(excludes.contains(&serde_json::json!("9.9.9.9/32")));
+    }
+
+    #[test]
+    fn test_macos_dynamic_utun_interface_omission() {
+        assert!(!should_include_tun_interface_name("macos"));
+        assert!(should_include_tun_interface_name("windows"));
+        assert!(should_include_tun_interface_name("linux"));
     }
 
     #[test]

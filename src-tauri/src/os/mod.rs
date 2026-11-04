@@ -1,4 +1,87 @@
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
+
+#[cfg(target_os = "macos")]
+pub mod darwin;
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "windows")]
+pub mod windows;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TunSupportStatus {
+    Supported,
+    RequiresElevation,
+    DriverMissing(String),
+    UnsupportedPlatform,
+}
+
+#[async_trait::async_trait]
+pub trait PlatformNetworkManager: Send + Sync {
+    /// Configures the operating system's system proxy (HTTP/SOCKS).
+    async fn configure_system_proxy(&self, port: u16, bypass_local: bool) -> Result<(), String>;
+
+    /// Restores the OS system proxy settings to pre-connection state asynchronously.
+    async fn restore_system_proxy(&self) -> Result<(), String>;
+
+    /// Synchronous variant for use in Tauri exit/shutdown hooks.
+    fn restore_system_proxy_sync(&self) -> Result<(), String>;
+
+    /// Validates if TUN privileges and kernel drivers are available.
+    async fn check_tun_support(&self) -> Result<TunSupportStatus, String>;
+
+    /// Provisions platform-specific TUN prerequisites (validates elevation readiness on Darwin, copies wintun.dll on Windows).
+    async fn provision_tun_interface(
+        &self,
+        settings: &crate::config::generator::TunSettings,
+    ) -> Result<String, String>;
+
+    /// Performs one-time elevation or helper tool installation.
+    async fn request_platform_elevation(&self, app_handle: &tauri::AppHandle) -> Result<(), String>;
+
+    /// Dynamically discovers host DNS server IP addresses to enforce Invariant 2 (route_exclude_address).
+    async fn get_system_dns_servers(&self) -> Result<Vec<std::net::IpAddr>, String>;
+}
+
+/// Pure status resolver for Windows TUN support.
+pub fn resolve_windows_tun_status(is_elevated: bool, wintun_exists: bool) -> TunSupportStatus {
+    if !wintun_exists {
+        TunSupportStatus::DriverMissing("wintun.dll".to_string())
+    } else if !is_elevated {
+        TunSupportStatus::RequiresElevation
+    } else {
+        TunSupportStatus::Supported
+    }
+}
+
+/// Pure status resolver for macOS TUN support.
+pub fn resolve_darwin_tun_status(helper_and_sudoers_ready: bool) -> TunSupportStatus {
+    if helper_and_sudoers_ready {
+        TunSupportStatus::Supported
+    } else {
+        TunSupportStatus::RequiresElevation
+    }
+}
+
+/// Pure status resolver for Linux TUN support.
+pub fn resolve_linux_tun_status(has_cap_net_admin_or_root: bool) -> TunSupportStatus {
+    if has_cap_net_admin_or_root {
+        TunSupportStatus::Supported
+    } else {
+        TunSupportStatus::RequiresElevation
+    }
+}
+
+/// Factory constructor returning the active platform's network manager.
+pub fn get_network_manager() -> Box<dyn PlatformNetworkManager> {
+    #[cfg(target_os = "windows")]
+    return Box::new(windows::WindowsNetworkManager::new());
+    #[cfg(target_os = "macos")]
+    return Box::new(darwin::DarwinNetworkManager::new());
+    #[cfg(target_os = "linux")]
+    return Box::new(linux::LinuxNetworkManager::new());
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedSystemProxy {
@@ -283,7 +366,7 @@ pub fn capture_current_system_proxy() -> Option<SavedSystemProxy> {
         })
 }
 
-pub fn enable_system_proxy(host: &str, port: u16) -> Result<(), String> {
+pub(crate) fn enable_system_proxy_internal(host: &str, port: u16) -> Result<(), String> {
     {
         let mut state = PROXY_STATE
             .lock()
@@ -312,6 +395,10 @@ pub fn enable_system_proxy(host: &str, port: u16) -> Result<(), String> {
             Err(format!("Failed to set system proxy: {}", e))
         }
     }
+}
+
+pub fn enable_system_proxy(host: &str, port: u16) -> Result<(), String> {
+    enable_system_proxy_internal(host, port)
 }
 
 fn apply_restore_target(target: RestoreTarget) -> Result<(), String> {
@@ -345,13 +432,17 @@ fn apply_restore_target(target: RestoreTarget) -> Result<(), String> {
     }
 }
 
-pub fn disable_system_proxy() -> Result<(), String> {
+pub(crate) fn disable_system_proxy_internal() -> Result<(), String> {
     let mut state = match PROXY_STATE.lock() {
         Ok(guard) => guard,
         Err(_) => return Err("Failed to acquire proxy state lock".to_string()),
     };
 
     state.execute_disable(capture_current_system_proxy, apply_restore_target)
+}
+
+pub fn disable_system_proxy() -> Result<(), String> {
+    get_network_manager().restore_system_proxy_sync()
 }
 
 pub fn has_saved_system_proxy() -> bool {
@@ -387,6 +478,41 @@ pub fn is_elevated() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tun_support_status_resolution_across_platforms() {
+        // Windows variants
+        assert_eq!(
+            resolve_windows_tun_status(true, true),
+            TunSupportStatus::Supported
+        );
+        assert_eq!(
+            resolve_windows_tun_status(false, true),
+            TunSupportStatus::RequiresElevation
+        );
+        assert_eq!(
+            resolve_windows_tun_status(true, false),
+            TunSupportStatus::DriverMissing("wintun.dll".to_string())
+        );
+        assert_eq!(
+            resolve_windows_tun_status(false, false),
+            TunSupportStatus::DriverMissing("wintun.dll".to_string())
+        );
+
+        // macOS variants
+        assert_eq!(resolve_darwin_tun_status(true), TunSupportStatus::Supported);
+        assert_eq!(
+            resolve_darwin_tun_status(false),
+            TunSupportStatus::RequiresElevation
+        );
+
+        // Linux variants
+        assert_eq!(resolve_linux_tun_status(true), TunSupportStatus::Supported);
+        assert_eq!(
+            resolve_linux_tun_status(false),
+            TunSupportStatus::RequiresElevation
+        );
+    }
 
     #[test]
     fn test_system_proxy_bypass_contains_boundaries_and_all_intermediate() {

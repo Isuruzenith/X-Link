@@ -295,11 +295,187 @@ pub fn get_process_metrics(pid: u32) -> (u64, f32) {
 static CONNECTION_START_TIME: std::sync::Mutex<Option<std::time::Instant>> =
     std::sync::Mutex::new(None);
 
+pub fn get_sidecar_session_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("sidecar.session.json"))
+}
+
+pub fn write_sidecar_session(
+    app: &tauri::AppHandle,
+    session: &crate::state::SidecarSession,
+) -> Result<(), String> {
+    let Some(path) = get_sidecar_session_path(app) else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp_path = path.with_extension("json.tmp");
+    let serialized = serde_json::to_vec_pretty(session)
+        .map_err(|e| format!("Failed to serialize sidecar.session.json: {}", e))?;
+    std::fs::write(&tmp_path, serialized)
+        .map_err(|e| format!("Failed to write temp sidecar.session.json: {}", e))?;
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| format!("Failed to commit sidecar.session.json: {}", e))?;
+    Ok(())
+}
+
+pub fn remove_sidecar_session(app: &tauri::AppHandle) {
+    if let Some(path) = get_sidecar_session_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn strip_ansi_codes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                let _ = chars.next();
+                for ch in chars.by_ref() {
+                    if ch.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn current_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+pub fn parse_singbox_dns_log_line(line: &str) -> Option<crate::state::DnsLogEntry> {
+    let clean = strip_ansi_codes(line);
+    let idx = clean.find("exchanged ")?;
+    let rest = clean.get(idx + "exchanged ".len()..)?.trim();
+    let mut parts = rest.split_whitespace();
+    let domain = parts.next()?.trim_end_matches('.').to_string();
+    if domain.is_empty() {
+        return None;
+    }
+
+    let mut qtype = "A".to_string();
+    let mut answers = Vec::new();
+    let mut elapsed_ms = 0u32;
+
+    let tokens: Vec<&str> = parts.collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if matches!(*token, "A" | "AAAA" | "HTTPS" | "CNAME" | "TXT" | "MX" | "PTR" | "SRV") {
+            qtype = (*token).to_string();
+            for ans in tokens.iter().skip(i + 1) {
+                if ans.ends_with("ms") {
+                    if let Ok(ms) = ans.trim_end_matches("ms").parse::<u32>() {
+                        elapsed_ms = ms;
+                    }
+                } else if ans.contains('.') || ans.contains(':') {
+                    answers.push((*ans).to_string());
+                }
+            }
+            break;
+        }
+    }
+
+    if answers.is_empty() {
+        for token in &tokens {
+            if token.ends_with("ms") {
+                if let Ok(ms) = token.trim_end_matches("ms").parse::<u32>() {
+                    elapsed_ms = ms;
+                }
+            }
+        }
+    }
+
+    Some(crate::state::DnsLogEntry {
+        timestamp: current_epoch_ms(),
+        domain,
+        qtype,
+        answers,
+        elapsed_ms,
+    })
+}
+
+pub fn parse_singbox_route_trace_line(line: &str) -> Option<crate::state::TraceEntry> {
+    let clean = strip_ansi_codes(line);
+    if !clean.contains("router") && !clean.contains("match[") && !clean.contains("inbound/") {
+        return None;
+    }
+
+    let match_idx = clean.find("match[")?;
+    let after_match = clean.get(match_idx + "match[".len()..)?;
+    let end_rule_idx = after_match.find(']')?;
+    let rule_str = after_match[..end_rule_idx].trim().to_string();
+    let remainder = after_match.get(end_rule_idx + 1..)?.trim();
+
+    let (conditions_part, action_part) = if let Some((l, r)) = remainder.split_once("=>") {
+        (l.trim(), r.trim())
+    } else {
+        (remainder, "proxy")
+    };
+
+    let outbound = if let Some(start_p) = action_part.find('(') {
+        if let Some(end_p) = action_part[start_p + 1..].find(')') {
+            action_part[start_p + 1..start_p + 1 + end_p].trim().to_string()
+        } else {
+            action_part.to_string()
+        }
+    } else {
+        action_part.split_whitespace().next().unwrap_or("proxy").to_string()
+    };
+
+    let mut inbound = "mixed-in".to_string();
+    let mut destination = String::new();
+    for token in conditions_part.split_whitespace() {
+        if let Some(inb) = token.strip_prefix("inbound=") {
+            inbound = inb.to_string();
+        } else if let Some(dom) = token.strip_prefix("domain=") {
+            destination = dom.to_string();
+        } else if destination.is_empty()
+            && (token.contains(':') || token.contains('.'))
+            && !token.contains('=')
+        {
+            destination = token.to_string();
+        }
+    }
+    if destination.is_empty() {
+        destination = conditions_part.to_string();
+    }
+
+    Some(crate::state::TraceEntry {
+        timestamp: current_epoch_ms(),
+        inbound,
+        outbound,
+        rule: Some(rule_str),
+        destination,
+    })
+}
+
+fn ingest_singbox_log_line(state: &crate::state::ProxyState, app: &tauri::AppHandle, text: String) {
+    if let Some(dns_entry) = parse_singbox_dns_log_line(&text) {
+        state.push_dns_log(dns_entry);
+    } else if let Some(trace_entry) = parse_singbox_route_trace_line(&text) {
+        state.push_trace(trace_entry);
+    }
+    state.push_log(text.clone());
+    let _ = app.emit("sing-box-log", text);
+}
+
 fn spawn_singbox_sidecar(
     app: &tauri::AppHandle,
     state: &crate::state::ProxyState,
     config_path: &Path,
     session_id: &str,
+    proxy_mode: &str,
 ) -> Result<oneshot::Receiver<Option<i32>>, String> {
     // Defense-in-depth: check cached sidecar version compatibility before spawning
     if let Ok(guard) = state.singbox_version.lock() {
@@ -311,6 +487,98 @@ fn spawn_singbox_sidecar(
 
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let _ = std::fs::create_dir_all(&app_data_dir);
+
+    #[cfg(target_os = "macos")]
+    let use_tokio_supervisor =
+        proxy_mode == "tun" && crate::os::darwin::is_darwin_helper_ready();
+    #[cfg(target_os = "linux")]
+    let use_tokio_supervisor = proxy_mode == "tun"
+        && (crate::os::linux::get_linux_helper_dir()
+            .join("xlink-linux-supervisor")
+            .exists());
+
+    #[cfg(not(target_os = "windows"))]
+    if use_tokio_supervisor {
+        #[cfg(target_os = "macos")]
+        let mut child = crate::os::darwin::spawn_darwin_supervisor(config_path, &app_data_dir)
+            .map_err(|e| format!("spawn_failed: {}", e))?;
+        #[cfg(target_os = "linux")]
+        let mut child = crate::os::linux::spawn_linux_supervisor(config_path, &app_data_dir)
+            .map_err(|e| format!("spawn_failed: {}", e))?;
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let pid = child.id().unwrap_or(0);
+
+        {
+            let mut process_lock = state
+                .child_process
+                .lock()
+                .map_err(|e| format!("state_lock_poisoned: {}", e))?;
+            *process_lock = Some(crate::state::SidecarChild::Tokio(child));
+        }
+
+        let settings = state.get_settings();
+        let _ = write_sidecar_session(
+            app,
+            &crate::state::SidecarSession {
+                pid,
+                session_id: session_id.to_string(),
+                proxy_mode: proxy_mode.to_string(),
+                api_port: settings.api_port,
+                started_at: current_epoch_ms(),
+            },
+        );
+
+        let (term_tx, term_rx) = oneshot::channel::<Option<i32>>();
+        let term_tx = Arc::new(tokio::sync::Mutex::new(Some(term_tx)));
+
+        if let Some(out) = stdout {
+            let app_out = app.clone();
+            let term_tx_out = term_tx.clone();
+            let session_id_clone = session_id.to_string();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let state_for_logs = app_out.state::<crate::state::ProxyState>();
+                let mut lines = BufReader::new(out).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    ingest_singbox_log_line(&state_for_logs, &app_out, line);
+                }
+                let mut guard = term_tx_out.lock().await;
+                if let Some(tx) = guard.take() {
+                    let _ = tx.send(None);
+                }
+                let is_active =
+                    if let Ok(active_id_guard) = state_for_logs.active_session_id.lock() {
+                        active_id_guard.as_ref() == Some(&session_id_clone)
+                    } else {
+                        false
+                    };
+                if is_active {
+                    let _ = app_out.emit("sing-box-terminated", Option::<i32>::None);
+                    state_for_logs.set_status(&app_out, crate::state::ConnectionStatus::Disconnected);
+                    *CONNECTION_START_TIME.lock().unwrap() = None;
+                    remove_sidecar_session(&app_out);
+                    crate::tray::perform_clean_cleanup(&app_out);
+                    crate::tray::update_tray(&app_out);
+                }
+            });
+        }
+
+        if let Some(err) = stderr {
+            let app_err = app.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let state_for_logs = app_err.state::<crate::state::ProxyState>();
+                let mut lines = BufReader::new(err).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    ingest_singbox_log_line(&state_for_logs, &app_err, line);
+                }
+            });
+        }
+
+        return Ok(term_rx);
+    }
 
     let (mut rx, child) = app
         .shell()
@@ -333,13 +601,36 @@ fn spawn_singbox_sidecar(
             .map_err(|e| format!("spawn_failed: {}", e))
         })?;
 
+    let pid = child.pid();
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(e) = crate::os::windows::assign_process_to_job_object(pid) {
+            state.push_log(format!(
+                "[System] Warning: could not bind sing-box PID {} to Windows Job Object: {}",
+                pid, e
+            ));
+        }
+    }
+
     {
         let mut process_lock = state
             .child_process
             .lock()
             .map_err(|e| format!("state_lock_poisoned: {}", e))?;
-        *process_lock = Some(child);
+        *process_lock = Some(crate::state::SidecarChild::Shell(child));
     }
+
+    let settings = state.get_settings();
+    let _ = write_sidecar_session(
+        app,
+        &crate::state::SidecarSession {
+            pid,
+            session_id: session_id.to_string(),
+            proxy_mode: proxy_mode.to_string(),
+            api_port: settings.api_port,
+            started_at: current_epoch_ms(),
+        },
+    );
 
     let app_for_logs = app.clone();
     let (term_tx, term_rx) = oneshot::channel::<Option<i32>>();
@@ -352,8 +643,7 @@ fn spawn_singbox_sidecar(
             match event {
                 CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
                     let text = String::from_utf8_lossy(&line).to_string();
-                    state_for_logs.push_log(text.clone());
-                    let _ = app_for_logs.emit("sing-box-log", text);
+                    ingest_singbox_log_line(&state_for_logs, &app_for_logs, text);
                 }
                 CommandEvent::Terminated(payload) => {
                     let mut guard = term_tx.lock().await;
@@ -375,6 +665,7 @@ fn spawn_singbox_sidecar(
                             crate::state::ConnectionStatus::Disconnected,
                         );
                         *CONNECTION_START_TIME.lock().unwrap() = None;
+                        remove_sidecar_session(&app_for_logs);
                         crate::tray::perform_clean_cleanup(&app_for_logs);
                         crate::tray::update_tray(&app_for_logs);
                     } else {
@@ -415,6 +706,7 @@ fn health_check_port(settings: &crate::state::UserSettings) -> u16 {
     }
 }
 
+#[allow(dead_code)]
 fn mode_for_tun_support(requested: &str, tun_supported: bool) -> &str {
     if requested == "tun" && !tun_supported {
         "system"
@@ -697,6 +989,7 @@ fn stop_startup_child(app: &tauri::AppHandle, state: &crate::state::ProxyState) 
     }
     let _ = crate::os::disable_system_proxy();
     *CONNECTION_START_TIME.lock().unwrap() = None;
+    remove_sidecar_session(app);
     crate::tray::update_tray(app);
 }
 
@@ -725,7 +1018,7 @@ pub fn get_proxy_status(
             .child_process
             .lock()
             .ok()
-            .and_then(|guard| guard.as_ref().map(|child| child.pid()))
+            .and_then(|guard| guard.as_ref().and_then(|child| child.pid()))
     } else {
         None
     };
@@ -792,14 +1085,26 @@ pub async fn prepare_and_patch_config(
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
     let requested_mode = mode_override.unwrap_or(&settings.proxy_mode);
-    let tun_supported = crate::commands::system::check_tun_support(app.clone());
-    let proxy_mode = mode_for_tun_support(requested_mode, tun_supported).to_string();
-    if requested_mode == "tun" && proxy_mode == "system" {
-        state.push_log(
-            "[System] TUN privileges are unavailable. Using System Proxy for this session."
-                .to_string(),
-        );
+
+    if requested_mode == "tun" {
+        match crate::os::get_network_manager().check_tun_support().await {
+            Ok(crate::os::TunSupportStatus::Supported) => {}
+            Ok(crate::os::TunSupportStatus::RequiresElevation) => {
+                let _ = app.emit("tun-elevation-required", ());
+                return Err("TUN_ELEVATION_REQUIRED: Administrator / root privileges are required for TUN mode.".to_string());
+            }
+            Ok(crate::os::TunSupportStatus::DriverMissing(msg)) => {
+                return Err(format!("TUN_DRIVER_MISSING: {}", msg));
+            }
+            Ok(crate::os::TunSupportStatus::UnsupportedPlatform) => {
+                return Err("TUN_UNSUPPORTED: TUN mode is not supported on this platform.".to_string());
+            }
+            Err(e) => {
+                return Err(format!("TUN_CHECK_FAILED: Failed to check TUN support: {}", e));
+            }
+        }
     }
+    let proxy_mode = requested_mode.to_string();
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
     let config_path = crate::commands::config::get_active_config_path(app)?;
@@ -858,9 +1163,20 @@ pub async fn prepare_and_patch_config(
         );
     }
 
-    let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
+    let mut node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> =
         serde_json::from_value(serde_json::Value::Array(profile_nodes))
             .map_err(|e| format!("Failed to deserialize profile nodes: {}", e))?;
+
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(app);
+    crate::config::validator::normalize_detour_references(&mut node_outbounds, &outbound_groups);
+    if let Err(err) = crate::config::validator::validate_detour_graph(&node_outbounds, &outbound_groups) {
+        return Err(format!("Detour graph validation failed: {}", err));
+    }
+
+    let host_dns = crate::os::get_network_manager()
+        .get_system_dns_servers()
+        .await
+        .unwrap_or_default();
 
     let tun_settings = load_tun_settings(app);
     let mixed_port = settings.mixed_port;
@@ -879,6 +1195,8 @@ pub async fn prepare_and_patch_config(
         &user_rules,
         &rule_sets,
         &app_data_dir,
+        &outbound_groups,
+        &host_dns,
     )?;
 
     let mut final_config_val: serde_json::Value = serde_json::from_str(&generated_config)
@@ -969,11 +1287,11 @@ pub fn build_clash_api_config(
 
 #[allow(dead_code)]
 async fn hot_reload_via_api(
+    client: &reqwest::Client,
     config_path: &std::path::Path,
     api_port: u16,
     api_secret: &str,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
     let path_str = config_path.to_string_lossy();
     let mut req = client
         .put(format!("http://127.0.0.1:{}/configs", api_port))
@@ -990,11 +1308,11 @@ async fn hot_reload_via_api(
 }
 
 async fn switch_selector_node_via_api(
+    client: &reqwest::Client,
     tag: &str,
     api_port: u16,
     api_secret: &str,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
     let mut req = client
         .put(format!("http://127.0.0.1:{}/proxies/proxy", api_port))
         .json(&serde_json::json!({ "name": tag }));
@@ -1048,7 +1366,7 @@ pub async fn switch_node_hot(
         };
 
         // Try hot-reloading the configuration first so the running sing-box gets the updated active.json
-        if let Err(e) = hot_reload_via_api(&config_path, api_port, &api_secret).await {
+        if let Err(e) = hot_reload_via_api(&state.clash_client, &config_path, api_port, &api_secret).await {
             state.push_log(format!(
                 "[System] API config reload failed ({}), falling back to full reload.",
                 e
@@ -1061,7 +1379,7 @@ pub async fn switch_node_hot(
         }
 
         // Try switching the selector group
-        match switch_selector_node_via_api(&tag, api_port, &api_secret).await {
+        match switch_selector_node_via_api(&state.clash_client, &tag, api_port, &api_secret).await {
             Ok(_) => {
                 if let Ok(mut lock) = state.selected_outbound_tag.lock() {
                     *lock = Some(tag.clone());
@@ -1153,7 +1471,7 @@ pub async fn toggle_proxy(
         }
     }
 
-    // ── STOP PATH ────────────────────────────────────────────────────────────
+    // ── STOP PATH ───────────────────────────────────────────────────────────
     if !start {
         {
             let mut process_lock = state
@@ -1179,8 +1497,9 @@ pub async fn toggle_proxy(
             *session_lock = None;
         }
         *CONNECTION_START_TIME.lock().unwrap() = None;
+        remove_sidecar_session(&app);
 
-        // Reset bandwidth metrics
+        // Reset bandwidth metrics & speed map
         if let Ok(mut up_s) = state.upload_speed.lock() {
             *up_s = 0;
         }
@@ -1189,6 +1508,9 @@ pub async fn toggle_proxy(
         }
         if let Ok(mut conn) = state.active_connections.lock() {
             *conn = 0;
+        }
+        if let Ok(mut prev_map) = state.prev_connection_bytes.lock() {
+            prev_map.clear();
         }
 
         // Sync native system tray
@@ -1230,7 +1552,7 @@ pub async fn toggle_proxy(
         return Ok("stopped".into());
     }
 
-    // ── START PATH ───────────────────────────────────────────────────────────
+    // ── START PATH ──────────────────────────────────────────────────────────
     // If already connected, only a node-switch (different selected_outbound_tag)
     // warrants action -- otherwise this is a no-op.
     if start && state.get_status() == crate::state::ConnectionStatus::Connected {
@@ -1284,6 +1606,7 @@ pub async fn toggle_proxy(
     if killed_stale {
         let _ = crate::os::disable_system_proxy();
         *CONNECTION_START_TIME.lock().unwrap() = None;
+        remove_sidecar_session(&app);
         tokio::time::sleep(std::time::Duration::from_millis(
             STALE_PROCESS_KILL_DELAY_MS,
         ))
@@ -1306,12 +1629,36 @@ pub async fn toggle_proxy(
         }
     };
 
-    let mut current_mode = resolved_proxy_mode.clone();
+    // Pre-flight port availability verification: poll up to 10 times at 100ms intervals
+    let mut ports_to_check = vec![state.get_settings().mixed_port];
+    if state.get_settings().api_enabled && !api_secret.trim().is_empty() {
+        ports_to_check.push(api_port);
+    }
+    for port in ports_to_check {
+        let mut available = false;
+        for _ in 0..10 {
+            if !crate::commands::system::port_is_bound(port) {
+                available = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        if !available {
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
+            return Err(format!(
+                "Port conflict: Port {} is already in use by another application.",
+                port
+            ));
+        }
+    }
+
+    let current_mode = resolved_proxy_mode.clone();
     let mut attempt = 0;
     let mut last_error = String::new();
     let mut connected_successfully = false;
 
-    // Helper helper to apply TUN compatibility in-place
+    // Helper to apply TUN compatibility in-place
     let apply_tun_compatibility_in_place = |path: &std::path::Path| -> Result<(), String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read active config for TUN compatibility: {}", e))?;
@@ -1352,7 +1699,7 @@ pub async fn toggle_proxy(
             crate::copy_wintun_dll_to_sidecar_dir(&app);
         }
 
-        let mut term_rx = match spawn_singbox_sidecar(&app, &state, &config_path, &session_id) {
+        let mut term_rx = match spawn_singbox_sidecar(&app, &state, &config_path, &session_id, &current_mode) {
             Ok(rx) => rx,
             Err(e) => {
                 last_error = e.clone();
@@ -1420,52 +1767,13 @@ pub async fn toggle_proxy(
     }
 
     if !connected_successfully {
+        stop_startup_child(&app, &state);
+        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+        crate::tray::update_tray(&app);
         if resolved_proxy_mode == "tun" {
-            state.push_log("[System] TUN mode failed completely after all fallback attempts. Rolling back to System Proxy mode...".to_string());
-
-            // Switch mode dynamically
-            current_mode = "system".to_string();
-
-            // The fallback has the same ownership and status rollback guarantees as a normal attempt.
-            let fallback_result: Result<(), String> = async {
-                let (retry_config_path, _, _, _) = prepare_and_patch_config(
-                    &app,
-                    &state,
-                    selected_outbound_tag.as_deref(),
-                    Some("system"),
-                )
-                .await?;
-
-                let session_id = uuid::Uuid::new_v4().to_string();
-                if let Ok(mut session_lock) = state.active_session_id.lock() {
-                    *session_lock = Some(session_id.clone());
-                }
-
-                let mut term_rx =
-                    spawn_singbox_sidecar(&app, &state, &retry_config_path, &session_id)
-                        .map_err(|e| format!("System proxy fallback spawn failed: {}", e))?;
-                wait_for_startup_or_exit(&mut term_rx)
-                    .await
-                    .map_err(|e| format!("System proxy fallback process exited: {}", e))?;
-
-                let port = health_check_port(&state.get_settings());
-                run_startup_health_checks(port, &current_mode)
-                    .await
-                    .map_err(|e| format!("System proxy fallback health check failed: {}", e))
-            }
-            .await;
-
-            if let Err(error) = fallback_result {
-                stop_startup_child(&app, &state);
-                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
-                crate::tray::update_tray(&app);
-                return Err(error);
-            }
-
-            state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
+            let _ = app.emit("tun-startup-failed", ());
+            return Err(format!("TUN mode failed to start: {}", last_error));
         } else {
-            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
-            crate::tray::update_tray(&app);
             return Err(format!(
                 "Connection failed after {} fallback attempts: {}",
                 MAX_FALLBACK_ATTEMPTS, last_error
@@ -1480,7 +1788,7 @@ pub async fn toggle_proxy(
         let api_secret_clone = api_secret.clone();
         tokio::spawn(async move {
             let state_clone = app_handle.state::<crate::state::ProxyState>();
-            let client = reqwest::Client::new();
+            let client = state_clone.clash_client.clone();
             let url = format!("http://127.0.0.1:{}/connections", api_port);
             let mut prev_upload = 0u64;
             let mut prev_download = 0u64;
@@ -1583,7 +1891,7 @@ pub async fn toggle_proxy(
         crate::tray::update_tray_tooltip(&app);
     }
 
-    // Enable system proxy if the final connection mode is 'system' (either by default or as a fallback)
+    // Enable system proxy if the final connection mode is 'system'
     if current_mode == "system" {
         let port = health_check_port(&state.get_settings());
         if let Err(e) = crate::os::enable_system_proxy("127.0.0.1", port) {
@@ -1608,32 +1916,156 @@ pub async fn toggle_proxy(
 }
 
 #[tauri::command]
-pub async fn get_active_connections(
+pub async fn get_proxy_group_status(
     state: State<'_, crate::state::ProxyState>,
-) -> Result<serde_json::Value, String> {
+) -> Result<Vec<crate::state::ProxyGroupInfo>, String> {
     let settings = state.get_settings();
     if !state.is_running() || !settings.api_enabled || settings.api_secret.trim().is_empty() {
-        return Ok(serde_json::json!({ "connections": [] }));
+        return Ok(Vec::new());
+    }
+    let api_port = settings.api_port;
+    let api_secret = settings.api_secret.clone();
+    let url = format!("http://127.0.0.1:{}/proxies", api_port);
+
+    let mut req = state.clash_client.get(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
+
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let val: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let mut groups = Vec::new();
+    if let Some(proxies) = val.get("proxies").and_then(|p| p.as_object()) {
+        for (name, item) in proxies {
+            let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if matches!(item_type, "Selector" | "URLTest" | "Fallback") {
+                let winning_tag = item
+                    .get("now")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let delay = item
+                    .get("history")
+                    .and_then(|h| h.as_array())
+                    .and_then(|arr| arr.last())
+                    .and_then(|h| h.get("delay"))
+                    .and_then(|d| d.as_u64())
+                    .map(|d| d as u32);
+
+                groups.push(crate::state::ProxyGroupInfo {
+                    group: name.clone(),
+                    winning_tag,
+                    delay,
+                });
+            }
+        }
+    }
+    Ok(groups)
+}
+
+#[tauri::command]
+pub fn get_diagnostic_traces(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<crate::state::DiagnosticTracesPayload, String> {
+    Ok(state.get_diagnostic_traces_snapshot())
+}
+
+#[tauri::command]
+pub async fn get_active_connections(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<crate::state::ConnectionsPayload, String> {
+    let settings = state.get_settings();
+    if !state.is_running() || !settings.api_enabled || settings.api_secret.trim().is_empty() {
+        return Ok(crate::state::ConnectionsPayload {
+            download_total: 0,
+            upload_total: 0,
+            total_connections: 0,
+            connections: Vec::new(),
+        });
     }
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections", api_port);
 
-    let client = reqwest::Client::new();
-    let req = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", api_secret));
-
-    match req.send().await {
-        Ok(resp) => {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                Ok(json)
-            } else {
-                Err("Failed to parse connections JSON".to_string())
-            }
-        }
-        Err(e) => Err(e.to_string()),
+    let mut req = state.clash_client.get(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
     }
+
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct RawConnectionsResponse {
+        #[serde(rename = "uploadTotal", default)]
+        upload_total: u64,
+        #[serde(rename = "downloadTotal", default)]
+        download_total: u64,
+        #[serde(default)]
+        connections: Vec<crate::state::ActiveConnection>,
+    }
+
+    let raw: RawConnectionsResponse = resp.json().await.map_err(|e| e.to_string())?;
+    let total_connections = raw.connections.len();
+    let now = std::time::Instant::now();
+
+    let mut connections = raw.connections;
+    let mut current_ids = std::collections::HashSet::new();
+
+    // Compute speeds and update snapshot
+    if let Ok(mut prev_map) = state.prev_connection_bytes.lock() {
+        for conn in &mut connections {
+            current_ids.insert(conn.id.clone());
+            if let Some(prev) = prev_map.get(&conn.id) {
+                let elapsed_secs = prev.recorded_at.elapsed().as_secs_f64();
+                if elapsed_secs > 0.05 {
+                    let up_delta = conn.upload.saturating_sub(prev.upload);
+                    let down_delta = conn.download.saturating_sub(prev.download);
+                    conn.up_speed = Some((up_delta as f64 / elapsed_secs) as u64);
+                    conn.down_speed = Some((down_delta as f64 / elapsed_secs) as u64);
+                } else {
+                    conn.up_speed = Some(0);
+                    conn.down_speed = Some(0);
+                }
+            } else {
+                conn.up_speed = Some(0);
+                conn.down_speed = Some(0);
+            }
+            prev_map.insert(
+                conn.id.clone(),
+                crate::state::ConnectionByteSnapshot {
+                    upload: conn.upload,
+                    download: conn.download,
+                    recorded_at: now,
+                },
+            );
+        }
+        // Prune connections that no longer exist
+        prev_map.retain(|id, _| current_ids.contains(id));
+    }
+
+    // Sort descending by total speed (down_speed + up_speed), tie-break by total bytes
+    connections.sort_by(|a, b| {
+        let speed_a = a.down_speed.unwrap_or(0) + a.up_speed.unwrap_or(0);
+        let speed_b = b.down_speed.unwrap_or(0) + b.up_speed.unwrap_or(0);
+        speed_b.cmp(&speed_a).then_with(|| {
+            let bytes_a = a.download + a.upload;
+            let bytes_b = b.download + b.upload;
+            bytes_b.cmp(&bytes_a)
+        })
+    });
+
+    // Window top 100 connections
+    if connections.len() > 100 {
+        connections.truncate(100);
+    }
+
+    Ok(crate::state::ConnectionsPayload {
+        download_total: raw.download_total,
+        upload_total: raw.upload_total,
+        total_connections,
+        connections,
+    })
 }
 
 #[tauri::command]
@@ -1649,10 +2081,10 @@ pub async fn close_connection(
     let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections/{}", api_port, id);
 
-    let client = reqwest::Client::new();
-    let req = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", api_secret));
+    let mut req = state.clash_client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
 
     match req.send().await {
         Ok(_) => Ok(()),
@@ -1672,10 +2104,10 @@ pub async fn close_all_connections(
     let api_secret = settings.api_secret.clone();
     let url = format!("http://127.0.0.1:{}/connections", api_port);
 
-    let client = reqwest::Client::new();
-    let req = client
-        .delete(&url)
-        .header("Authorization", format!("Bearer {}", api_secret));
+    let mut req = state.clash_client.delete(&url);
+    if !api_secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", api_secret));
+    }
 
     match req.send().await {
         Ok(_) => Ok(()),
@@ -1824,5 +2256,33 @@ mod tests {
         let with_cors = build_clash_api_config(true, 9090, "sec-token-xyz", true).unwrap();
         let origins = with_cors["access_control_allow_origin"].as_array().unwrap();
         assert_eq!(origins, &vec![serde_json::json!("*")]);
+    }
+
+    #[test]
+    fn test_parse_singbox_dns_log_line() {
+        let line = "INFO[0005] [dns] exchanged example.com. A 1.2.3.4 45ms";
+        let parsed = parse_singbox_dns_log_line(line).expect("Should parse valid DNS log line");
+        assert_eq!(parsed.domain, "example.com");
+        assert_eq!(parsed.qtype, "A");
+        assert_eq!(parsed.answers, vec!["1.2.3.4"]);
+        assert_eq!(parsed.elapsed_ms, 45);
+
+        let non_dns = "INFO[0005] [router] match[0] 1.1.1.1:53 => direct";
+        assert!(parse_singbox_dns_log_line(non_dns).is_none());
+    }
+
+    #[test]
+    fn test_parse_singbox_route_trace_line() {
+        let line = "INFO[0010] [router] match[rule-1] inbound=mixed-in domain=google.com => proxy(node-us-1)";
+        let parsed = parse_singbox_route_trace_line(line).expect("Should parse route trace");
+        assert_eq!(parsed.inbound, "mixed-in");
+        assert_eq!(parsed.destination, "google.com");
+        assert_eq!(parsed.rule, Some("rule-1".to_string()));
+        assert_eq!(parsed.outbound, "node-us-1");
+
+        let simple_line = "INFO[0012] [router] match[0] 1.1.1.1:53 => direct";
+        let parsed_simple = parse_singbox_route_trace_line(simple_line).expect("Should parse simple route trace");
+        assert_eq!(parsed_simple.outbound, "direct");
+        assert_eq!(parsed_simple.rule, Some("0".to_string()));
     }
 }

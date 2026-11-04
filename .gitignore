@@ -54,3 +54,15 @@ dogfood-output/*
 .hermes/*
 .claude/*
 
+# Ignore markdown files outside docs and core repository docs
+*.md
+!README.md
+!CHANGELOG.md
+!CONTRIBUTING.md
+!CODE_OF_CONDUCT.md
+!SECURITY.md
+!docs/**
+docs/.obsidian/**
+!.github/**
+
+

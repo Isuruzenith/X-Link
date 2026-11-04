@@ -4,10 +4,23 @@ version = "0.8.0"
 description = "X-Link Desktop Proxy Client"
 authors = ["Isuruzenith"]
 edition = "2021"
+default-run = "xlink"
 
 [lib]
 name = "xlink_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "xlink"
+path = "src/main.rs"
+
+[[bin]]
+name = "xlink-darwin-supervisor"
+path = "src/bin/xlink-darwin-supervisor.rs"
+
+[[bin]]
+name = "xlink-linux-supervisor"
+path = "src/bin/xlink-linux-supervisor.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -33,6 +46,9 @@ url = "2.5"
 percent-encoding = "2.3"
 dirs = "5.0"
 libc = "0.2"
+aes-gcm = "0.10"
+argon2 = "0.5"
+async-trait = "0.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.55"
@@ -44,6 +60,8 @@ windows = { version = "0.58", features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_System_Threading",
+    "Win32_System_JobObjects",
+    "Win32_Security",
     "Win32_Foundation",
 ] }
 

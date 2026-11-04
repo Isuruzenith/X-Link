@@ -1,5 +1,30 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::Manager;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutboundGroupType {
+    Urltest,
+    Fallback,
+    Selector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OutboundGroup {
+    pub id: String,
+    pub tag: String,
+    pub r#type: OutboundGroupType,
+    #[serde(default)]
+    pub nodes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<u32>,
+}
 
 #[derive(serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -49,12 +74,30 @@ pub fn load_routing_rules_from_file(app: &tauri::AppHandle) -> (Vec<RoutingRule>
     (Vec::new(), Vec::new())
 }
 
+pub fn load_outbound_groups_from_file(app: &tauri::AppHandle) -> Vec<OutboundGroup> {
+    if let Ok(mut path) = app.path().app_data_dir() {
+        path.push("routing.json");
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                    return val
+                        .get("outboundGroups")
+                        .and_then(|g| serde_json::from_value(g.clone()).ok())
+                        .unwrap_or_default();
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
 pub fn build_singbox_rule(
     rule: &RoutingRule,
     _geosite_db_exists: bool,
     _geoip_db_exists: bool,
+    outbound_groups: &[OutboundGroup],
 ) -> Option<Value> {
-    let outbound = map_outbound_action(&rule.outbound);
+    let outbound = map_outbound_action(&rule.outbound, outbound_groups);
     let invert = rule.invert;
 
     let mut value = rule.value.clone();
@@ -138,11 +181,23 @@ pub fn build_singbox_rule(
     Some(obj)
 }
 
-fn map_outbound_action(action: &str) -> &str {
+fn map_outbound_action<'a>(action: &'a str, outbound_groups: &'a [OutboundGroup]) -> &'a str {
     match action {
         "block" => "block",
         "direct" => "direct",
-        _ => "proxy",
+        "proxy" => "proxy",
+        "dns" => "dns",
+        custom => {
+            if let Some(group) = outbound_groups.iter().find(|g| g.tag == custom) {
+                group.tag.as_str()
+            } else {
+                log::warn!(
+                    "Routing rule targets missing Outbound Group '{}', falling back to 'proxy'",
+                    custom
+                );
+                "proxy"
+            }
+        }
     }
 }
 
@@ -210,7 +265,7 @@ mod tests {
     #[test]
     fn test_domain_rule_generates_correct_json() {
         let rule = make_rule("domain", "youtube.com", "proxy");
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert_eq!(json["domain"][0].as_str().unwrap(), "youtube.com");
         assert_eq!(json["outbound"].as_str().unwrap(), "proxy");
     }
@@ -218,7 +273,7 @@ mod tests {
     #[test]
     fn test_ip_cidr_rule() {
         let rule = make_rule("ip_cidr", "1.1.1.0/24", "direct");
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert_eq!(json["ip_cidr"][0].as_str().unwrap(), "1.1.1.0/24");
         assert_eq!(json["outbound"].as_str().unwrap(), "direct");
     }
@@ -226,27 +281,27 @@ mod tests {
     #[test]
     fn test_geoip_rule() {
         let rule = make_rule("geoip", "cn", "direct");
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert_eq!(json["rule_set"][0].as_str().unwrap(), "geoip-cn");
     }
 
     #[test]
     fn test_geosite_rule() {
         let rule = make_rule("geosite", "google", "proxy");
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert_eq!(json["rule_set"][0].as_str().unwrap(), "geosite-google");
     }
 
     #[test]
     fn test_geosite_private_fallback_when_missing() {
         let rule = make_rule("geosite", "private", "direct");
-        let json = build_singbox_rule(&rule, false, true).unwrap();
+        let json = build_singbox_rule(&rule, false, true, &[]).unwrap();
         assert!(json.get("domain_suffix").is_some());
         assert_eq!(json["domain_suffix"][0].as_str().unwrap(), ".lan");
         assert_eq!(json["outbound"].as_str().unwrap(), "direct");
 
         let rule_other = make_rule("geosite", "google", "proxy");
-        let json_other = build_singbox_rule(&rule_other, false, true).unwrap();
+        let json_other = build_singbox_rule(&rule_other, false, true, &[]).unwrap();
         assert_eq!(
             json_other["rule_set"][0].as_str().unwrap(),
             "geosite-google"
@@ -256,7 +311,7 @@ mod tests {
     #[test]
     fn test_geoip_ignored_when_missing() {
         let rule = make_rule("geoip", "cn", "direct");
-        let json = build_singbox_rule(&rule, true, false).unwrap();
+        let json = build_singbox_rule(&rule, true, false, &[]).unwrap();
         assert_eq!(json["rule_set"][0].as_str().unwrap(), "geoip-cn");
     }
 
@@ -264,16 +319,13 @@ mod tests {
     fn test_disabled_rule_is_skipped() {
         let mut rule = make_rule("domain", "example.com", "block");
         rule.enabled = Some(false);
-        // A disabled rule is filtered upstream in build_route_rules; build_singbox_rule
-        // itself still produces a value -- the caller is responsible for the guard.
-        // We just verify the enabled flag is respected by the caller:
         assert!(!rule.enabled.unwrap_or(true));
     }
 
     #[test]
     fn test_block_outbound() {
         let rule = make_rule("domain", "ads.example.com", "block");
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert_eq!(json["action"].as_str().unwrap(), "reject");
         assert!(json.get("outbound").is_none());
     }
@@ -282,14 +334,35 @@ mod tests {
     fn test_invert_flag() {
         let mut rule = make_rule("geoip", "cn", "proxy");
         rule.invert = true;
-        let json = build_singbox_rule(&rule, true, true).unwrap();
+        let json = build_singbox_rule(&rule, true, true, &[]).unwrap();
         assert!(json["invert"].as_bool().unwrap());
     }
 
     #[test]
     fn test_invalid_port_returns_none() {
         let rule = make_rule("port", "not_a_number", "direct");
-        assert!(build_singbox_rule(&rule, true, true).is_none());
+        assert!(build_singbox_rule(&rule, true, true, &[]).is_none());
+    }
+
+    #[test]
+    fn test_outbound_group_rule_targeting_and_fallback() {
+        let groups = vec![OutboundGroup {
+            id: "g1".into(),
+            tag: "Streaming-Pool".into(),
+            r#type: OutboundGroupType::Urltest,
+            nodes: vec!["node-1".into()],
+            url: None,
+            interval: Some("600s".into()),
+            tolerance: Some(50),
+        }];
+
+        let valid_group_rule = make_rule("domain_suffix", ".netflix.com", "Streaming-Pool");
+        let json = build_singbox_rule(&valid_group_rule, true, true, &groups).unwrap();
+        assert_eq!(json["outbound"].as_str().unwrap(), "Streaming-Pool");
+
+        let missing_group_rule = make_rule("domain_suffix", ".netflix.com", "Deleted-Group");
+        let fallback_json = build_singbox_rule(&missing_group_rule, true, true, &groups).unwrap();
+        assert_eq!(fallback_json["outbound"].as_str().unwrap(), "proxy");
     }
 
     #[test]

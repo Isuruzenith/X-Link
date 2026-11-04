@@ -66,6 +66,7 @@ pub fn run() {
             commands::system::check_port_status,
             commands::system::set_autostart,
             commands::system::check_tun_support,
+            commands::system::check_tun_support_status,
             commands::system::request_elevation,
             commands::system::set_runas_admin,
             commands::system::get_running_processes,
@@ -73,6 +74,8 @@ pub fn run() {
             commands::proxy::get_proxy_status,
             commands::proxy::get_traffic_stats,
             commands::proxy::get_active_connections,
+            commands::proxy::get_proxy_group_status,
+            commands::proxy::get_diagnostic_traces,
             commands::proxy::close_connection,
             commands::proxy::close_all_connections,
             commands::proxy::toggle_proxy,
@@ -106,6 +109,9 @@ pub fn run() {
             commands::config::preview_import_config
         ])
         .setup(|app| {
+            // Sweep orphan sidecar session from unexpected previous app termination
+            sweep_orphan_sidecar_session(app.handle());
+
             // Load and cache settings dynamically on boot
             // Run in a background thread to avoid blocking the app startup
             let app_handle = app.handle().clone();
@@ -236,6 +242,47 @@ pub(crate) fn copy_wintun_dll_to_sidecar_dir(app: &tauri::AppHandle) {
                     }
                 }
             }
+        }
+    }
+}
+
+fn sweep_orphan_sidecar_session(app: &tauri::AppHandle) {
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        let session_file = app_data_dir.join("sidecar.session.json");
+        if session_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&session_file) {
+                if let Ok(session) = serde_json::from_str::<crate::state::SidecarSession>(&content) {
+                    if session.proxy_mode == "system" {
+                        let _ = crate::os::get_network_manager().restore_system_proxy_sync();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        use windows::Win32::Foundation::CloseHandle;
+                        use windows::Win32::System::Threading::{
+                            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+                        };
+                        if session.pid > 0 {
+                            if let Ok(handle) =
+                                unsafe { OpenProcess(PROCESS_TERMINATE, false, session.pid) }
+                            {
+                                unsafe {
+                                    let _ = TerminateProcess(handle, 1);
+                                    let _ = CloseHandle(handle);
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(unix)]
+                    {
+                        if session.pid > 0 {
+                            unsafe {
+                                libc::kill(session.pid as i32, libc::SIGKILL);
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(session_file);
         }
     }
 }

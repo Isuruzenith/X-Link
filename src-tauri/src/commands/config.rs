@@ -371,6 +371,22 @@ fn read_basic_settings(app: &tauri::AppHandle) -> (String, Option<String>, bool)
     (proxy_mode, dns, wifi)
 }
 
+fn sanitize_subscription_outbounds(
+    mut outbounds: Vec<crate::config::adapters::SingBoxOutbound>,
+    outbound_groups: &[crate::config::rules::OutboundGroup],
+) -> Vec<crate::config::adapters::SingBoxOutbound> {
+    let group_tags: std::collections::HashSet<&str> =
+        outbound_groups.iter().map(|g| g.tag.as_str()).collect();
+    for ob in &mut outbounds {
+        let lower = ob.tag.trim().to_ascii_lowercase();
+        let is_reserved = matches!(lower.as_str(), "proxy" | "direct" | "block" | "dns");
+        if is_reserved || group_tags.contains(ob.tag.as_str()) {
+            ob.tag = format!("{}_node", ob.tag.trim());
+        }
+    }
+    outbounds
+}
+
 /// Imports a config from raw pasted text/clipboard content, or from a local file path.
 /// Always writes to the single fixed "active" config slot -- importing a new config
 /// overwrites whatever was previously active, there is no profile list to manage.
@@ -411,7 +427,8 @@ pub async fn import_config(
 
     // 2. Adapt configuration via the established format-detection engine
     //    (raw URIs, Clash YAML, sing-box JSON, base64 subscription blobs, etc.)
-    let outbounds = adapt(&bytes)?;
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(&app);
+    let outbounds = sanitize_subscription_outbounds(adapt(&bytes)?, &outbound_groups);
     if outbounds.is_empty() {
         return Err("Import contains no usable proxy nodes.".to_string());
     }
@@ -429,6 +446,10 @@ pub async fn import_config(
     let mixed_port = state.get_settings().mixed_port;
     let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let host_dns = crate::os::get_network_manager()
+        .get_system_dns_servers()
+        .await
+        .unwrap_or_default();
 
     let generated_config = generate_singbox_config(
         mixed_port,
@@ -441,6 +462,8 @@ pub async fn import_config(
         &user_rules,
         &rule_sets,
         &app_data_dir,
+        &outbound_groups,
+        &host_dns,
     )?;
 
     // 4. Early guard: validate generated JSON has required structure before
@@ -587,14 +610,17 @@ async fn refresh_subscription_internal(
         .ok_or_else(|| "Profile does not have a subscription URL".to_string())?
         .to_string();
 
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(&app);
+
     // A confirmed preview applies the exact fetched nodes, not a second remote response.
-    let outbounds = if let Some(token) = preview_token {
+    let raw_outbounds = if let Some(token) = preview_token {
         let current_path = get_profile_config_path(&app, &profile_id)?;
         take_subscription_snapshot(&token, &profile_id, &profiles_content, &current_path)?
     } else {
         let bytes = crate::config::subscription::fetch_subscription_content(&sub_url).await?;
         adapt(&bytes)?
     };
+    let outbounds = sanitize_subscription_outbounds(raw_outbounds, &outbound_groups);
     if outbounds.is_empty() {
         return Err("Subscription contains no usable proxy nodes.".to_string());
     }
@@ -627,6 +653,10 @@ async fn refresh_subscription_internal(
     let mixed_port = state.get_settings().mixed_port;
     let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let host_dns = crate::os::get_network_manager()
+        .get_system_dns_servers()
+        .await
+        .unwrap_or_default();
 
     let generated_config = generate_singbox_config(
         mixed_port,
@@ -639,6 +669,8 @@ async fn refresh_subscription_internal(
         &user_rules,
         &rule_sets,
         &app_data_dir,
+        &outbound_groups,
+        &host_dns,
     )?;
 
     // 6. Early structural guard
@@ -654,11 +686,12 @@ async fn refresh_subscription_internal(
         }
     }
 
-    // 7. Determine selected node tag: preserve existing tag if still present; otherwise fallback to first valid tag
+    // 7. Determine selected node tag: preserve existing tag if still present in nodes or outbound groups; otherwise fallback to first valid tag
     let valid_tags: Vec<String> = outbounds.iter().map(|o| o.tag.clone()).collect();
+    let group_tags: Vec<String> = outbound_groups.iter().map(|g| g.tag.clone()).collect();
 
     let new_selected_tag: Option<String> = match existing_selected_tag.as_ref() {
-        Some(tag) if valid_tags.contains(tag) => Some(tag.clone()),
+        Some(tag) if valid_tags.contains(tag) || group_tags.contains(tag) => Some(tag.clone()),
         _ => valid_tags.first().cloned(),
     };
 
@@ -672,7 +705,9 @@ async fn refresh_subscription_internal(
         if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&final_config) {
             if let Some(obs) = parsed.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
                 for ob in obs.iter_mut() {
-                    if ob.get("type").and_then(|t| t.as_str()) == Some("selector") {
+                    if ob.get("type").and_then(|t| t.as_str()) == Some("selector")
+                        && ob.get("tag").and_then(|t| t.as_str()) == Some("proxy")
+                    {
                         ob["default"] = serde_json::Value::String(tag.clone());
                     }
                 }
@@ -1879,6 +1914,8 @@ pub fn extract_nodes_from_config(config: &serde_json::Value) -> Vec<serde_json::
         for outbound in outbounds {
             let outbound_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
             if outbound_type != "selector"
+                && outbound_type != "urltest"
+                && outbound_type != "fallback"
                 && outbound_type != "direct"
                 && outbound_type != "block"
                 && outbound_type != "dns"
@@ -1918,8 +1955,8 @@ pub fn extract_nodes_from_config(config: &serde_json::Value) -> Vec<serde_json::
 }
 
 /// Returns the outbound the "proxy" selector currently defaults to (i.e. the
-/// node that will actually be used to connect), falling back to the first
-/// customizable outbound if no default has been set yet.
+/// node or outbound group that will actually be used to connect), falling back
+/// to the first customizable outbound if no default has been set yet.
 #[tauri::command]
 pub fn get_active_outbound(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let config_path = get_active_config_path(&app)?;
@@ -1933,18 +1970,27 @@ pub fn get_active_outbound(app: tauri::AppHandle) -> Result<serde_json::Value, S
         .map_err(|e| format!("Failed to parse config file: {}", e))?;
 
     let all_nodes = extract_nodes_from_config(&config);
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(&app);
 
     if let Some(outbounds) = config.get("outbounds").and_then(|o| o.as_array()) {
-        if let Some(selector) = outbounds
-            .iter()
-            .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))
-        {
+        if let Some(selector) = outbounds.iter().find(|o| {
+            o.get("type").and_then(|t| t.as_str()) == Some("selector")
+                && o.get("tag").and_then(|t| t.as_str()) == Some("proxy")
+        }) {
             if let Some(default_tag) = selector.get("default").and_then(|d| d.as_str()) {
                 if let Some(found) = all_nodes
                     .iter()
                     .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag))
                 {
                     return Ok(found.clone());
+                }
+                if outbound_groups.iter().any(|g| g.tag == default_tag) {
+                    if let Some(group_ob) = outbounds
+                        .iter()
+                        .find(|o| o.get("tag").and_then(|t| t.as_str()) == Some(default_tag))
+                    {
+                        return Ok(group_ob.clone());
+                    }
                 }
             }
         }
@@ -1966,9 +2012,10 @@ pub fn get_selected_outbound_tag(app: &tauri::AppHandle) -> Option<String> {
     let content = std::fs::read_to_string(&config_path).ok()?;
     let config: serde_json::Value = serde_json::from_str(&content).ok()?;
     let outbounds = config.get("outbounds")?.as_array()?;
-    let selector = outbounds
-        .iter()
-        .find(|o| o.get("type").and_then(|t| t.as_str()) == Some("selector"))?;
+    let selector = outbounds.iter().find(|o| {
+        o.get("type").and_then(|t| t.as_str()) == Some("selector")
+            && o.get("tag").and_then(|t| t.as_str()) == Some("proxy")
+    })?;
     selector
         .get("default")
         .and_then(|d| d.as_str())
@@ -2007,7 +2054,13 @@ pub async fn update_node(
     if let Some(outbounds) = config.get("outbounds").and_then(|o| o.as_array()) {
         for (idx, outbound) in outbounds.iter().enumerate() {
             let t = outbound.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            if t == "selector" || t == "direct" || t == "block" || t == "dns" {
+            if t == "selector"
+                || t == "urltest"
+                || t == "fallback"
+                || t == "direct"
+                || t == "block"
+                || t == "dns"
+            {
                 continue;
             }
             if let Some(tag) = outbound.get("tag").and_then(|v| v.as_str()) {
@@ -2082,10 +2135,12 @@ pub async fn update_node(
         }
     }
 
-    // Ensure target_tag is in selector.outbounds
+    // Ensure target_tag is in root 'proxy' selector.outbounds
     if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
         for outbound in outbounds.iter_mut() {
-            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector")
+                && outbound.get("tag").and_then(|t| t.as_str()) == Some("proxy")
+            {
                 if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
                     if let Some(ref old) = old_tag {
                         if old != &target_tag {
@@ -2173,6 +2228,7 @@ pub async fn update_node(
         .and_then(|outbounds| {
             outbounds.iter().find(|outbound| {
                 outbound.get("type").and_then(|value| value.as_str()) == Some("selector")
+                    && outbound.get("tag").and_then(|value| value.as_str()) == Some("proxy")
             })
         })
         .and_then(|selector| selector.get("default"))
@@ -2218,7 +2274,13 @@ pub async fn delete_node(app: tauri::AppHandle, tag: String) -> Result<(), Strin
         let initial_len = outbounds.len();
         outbounds.retain(|o| {
             let t = o.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            if t == "selector" || t == "direct" || t == "block" || t == "dns" {
+            if t == "selector"
+                || t == "urltest"
+                || t == "fallback"
+                || t == "direct"
+                || t == "block"
+                || t == "dns"
+            {
                 return true;
             }
             o.get("tag").and_then(|v| v.as_str()) != Some(&tag)
@@ -2248,7 +2310,9 @@ pub async fn delete_node(app: tauri::AppHandle, tag: String) -> Result<(), Strin
     let mut next_selected_tag: Option<String> = None;
     if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
         for outbound in outbounds.iter_mut() {
-            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector") {
+            if outbound.get("type").and_then(|t| t.as_str()) == Some("selector")
+                && outbound.get("tag").and_then(|t| t.as_str()) == Some("proxy")
+            {
                 let mut first_candidate = "direct".to_string();
                 if let Some(list) = outbound.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
                     list.retain(|v| v.as_str() != Some(&tag));
@@ -2385,7 +2449,12 @@ pub async fn create_empty_profile(
     let tun_settings = load_tun_settings(&app);
     let mixed_port = state.get_settings().mixed_port;
     let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(&app);
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let host_dns = crate::os::get_network_manager()
+        .get_system_dns_servers()
+        .await
+        .unwrap_or_default();
 
     let generated_config = generate_singbox_config(
         mixed_port,
@@ -2398,6 +2467,8 @@ pub async fn create_empty_profile(
         &user_rules,
         &rule_sets,
         &app_data_dir,
+        &outbound_groups,
+        &host_dns,
     )?;
 
     // 2. Validate empty config
@@ -2528,15 +2599,18 @@ fn prepare_profile_switch(
             .ok_or_else(|| "No outbounds array found in profile config".to_string())?;
         if !outbounds.iter().any(|outbound| {
             outbound.get("tag").and_then(|value| value.as_str()) == Some(tag)
+                && outbound.get("tag").and_then(|value| value.as_str()) != Some("proxy")
                 && !matches!(
                     outbound.get("type").and_then(|value| value.as_str()),
-                    Some("selector" | "direct" | "block" | "dns")
+                    Some("direct" | "block" | "dns")
                 )
         }) {
             return Err(format!("Selected node not found in profile {}", profile_id));
         }
         for outbound in outbounds {
-            if outbound.get("type").and_then(|value| value.as_str()) == Some("selector") {
+            if outbound.get("type").and_then(|value| value.as_str()) == Some("selector")
+                && outbound.get("tag").and_then(|value| value.as_str()) == Some("proxy")
+            {
                 outbound["default"] = serde_json::Value::String(tag.to_string());
             }
         }
@@ -2612,6 +2686,8 @@ pub async fn switch_profile(
                         outbounds.iter().find(|outbound| {
                             outbound.get("type").and_then(|value| value.as_str())
                                 == Some("selector")
+                                && outbound.get("tag").and_then(|value| value.as_str())
+                                    == Some("proxy")
                         })
                     })
                     .and_then(|selector| selector.get("default"))
