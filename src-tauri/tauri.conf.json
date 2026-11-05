@@ -13,13 +13,13 @@
     "windows": [
       {
         "title": "X-Link",
-        "width": 1000,
-        "height": 640,
-        "minWidth": 800,
-        "minHeight": 580,
+        "width": 950,
+        "height": 650,
+        "minWidth": 380,
+        "minHeight": 550,
         "decorations": true,
         "transparent": false,
-        "visible": false
+        "visible": true
       }
     ],
     "security": {

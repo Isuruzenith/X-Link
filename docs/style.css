@@ -700,7 +700,11 @@
     }
     
     .nav-links {
-      display: none; /* Mobile menu fallback simplified */
+      gap: 12px;
+    }
+
+    .nav-links a:not(.nav-btn):not(.nav-github-link) {
+      display: none;
     }
     
     .download-buttons {
@@ -734,4 +738,17 @@
       align-items: center;
       text-align: center;
     }
+  }
+
+  @media (max-width: 480px) {
+    .nav-container { padding-inline: 16px; }
+    .nav-links { gap: 8px; }
+    .nav-github-link { display: none; }
+    .nav-btn { padding: 10px 12px; }
+    .hero-section { padding: 104px 0 48px; min-height: auto; }
+    .hero-title { font-size: clamp(27px, 8vw, 36px); }
+    .hero-subtitle { font-size: 14px; margin-bottom: 26px; }
+    .download-box { padding: 20px 14px; }
+    .download-btn { min-height: 48px; }
+    .download-btn .btn-text { min-width: 0; }
   }

@@ -3,6 +3,7 @@ import { storeHelper, type Settings } from '../utils/store';
 import { invoke } from '@tauri-apps/api/core';
 import { classifySetting, validateSettingsForApply } from '../utils/applyPolicy';
 import { useConnectionStore } from './connectionStore';
+import { useToastStore } from './toastStore';
 import { connectedApplyDeps, createApplier, reportApplyOutcome } from '../utils/connectedApply';
 
 export type ThemeMode = 'dark' | 'light' | 'system';
@@ -122,6 +123,34 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       const baseline: Partial<Settings> = {};
       for (const key of restartKeys) (baseline as Record<string, unknown>)[key] = current[key];
       getApplier().schedule(baseline);
+    }
+
+    // Notify user of apply-class requirements for changed keys (pop up when selected/changed)
+    const changedKeys = (Object.keys(updates) as (keyof Settings)[]).filter(
+      (key) => updates[key] !== undefined && current[key] !== updates[key],
+    );
+    const hasDefer = changedKeys.some((k) => classifySetting(k) === 'defer');
+    const hasRestart = changedKeys.some((k) => classifySetting(k) === 'restart');
+
+    const activeToasts = useToastStore.getState().toasts;
+    if (hasDefer) {
+      if (!activeToasts.some((t) => t.title === 'Next Connect' && !t.exiting)) {
+        useToastStore.getState().addToast(
+          'info',
+          'This setting will take effect on next connect.',
+          'Next Connect'
+        );
+      }
+    } else if (hasRestart) {
+      if (!activeToasts.some((t) => t.title === 'Requires Restart' && !t.exiting)) {
+        useToastStore.getState().addToast(
+          'info',
+          connectedApplyDeps.isConnected()
+            ? 'This setting requires a proxy restart and will be applied.'
+            : 'This setting requires a proxy restart to take effect.',
+          'Requires Restart'
+        );
+      }
     }
 
     // Apply auto-start and admin elevation configurations via Tauri commands

@@ -72,19 +72,19 @@ export function NavRail({ activeTab, onTabChange }: NavRailProps) {
       <aside ref={navRef} id="primary-navigation" className={`app-navigation ${open ? 'is-open' : ''}`} aria-label="X-Link navigation" inert={compact && !open}>
         <div className="nav-brand">
           <img src={xLinkLogo} alt="" className="nav-brand-icon" />
-          <div><strong>X-Link</strong><span>Network control</span></div>
+          <div className="nav-brand-text"><strong>X-Link</strong><span>Network control</span></div>
           <button type="button" className="nav-close" aria-label="Close navigation" onClick={() => { setOpen(false); menuRef.current?.focus(); }}><Icon name="close" size={18} /></button>
         </div>
         <nav className="nav-destinations" aria-label="Main navigation">
           {NAV_ITEMS.map(({ id, icon, label }) => (
-            <button key={id} type="button" aria-current={activeTab === id ? 'page' : undefined} className={`nav-destination ${activeTab === id ? 'is-active' : ''}`} onClick={() => navigate(id)}>
-              <Icon name={icon} size={19} aria-hidden="true" /><span>{label}</span>
+            <button key={id} type="button" title={label} aria-label={label} aria-current={activeTab === id ? 'page' : undefined} className={`nav-destination ${activeTab === id ? 'is-active' : ''}`} onClick={() => navigate(id)}>
+              <Icon name={icon} size={19} aria-hidden="true" /><span className="nav-label">{label}</span>
             </button>
           ))}
         </nav>
-        <div className="nav-session" role="status">
+        <div className="nav-session" role="status" title={`Proxy session: ${connectionStatus}`}>
           <span className={`session-indicator ${connectionStatus}`} aria-hidden="true" />
-          <div><strong>{connectionStatus === 'connecting' ? 'Connecting' : connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}</strong><span>Proxy session</span></div>
+          <div className="nav-session-text"><strong>{connectionStatus === 'connecting' ? 'Connecting' : connectionStatus === 'connected' ? 'Connected' : 'Disconnected'}</strong><span>Proxy session</span></div>
         </div>
       </aside>
     </>

@@ -119,7 +119,7 @@ export const useRoutingStore = create<RoutingState>((set, get) => {
 
   saveRuleSet: async () => {
     const { ruleSetForm, ruleSets } = get();
-    if (!ruleSetForm.tag.trim()) return;
+    if (!ruleSetForm.tag.trim() || (ruleSetForm.type === 'remote' && !ruleSetForm.url?.trim())) return;
 
     const before = snapshot();
     const updated = [...ruleSets, { ...ruleSetForm, id: uid() }];

@@ -9,13 +9,21 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { FormInput, SegmentedControl } from '@/components/form';
 
-const LOG_ROW_HEIGHT = 28;
+const LOG_ROW_HEIGHT = 30;
 
 function getLevelLabel(type: string): string {
   if (type === 'error') return 'ERR';
   if (type === 'warn')  return 'WARN';
   if (type === 'system') return 'SYS';
   return 'INFO';
+}
+
+function stripRedundantLevelTag(text: string, type: string): string {
+  if (type === 'system') return text.replace(/^\[(?:system|sys)\]\s*/i, '');
+  if (type === 'info') return text.replace(/^\[(?:info)\]\s*/i, '');
+  if (type === 'warn') return text.replace(/^\[(?:warn|warning)\]\s*/i, '');
+  if (type === 'error') return text.replace(/^\[(?:error|err)\]\s*/i, '');
+  return text;
 }
 
 // Syntax highlighting for log tags like [DNS], [TUN], etc.
@@ -61,18 +69,20 @@ function LogRow({
   const log = items[index];
   if (!log) return null;
 
+  const cleanText = stripRedundantLevelTag(log.text, log.type);
+
   return (
     <div
       style={style}
-      className="flex items-center px-2 py-0.5 rounded hover:bg-muted/30 transition-colors font-mono text-[11.5px] font-normal text-foreground/90 select-text"
+      className="flex items-center px-2 py-0.5 rounded hover:bg-muted/30 transition-colors font-mono text-[11.5px] font-normal text-foreground/90 select-text gap-2 min-w-0"
     >
       {/* Timestamp */}
-      <span className="text-muted-foreground/60 mr-3.5 select-none text-[10px] shrink-0 font-normal w-12 sm:w-14 truncate" title={log.timestamp}>
+      <span className="text-muted-foreground/60 select-none text-[10px] shrink-0 font-normal w-14 truncate" title={log.timestamp}>
         {log.timestamp}
       </span>
 
       {/* Level label */}
-      <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none ${
+      <span className={`w-9 shrink-0 text-[9px] font-bold tracking-wider select-none uppercase ${
         log.type === 'error' ? 'text-destructive font-black' :
         log.type === 'warn'  ? 'text-amber-600 dark:text-amber-500' :
         log.type === 'system' ? 'text-blue-600 dark:text-blue-400' : 'text-foreground/70'
@@ -82,12 +92,12 @@ function LogRow({
 
       {/* Log content */}
       <span
-        className={`flex-1 truncate font-normal text-[11px] ${
+        className={`flex-1 truncate font-normal text-[11px] min-w-0 ${
           log.type === 'error' ? 'text-destructive/90 font-medium' : 'text-foreground/90'
         }`}
-        title={log.text}
+        title={cleanText}
       >
-        {renderHighlightedText(log.text)}
+        {renderHighlightedText(cleanText)}
       </span>
     </div>
   );
@@ -145,8 +155,12 @@ export function LogsView() {
   }, [filtered.length, autoScroll, listRef]);
 
   const handleCopy = async () => {
-    await copyLogs();
-    useToastStore.getState().addToast('success', 'All logs copied to clipboard.', 'Logs Copied');
+    try {
+      await copyLogs();
+      useToastStore.getState().addToast('success', 'All logs copied to clipboard.', 'Logs Copied');
+    } catch {
+      useToastStore.getState().addToast('error', 'Clipboard access failed. Try again.', 'Copy Failed');
+    }
   };
 
   return (
@@ -204,7 +218,7 @@ export function LogsView() {
         {/* Terminal block */}
         <Card className="utility-log-panel flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
           {filtered.length > 0 ? (
-            <div className="flex-1 w-full min-h-0 p-3 font-mono text-[11.5px]">
+            <div className="flex-1 w-full min-h-0 p-3 font-mono text-[11.5px]" role="region" aria-label="Proxy activity logs">
               <List
                 listRef={listRef}
                 rowCount={filtered.length}

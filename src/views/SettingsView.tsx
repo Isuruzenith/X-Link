@@ -81,6 +81,49 @@ interface RestoreOptions {
   restoreRouting: boolean;
 }
 
+function PortField({ label, value, disabled, onCommit }: {
+  label: string;
+  value: number;
+  disabled?: boolean;
+  onCommit: (port: number) => void;
+}) {
+  const [edit, setEdit] = React.useState<{ initial: number; draft: string } | null>(null);
+  const lastCommitted = React.useRef<string | null>(null);
+  const fieldId = React.useId();
+  const draft = edit?.initial === value ? edit.draft : String(value);
+  const port = Number(draft);
+  const invalid = !/^\d+$/.test(draft) || !Number.isInteger(port) || port < 1 || port > 65535;
+  const commit = (next: string) => {
+    const number = Number(next);
+    if (/^\d+$/.test(next) && Number.isInteger(number) && number >= 1 && number <= 65535 && number !== value && lastCommitted.current !== next) {
+      lastCommitted.current = next;
+      onCommit(number);
+    }
+    setEdit(null);
+  };
+
+  return (
+    <div>
+      <FormInput
+        label={label}
+        type="number"
+        min={1}
+        max={65535}
+        mono
+        className="h-8"
+        value={draft}
+        disabled={disabled}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? fieldId : undefined}
+        onChange={(next) => { lastCommitted.current = null; setEdit({ initial: value, draft: next }); }}
+        onFieldChange={commit}
+        onBlur={(event) => commit(event.currentTarget.value)}
+      />
+      {invalid && !disabled && <span id={fieldId} role="alert" className="text-xs text-destructive">Enter a port from 1 to 65535.</span>}
+    </div>
+  );
+}
+
 export function SettingsView() {
   const {
     settings,
@@ -282,16 +325,16 @@ export function SettingsView() {
         {/* Secondary nav */}
         <nav className="settings-navigation" aria-label="Settings sections">
           {sideNavItems.map(([id, iconName, label]) => (
-            <Button
+            <button
               key={id}
-              variant="ghost"
-              className={`settings-nav-item ${settingsTab === id ? 'is-active' : ''}`}
-              aria-current={settingsTab === id ? 'page' : undefined}
+              type="button"
+              className={`settings-nav-item ${settingsTab === id ? "is-active" : ""}`}
+              aria-current={settingsTab === id ? "page" : undefined}
               onClick={() => setSettingsTab(id)}
             >
-              <Icon name={iconName} size={15} className="shrink-0" />
+              <Icon name={iconName} size={16} className="shrink-0" />
               <span>{label}</span>
-            </Button>
+            </button>
           ))}
         </nav>
 
@@ -306,7 +349,6 @@ export function SettingsView() {
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Proxy Mode</CardTitle>
-                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Next connect</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Proxy Mode: TUN vs System Proxy" desc="Toggle between native routing (TUN) and OS settings (System Proxy)."
                       checked={settings.proxyMode === 'tun'}
@@ -327,7 +369,6 @@ export function SettingsView() {
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">App Preferences</CardTitle>
-                      <Badge variant="secondary" className="h-4.5 px-1.5 text-[8.5px] font-bold bg-green-500/10 text-green-600 border border-green-500/25 select-none dark:text-green-400">Live</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Close to Tray" desc="Minimize to system tray on close" checked={settings.closeToTray} onChange={(v) => updateSettings({ closeToTray: v })} />
                     <FormSwitchRow title="Launch on System Login" desc="Launch minimized on user login" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
@@ -346,7 +387,6 @@ export function SettingsView() {
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Connection Optimization</CardTitle>
-                      <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                     </CardHeader>
                     <FormSwitchRow title="Enable Multiplexing (Mux)" desc="Multiplexes multiple streams over a single connection" checked={settings.multiplex} onChange={(v) => updateSettings({ multiplex: v })} />
                   </Card>
@@ -354,7 +394,6 @@ export function SettingsView() {
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                     <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                       <CardTitle className="text-xs font-bold text-foreground">Appearance</CardTitle>
-                      <Badge variant="secondary" className="h-4.5 px-1.5 text-[8.5px] font-bold bg-green-500/10 text-green-600 border border-green-500/25 select-none dark:text-green-400">Live</Badge>
                     </CardHeader>
                     <SegmentedControl
                       value={theme}
@@ -372,7 +411,6 @@ export function SettingsView() {
                 <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3 h-fit">
                   <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-xs font-bold text-foreground">Inbound Ports</CardTitle>
-                    <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                   </CardHeader>
                   <FormSwitchRow title="Use Separate HTTP & SOCKS5 Ports" desc="Bind separate HTTP and SOCKS5 protocol listeners"
                     checked={settings.useSeparatePorts} onChange={(v) => updateSettings({ useSeparatePorts: v })} />
@@ -394,15 +432,11 @@ export function SettingsView() {
                                 {isInvalid ? '● Invalid' : hasConflict ? '● Conflict' : portStatuses[val] === 'own' ? '● X-Link' : portStatuses[val] === 'free' ? '● Free' : '● Unchecked'}
                               </span>
                             </div>
-                            <FormInput
-                              type="number"
-                              aria-label={label}
-                              mono
-                              className="h-8"
-                              style={{ borderColor: hasError ? 'var(--destructive)' : undefined }}
+                            <PortField
+                              label={label}
                               value={val}
                               disabled={!settings.useSeparatePorts}
-                              onChange={(v) => { const numVal = parseInt(v) || 0; set(numVal); updateSettings({ [key]: numVal } as Partial<Settings>); }}
+                              onCommit={(port) => { set(port); void updateSettings({ [key]: port } as Partial<Settings>); }}
                             />
                           </div>
                         );
@@ -417,15 +451,11 @@ export function SettingsView() {
                           {mixedPort < 1 || mixedPort > 65535 ? '● Invalid' : conflictingPorts.includes(mixedPort) ? '● Conflict' : portStatuses[mixedPort] === 'own' ? '● X-Link' : portStatuses[mixedPort] === 'free' ? '● Free' : '● Unchecked'}
                         </span>
                       </div>
-                      <FormInput
-                        type="number"
-                        aria-label="Mixed inbound port"
-                        mono
-                        className="h-8"
-                        style={{ borderColor: (conflictingPorts.includes(mixedPort) || mixedPort < 1 || mixedPort > 65535) ? 'var(--destructive)' : undefined }}
+                      <PortField
+                        label="Mixed inbound port"
                         value={mixedPort}
                         disabled={settings.useSeparatePorts}
-                        onChange={(v) => { const numVal = parseInt(v) || 0; setPorts({ mixedPort: numVal }); updateSettings({ mixedPort: numVal }); }}
+                        onCommit={(port) => { setPorts({ mixedPort: port }); void updateSettings({ mixedPort: port }); }}
                       />
                     </div>
                   </div>
@@ -461,7 +491,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">TUN Interface Configuration</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div className="flex flex-col gap-1.5">
@@ -505,7 +534,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Traffic Sniffing & Protocol Detection</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Enable Traffic Sniffing" desc="Inspect connection metadata to extract domain names for routing"
                   checked={settings.sniffEnabled} onChange={(v) => updateSettings({ sniffEnabled: v })} />
@@ -532,7 +560,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">DNS Servers</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                   <div className="flex flex-col gap-1.5">
@@ -603,7 +630,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">DNS Options & Strategy</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
@@ -627,7 +653,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Resolution Mode</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <div className="flex flex-col gap-1.5">
                   <FormSelect
@@ -654,7 +679,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Routing</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Bypass LAN / Private IPs" desc="Route RFC-1918 addresses directly instead of through the proxy"
                   checked={settings.bypassLan} onChange={(v) => updateSettings({ bypassLan: v })} />
@@ -673,7 +697,6 @@ export function SettingsView() {
               <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-4">
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Clash-Compatible REST API</CardTitle>
-                  <Badge variant="outline" className="h-4.5 px-1.5 text-[8.5px] font-bold text-orange-500 border-orange-500/20 bg-orange-500/5 select-none">Requires restart</Badge>
                 </CardHeader>
                 <FormSwitchRow title="Enable External API" desc="Expose HTTP API for external controllers (Yacd, MetaCubeX)"
                   checked={settings.apiEnabled} onChange={(v) => {
@@ -687,14 +710,11 @@ export function SettingsView() {
                 <div className={`flex flex-col gap-4 ${!settings.apiEnabled ? 'opacity-50' : ''}`}>
                   <div className="settings-api-row">
                     <div className="settings-api-port">
-                      <FormInput
+                      <PortField
                         label="API Port"
-                        type="number"
-                        mono
-                        style={{ borderColor: (settings.apiPort < 1 || settings.apiPort > 65535) ? 'var(--destructive)' : undefined }}
                         value={settings.apiPort}
                         disabled={!settings.apiEnabled}
-                        onChange={(v) => updateSettings({ apiPort: parseInt(v) || 9090 })}
+                        onCommit={(port) => { void updateSettings({ apiPort: port }); }}
                       />
                     </div>
                     <div className="settings-api-secret">

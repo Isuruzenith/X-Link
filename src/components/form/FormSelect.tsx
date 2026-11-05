@@ -14,6 +14,8 @@ interface FormSelectProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
 }
 
 export function FormSelect({
@@ -24,6 +26,8 @@ export function FormSelect({
   placeholder,
   className,
   disabled,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedBy,
 }: FormSelectProps) {
   const selectRef = React.useRef<HTMLElementTagNameMap['md-outlined-select']>(null);
 
@@ -40,6 +44,9 @@ export function FormSelect({
       label,
       value,
       'aria-label': label || placeholder || 'Select option',
+      'aria-invalid': ariaInvalid === undefined ? undefined : String(ariaInvalid),
+      'aria-describedby': ariaDescribedBy,
+      error: ariaInvalid || undefined,
       disabled: disabled || undefined,
       className: cn('material-field material-select', className),
       onChange: (event: React.FormEvent<HTMLElementTagNameMap['md-outlined-select']>) => {

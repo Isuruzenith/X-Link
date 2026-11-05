@@ -11,7 +11,10 @@ updated: 2026-11-03
 
 # 04 — UI Wireframes & Screen Layouts
 
-**Navigation**: [[00-Home-MOC]] | **Prev**: [[03-UI-Components-and-Views]] | **Next**: [[05-Rust-Backend-Architecture]] | **Related**: [[02-Frontend-UI-Architecture]]
+**Navigation**: [[00-Home-MOC]] | **Prev**: [[03-UI-Components-and-Views]] | **Next**: [[05-Rust-Backend-Architecture]] | **Related**: [[02-Frontend-UI-Architecture]] · [[wireframes/README|Current UI/UX Wireframes]]
+
+> [!WARNING] Historical design reference
+> Some layouts and features below are proposals, not the running app. For source-aligned screens and states, see [[wireframes/README|Current UI/UX Wireframes]].
 
 > [!NOTE] Window Geometry & Cross-Platform Ergonomics
 > Default native window dimensions (`src-tauri/tauri.conf.json`): **1080 × 700 px** (Minimum: **900 × 620 px**).

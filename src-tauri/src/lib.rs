@@ -109,6 +109,13 @@ pub fn run() {
             commands::config::preview_import_config
         ])
         .setup(|app| {
+            // Preserve minimized launches now that the main window is visible by default.
+            if commands::system::is_minimized_launch() {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide()?;
+                }
+            }
+
             // Sweep orphan sidecar session from unexpected previous app termination
             sweep_orphan_sidecar_session(app.handle());
 

@@ -67,6 +67,20 @@ describe('SettingsView Diagnostics and Simulation', () => {
     expect(screen.getByText('Routing Rule & DNS Simulation')).toBeTruthy();
   });
 
+  it('keeps port edits as drafts until a valid value is committed', () => {
+    render(<SettingsView />);
+    const field = screen.getByLabelText('Mixed inbound port') as HTMLElement & { value: string };
+    const previous = useSettingsStore.getState().settings.mixedPort;
+    Object.defineProperty(field, 'value', { configurable: true, writable: true, value: '' });
+    fireEvent.input(field);
+    expect(useSettingsStore.getState().settings.mixedPort).toBe(previous);
+    expect(screen.getByText('Enter a port from 1 to 65535.')).toBeTruthy();
+    field.value = '3000';
+    fireEvent.input(field);
+    fireEvent.change(field);
+    expect(useSettingsStore.getState().settings.mixedPort).toBe(3000);
+  });
+
   it('generates, displays, and copies sanitized system diagnostics report', async () => {
     const mockReport = {
       timestamp: 1730000000,
@@ -253,5 +267,53 @@ describe('SettingsView Diagnostics and Simulation', () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Backup validation failed'));
     expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('import_config_backup', expect.anything());
+  });
+
+  it('does not display static Live, Requires restart, or Next connect badges in card headers', () => {
+    render(<SettingsView />);
+    expect(screen.queryByText('Live')).toBeNull();
+    expect(screen.queryByText('Requires restart')).toBeNull();
+    expect(screen.queryByText('Next connect')).toBeNull();
+  });
+
+  it('triggers a toast popup notification when changing a setting requiring restart or next connect', async () => {
+    render(<SettingsView />);
+    useToastStore.setState({ toasts: [] });
+
+    // Changing proxyMode (Next connect)
+    await useSettingsStore.getState().updateSettings({ proxyMode: 'tun' });
+    let toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.title === 'Next Connect')).toBe(true);
+
+    // Changing multiplex (Requires restart)
+    useToastStore.setState({ toasts: [] });
+    await useSettingsStore.getState().updateSettings({ multiplex: true });
+    toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.title === 'Requires Restart')).toBe(true);
+  });
+  it("renders all secondary navigation items with consistent left alignment structure and active state", () => {
+    const { container } = render(<SettingsView />);
+    const navItems = container.querySelectorAll<HTMLButtonElement>(".settings-nav-item");
+    expect(navItems).toHaveLength(6);
+
+    const expectedLabels = ["General", "TUN Mode", "Sniffing", "DNS", "API", "Diagnostics"];
+    navItems.forEach((item, index) => {
+      expect(item.tagName.toLowerCase()).toBe("button");
+      expect(item.getAttribute("type")).toBe("button");
+      expect(item.textContent).toContain(expectedLabels[index]);
+      expect(item.querySelector("md-icon")).toBeTruthy();
+      expect(item.querySelector("span")?.textContent).toBe(expectedLabels[index]);
+    });
+
+    // Default active item is General
+    expect(navItems[0].getAttribute("aria-current")).toBe("page");
+    expect(navItems[0].classList.contains("is-active")).toBe(true);
+
+    // Switching tab updates active state
+    fireEvent.click(navItems[1]);
+    expect(navItems[0].getAttribute("aria-current")).toBeNull();
+    expect(navItems[0].classList.contains("is-active")).toBe(false);
+    expect(navItems[1].getAttribute("aria-current")).toBe("page");
+    expect(navItems[1].classList.contains("is-active")).toBe(true);
   });
 });

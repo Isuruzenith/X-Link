@@ -208,4 +208,12 @@ describe('Profiles import', () => {
     fireEvent.input(field);
     expect(screen.queryByText('Sample servers:')).toBeNull();
   });
+
+  it('renders compact empty states with dedicated icons for profiles and servers', () => {
+    render(<ConfigView />);
+    expect(screen.getByText('No profiles yet')).toBeTruthy();
+    expect(screen.getByText('No profile selected')).toBeTruthy();
+    const icons = document.querySelectorAll('.material-empty-icon');
+    expect(icons.length).toBeGreaterThanOrEqual(2);
+  });
 });

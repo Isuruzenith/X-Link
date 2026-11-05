@@ -55,6 +55,30 @@ export function RoutingView() {
   const isConnected = useConnectionStore((state) => state.connectionStatus === 'connected');
   const [runningProcesses, setRunningProcesses] = useState<{ pid: number; name: string }[]>([]);
   const [loadingProcesses, setLoadingProcesses] = useState(false);
+  const [ruleError, setRuleError] = useState('');
+  const [ruleSetError, setRuleSetError] = useState('');
+
+  const submitRule = () => {
+    if (!ruleForm.value.trim()) {
+      setRuleError(ruleForm.type === 'rule_set' ? 'Select a rule set.' : 'Enter a rule value.');
+      return;
+    }
+    setRuleError('');
+    void saveRoutingRule();
+  };
+
+  const submitRuleSet = () => {
+    if (!ruleSetForm.tag.trim()) {
+      setRuleSetError('Enter a tag for the rule set.');
+      return;
+    }
+    if (ruleSetForm.type === 'remote' && !ruleSetForm.url?.trim()) {
+      setRuleSetError('Enter a remote URL for the rule set.');
+      return;
+    }
+    setRuleSetError('');
+    void saveRuleSet();
+  };
 
   const fetchRunningProcesses = async () => {
     setLoadingProcesses(true);
@@ -79,6 +103,7 @@ export function RoutingView() {
           onClick={() => {
             setEditingRule(null);
             setRuleForm({ type: 'geoip', value: '', outbound: 'direct', invert: false, notes: '' });
+            setRuleError('');
             setShowAddRule(true);
           }}
         >
@@ -136,7 +161,7 @@ export function RoutingView() {
                 variant="outline"
                 size="sm"
                 className="font-semibold"
-                onClick={() => setShowAddRuleSet(true)}
+                onClick={() => { setRuleSetError(''); setShowAddRuleSet(true); }}
               >
                 <Icon name="add" size={12} /> Add Rule Set
               </Button>
@@ -151,7 +176,7 @@ export function RoutingView() {
                       variant="ghost"
                       size="icon"
                       className="size-6 text-muted-foreground hover:text-foreground"
-                      onClick={() => setShowAddRuleSet(false)}
+                      onClick={() => { setRuleSetError(''); setShowAddRuleSet(false); }}
                       aria-label="Cancel adding rule set"
                     >
                       <Icon name="close" size={14} />
@@ -159,13 +184,13 @@ export function RoutingView() {
                   </div>
                   <div className="routing-form-grid routing-rule-set-grid">
                     <div className="flex flex-col gap-1">
-                      <FormInput label="Tag" value={ruleSetForm.tag} onChange={(v) => setRuleSetForm({ tag: v })} placeholder="geoip-cn" mono />
+                      <FormInput label="Tag" value={ruleSetForm.tag} onChange={(v) => { setRuleSetForm({ tag: v }); setRuleSetError(''); }} placeholder="geoip-cn" aria-invalid={!!ruleSetError && !ruleSetForm.tag.trim()} aria-describedby={ruleSetError ? 'rule-set-error' : undefined} mono />
                     </div>
                     <div className="flex flex-col gap-1">
                       <FormSelect
                         label="Rule set type"
                         value={ruleSetForm.type}
-                        onChange={(v) => setRuleSetForm({ type: v as 'remote' | 'local' })}
+                        onChange={(v) => { setRuleSetForm({ type: v as 'remote' | 'local' }); setRuleSetError(''); }}
                         options={[{ value: 'remote', label: 'Remote' }, { value: 'local', label: 'Local' }]}
                       />
                     </div>
@@ -197,16 +222,17 @@ export function RoutingView() {
                       variant="default"
                       size="sm"
                       className="font-semibold"
-                      onClick={saveRuleSet}
+                      onClick={submitRuleSet}
                     >
                       Add
                     </Button>
                   </div>
                   {ruleSetForm.type === 'remote' && (
                     <div className="flex flex-col gap-1 mt-2.5">
-                      <FormInput label="Remote URL" value={ruleSetForm.url || ''} onChange={(v) => setRuleSetForm({ url: v })} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" />
+                      <FormInput label="Remote URL" value={ruleSetForm.url || ''} onChange={(v) => { setRuleSetForm({ url: v }); setRuleSetError(''); }} placeholder="https://cdn.jsdelivr.net/.../geoip/cn.srs" aria-invalid={!!ruleSetError && !!ruleSetForm.tag.trim()} aria-describedby={ruleSetError ? 'rule-set-error' : undefined} />
                     </div>
                   )}
+                  {ruleSetError && <p id="rule-set-error" role="alert" className="mt-2 text-xs text-destructive">{ruleSetError}</p>}
                 </div>
               )}
 
@@ -276,7 +302,7 @@ export function RoutingView() {
                     <FormSelect
                       label="Rule type"
                       value={ruleForm.type}
-                      onChange={(v) => setRuleForm({ type: v as RoutingRuleType })}
+                      onChange={(v) => { setRuleForm({ type: v as RoutingRuleType, value: '' }); setRuleError(''); }}
                       options={[
                         { value: 'geoip', label: 'GeoIP' },
                         { value: 'geosite', label: 'GeoSite' },
@@ -296,18 +322,22 @@ export function RoutingView() {
                       <FormSelect
                         label="Rule value"
                         value={ruleForm.value}
-                        onChange={(v) => setRuleForm({ value: v })}
+                        onChange={(v) => { setRuleForm({ value: v }); setRuleError(''); }}
                         options={[
                           { value: '', label: 'Select Set...' },
                           ...ruleSets.map((rs) => ({ value: rs.tag, label: rs.tag })),
                         ]}
+                        aria-invalid={!!ruleError}
+                        aria-describedby={ruleError ? 'rule-value-error' : undefined}
                       />
                     ) : (
                       <>
                         <FormInput
                           label="Rule value"
                           value={ruleForm.value}
-                          onChange={(v) => setRuleForm({ value: v })}
+                          onChange={(v) => { setRuleForm({ value: v }); setRuleError(''); }}
+                          aria-invalid={!!ruleError}
+                          aria-describedby={ruleError ? 'rule-value-error' : undefined}
                           placeholder={
                             ruleForm.type === 'geoip' ? 'cn, private…' :
                             ruleForm.type === 'geosite' ? 'cn, geolocation-!cn, google…' :
@@ -366,6 +396,7 @@ export function RoutingView() {
                         )}
                       </>
                     )}
+                    {ruleError && <p id="rule-value-error" role="alert" className="text-xs text-destructive">{ruleError}</p>}
                   </div>
                   <div className="flex flex-col gap-1">
                     <FormSelect
@@ -394,7 +425,7 @@ export function RoutingView() {
                       variant="default"
                       size="sm"
                       className="font-semibold"
-                      onClick={saveRoutingRule}
+                      onClick={submitRule}
                     >
                       {editingRule ? 'Update' : 'Add'}
                     </Button>
@@ -402,7 +433,7 @@ export function RoutingView() {
                       variant="outline"
                       size="icon"
                       className="size-8"
-                      onClick={() => { setShowAddRule(false); setEditingRule(null); }}
+                      onClick={() => { setShowAddRule(false); setEditingRule(null); setRuleError(''); }}
                       aria-label="Cancel editing rule"
                     >
                       <Icon name="close" size={16} />
@@ -417,11 +448,11 @@ export function RoutingView() {
                 <div className="rules-table-header bg-muted/40 border-b border-border/60 text-[10px] uppercase font-bold tracking-wider text-muted-foreground py-2.5 px-3 flex items-center shrink-0">
                   <span className="w-7">#</span>
                   <span className="w-16">Active</span>
-                  <span className="w-32 shrink-0">Type</span>
-                  <span className="flex-1 truncate">Value</span>
-                  <span className="w-24 shrink-0">Outbound</span>
-                  <span className="flex-1 truncate">Notes</span>
-                  <span className="w-16 shrink-0 text-right">Actions</span>
+                  <span className="w-28 shrink-0">Type</span>
+                  <span className="flex-1 truncate min-w-[110px] pr-2">Value</span>
+                  <span className="w-24 shrink-0 pr-2">Outbound</span>
+                  <span className="flex-1 truncate min-w-[110px] pr-2">Notes</span>
+                  <span className="w-20 shrink-0 text-right pr-2">Actions</span>
                 </div>
                 <div className="flex flex-col divide-y divide-border/30">
                   {routingRules.map((rule, i) => (
@@ -439,20 +470,20 @@ export function RoutingView() {
                           onCheckedChange={(checked) => toggleRoutingRuleEnabled(rule.id, checked)}
                         />
                       </span>
-                      <span className="w-32 shrink-0 pr-1">
+                      <span className="w-28 shrink-0 pr-1">
                         <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] font-mono border-border bg-background/50 font-normal">
                           {rule.type}{rule.invert ? ' !' : ''}
                         </Badge>
                       </span>
-                      <span className="flex-1 font-mono text-[11px] text-foreground truncate min-w-0 pr-1" title={rule.value}>{rule.value}</span>
-                      <span className="w-24 shrink-0 pr-1"><BadgeOutbound action={rule.outbound} /></span>
-                      <span className="flex-1 text-[11px] text-muted-foreground truncate min-w-0 pr-1" title={rule.notes || ''}>{rule.notes || '—'}</span>
-                      <span className="w-16 shrink-0 flex gap-1 justify-end pl-1">
+                      <span className="flex-1 font-mono text-[11px] text-foreground truncate min-w-[110px] pr-2" title={rule.value}>{rule.value}</span>
+                      <span className="w-24 shrink-0 pr-2"><BadgeOutbound action={rule.outbound} /></span>
+                      <span className="flex-1 text-[11px] text-muted-foreground truncate min-w-[110px] pr-2" title={rule.notes || ''}>{rule.notes || '—'}</span>
+                      <span className="w-20 shrink-0 flex gap-1 justify-end pr-2">
                         <Button
                           variant="ghost"
                           size="icon"
                           className="size-6 text-muted-foreground hover:text-foreground rounded"
-                          onClick={() => { setEditingRule(rule); setShowAddRule(true); }}
+                          onClick={() => { setEditingRule(rule); setRuleError(''); setShowAddRule(true); }}
                           aria-label={`Edit rule ${rule.value}`}
                         >
                           <Icon name="edit" size={12} />

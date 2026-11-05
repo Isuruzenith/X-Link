@@ -17,6 +17,14 @@ describe('FormSelect', () => {
     expect(option.getAttribute('value')).toBe('proxy');
   });
 
+  it('forwards accessible validation state to the Material select', () => {
+    const { container } = render(<FormSelect label="Rule value" value="" onChange={() => {}} options={[{ value: '', label: 'Select set' }]} aria-invalid={true} aria-describedby="rule-error" />);
+    const select = container.querySelector('md-outlined-select')!;
+    expect(select.getAttribute('aria-invalid')).toBe('true');
+    expect(select.getAttribute('aria-describedby')).toBe('rule-error');
+    expect(select.hasAttribute('error')).toBe(true);
+  });
+
   it('allows choosing a real empty option without clearing the select', () => {
     const onChange = vi.fn();
     const { container } = render(

@@ -7,7 +7,7 @@ tags:
   - ai-context
   - xlink
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-05
 ---
 
 # X-Link — Complete AI Agent Knowledge Vault
@@ -25,7 +25,8 @@ updated: 2026-11-03
 | **[[01-Architecture-Overview]]** | End-to-end 3-tier system topology, boot lifecycle, cross-platform process supervision, 5-stage self-healing engine, transactional config pipeline, and non-negotiable core invariants. | `#architecture` `#backend` `#frontend` |
 | **[[02-Frontend-UI-Architecture]]** | React 19 + TypeScript + Tailwind CSS v4 + Material Web (`@material/web`) styling system, theme tokens, `App.tsx` orchestration, and all **8 Zustand stores** (`connectionStore`, `profileStore`, `routingStore`, `settingsStore`, `nodeEditorStore`, `statsStore`, `logStore`, `toastStore`). | `#frontend` `#state-management` |
 | **[[03-UI-Components-and-Views]]** | Exhaustive component reference: layout shell (`NavRail` with 72px macOS traffic light inset, `ViewShell`, `ToastContainer`, `ErrorBoundary`), domain editors (`NodeEditor`, `TrafficChart`), form controls (`FormInput`, `FormSelect`, `FormSwitchRow`, `SegmentedControl`), UI primitives, and all **6 main views** (`DashboardView`, `ConfigView`, `RoutingView`, `ConnectionsView`, `LogsView`, `SettingsView`). | `#frontend` `#components` `#ui` |
-| **[[04-UI-Wireframes]]** | Detailed **ASCII wireframes** and state matrices for every screen, tab, drawer, modal (including passphrase challenge), and banner in X-Link. | `#wireframe` `#ui` `#frontend` |
+| **[[04-UI-Wireframes]]** | Historical UI design sketches; some proposed flows do not match the running app. | `#wireframe` `#ui` `#frontend` |
+| **[[wireframes/README\|Current UI/UX Wireframes]]** | Source-aligned wireframes for the six current views, settings tabs, editor, dialogs, and responsive states. | `#wireframe` `#ui` `#frontend` |
 | **[[05-Rust-Backend-Architecture]]** | Deep dive into `src-tauri`: `ProxyState`, `SingBox` sidecar management (`v1.13.14`), cross-platform process supervision (`SidecarChild`, Windows Job Objects, Linux `PR_SET_PDEATHSIG`, macOS root helper), config generator (`generator.rs`), Kahn's DAG cycle validator (`validator.rs`), Outbound Group routing (`rules.rs`), telemetry ring buffers, and encrypted backup/restore v2. | `#backend` `#rust` `#sing-box` |
 | **[[06-IPC-Bridge-and-Data-Contracts]]** | Complete contract dictionary: all **49 Tauri `invoke` commands** (arguments, return types, side effects), all **8 Tauri events** (`emit` -> `listen`), Clash REST API (`127.0.0.1:9090`) integration, and on-disk JSON schemas (`settings.json`, `profiles.json`, `routing.json`, `stats.json`, `configs/active.json`, `sidecar.session.json`). | `#ipc` `#contracts` `#backend` `#frontend` |
 | **[[07-AI-Agent-Playbook]]** | Practical engineering guide for AI agents: 7 non-negotiable invariants, Dual-Store Synchronization Rule (`@tauri-apps/plugin-store` vs Rust `std::fs`), Connected-Apply Policy (`applyPolicy.ts`), and step-by-step recipes for adding settings, protocols, or IPC commands. | `#ai-context` `#playbook` `#architecture` |

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/icon';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { ViewShell } from '../components/ViewShell';
@@ -44,11 +44,11 @@ export function ConfigView() {
     ? 'Enter a valid subscription URL, such as https://example.com/config.'
     : null;
 
-  const closeDiff = () => {
+  const closeDiff = useCallback(() => {
     clearDiffPreview();
     setDiffProfileId(null);
     refreshTriggerRef.current?.focus();
-  };
+  }, [clearDiffPreview]);
 
   const handleRequestRefresh = async (profileId: string, trigger: HTMLElement) => {
     refreshTriggerRef.current = trigger;
@@ -91,11 +91,14 @@ export function ConfigView() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [diffPreview]);
+  }, [diffPreview, closeDiff]);
 
   useEffect(() => {
     if (selectedNodeTag) {
-      document.getElementById(`node-card-${selectedNodeTag}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      document.getElementById(`node-card-${selectedNodeTag}`)?.scrollIntoView({
+        behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+        block: 'nearest',
+      });
     }
   }, [selectedNodeTag]);
 
@@ -269,10 +272,12 @@ export function ConfigView() {
               );
             }) : (
               <div className="material-empty">
-                <Icon name="public" aria-hidden="true" />
+                <div className="material-empty-icon" aria-hidden="true">
+                  <Icon name="folder_open" />
+                </div>
                 <h3>No profiles yet</h3>
                 <p>Add a subscription, paste a share link or choose a configuration file to get started.</p>
-                <Button onClick={() => setShowImport(true)}><Icon name="add" aria-hidden="true" /> Add your first profile</Button>
+                <Button onClick={() => setShowImport(true)} className="material-action"><Icon name="add" aria-hidden="true" /> Add your first profile</Button>
               </div>
             )}
           </div>
@@ -369,8 +374,10 @@ export function ConfigView() {
               })}
             </div>
           ) : (
-            <div className="material-empty">
-              {selectedProfile ? <Icon name="bolt" aria-hidden="true" /> : <Icon name="public" aria-hidden="true" />}
+            <div className="material-empty material-empty-compact">
+              <div className="material-empty-icon" aria-hidden="true">
+                <Icon name={selectedProfile ? "bolt" : "dns"} />
+              </div>
               <h3>{selectedProfile ? 'No servers available' : 'No profile selected'}</h3>
               <p>{selectedProfile ? 'This profile has no selectable proxy nodes.' : 'Choose a profile to see its servers, or add a new one.'}</p>
             </div>

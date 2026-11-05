@@ -195,10 +195,15 @@ export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
 
   useEffect(() => {
     if (!isConnected) return;
+    let active = true;
+    let requestInFlight = false;
 
     const fetchConnections = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
       try {
         const res = await invoke<{ connections: ConnectionEntry[] }>('get_active_connections');
+        if (!active) return;
         const list = res?.connections || [];
         const now = Date.now();
 
@@ -208,7 +213,7 @@ export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
           let upSpeed = 0;
           let downSpeed = 0;
 
-          if (prev) {
+          if (prev && conn.upload >= prev.upload && conn.download >= prev.download && (now - prev.time) <= 5000) {
             const timeDiff = (now - prev.time) / 1000;
             if (timeDiff > 0) {
               upSpeed = Math.max(0, (conn.upload - prev.upload) / timeDiff);
@@ -233,12 +238,18 @@ export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
         setConnections(updatedList);
       } catch {
         // fail silently
+      } finally {
+        requestInFlight = false;
       }
     };
 
     fetchConnections();
     const interval = setInterval(fetchConnections, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      prevBytesRef.current = {};
+    };
   }, [isConnected]);
 
   const handleKill = async (id: string, label: string) => {
@@ -305,6 +316,8 @@ export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
   });
 
   // Sorting
+  const selectedConnection = visibleConnections.find((connection) => connection.id === selectedId);
+
   const sorted = [...filtered].sort((a, b) => {
     let valA: string | number = 0;
     let valB: string | number = 0;
@@ -388,78 +401,113 @@ export function ConnectionsView({ onNavigateToTab }: ConnectionsViewProps) {
         </div>
  
         {/* Connections table panel */}
-        <Card className="flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
-          <div data-slot="scroll-area" className="material-scroll-area utility-table flex-1 w-full relative overflow-auto size-full">
-            {sorted.length > 0 ? (
-              <Table>
-                <caption className="sr-only">Active connections, routes, speeds and transferred data</caption>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[11px] font-semibold text-muted-foreground select-none">
-                    <TableHead className="h-9 px-4">
-                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[120px] pr-2 text-left", sortBy === 'host' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')} aria-label={`Sort by destination ${sortBy === 'host' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
-                        <span>Destination</span>
-                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </button>
-                    </TableHead>
-                    <TableHead className="h-9 px-4">
-                      <div className="resize-x overflow-hidden min-w-[150px] max-w-[400px] pr-2">
-                        Network / Matched Rule
-                      </div>
-                    </TableHead>
-                    <TableHead className="h-9 px-4">
-                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'speed' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')} aria-label={`Sort by live speed ${sortBy === 'speed' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
-                        <span>Live speed</span>
-                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </button>
-                    </TableHead>
-                    <TableHead className="h-9 px-4">
-                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'bytes' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')} aria-label={`Sort by total data ${sortBy === 'bytes' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
-                        <span>Total data</span>
-                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </button>
-                    </TableHead>
-                    <TableHead className="h-9 px-4">
-                      <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[90px] pr-2 text-left", sortBy === 'time' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')} aria-label={`Sort by uptime ${sortBy === 'time' && sortOrder === 'desc' ? 'ascending' : 'descending'}`}>
-                        <span>Uptime</span>
-                        <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
-                      </button>
-                    </TableHead>
-                    <TableHead className="h-9 px-4 w-14 text-center">
-                      <div className="w-full text-center">Kill</div>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sorted.map((conn) => (
-                    <ConnectionRow
-                      key={conn.id}
-                      conn={conn}
-                      isSelected={selectedId === conn.id}
-                      onSelect={() => setSelectedId(selectedId === conn.id ? null : conn.id)}
-                      onKill={handleKill}
-                      isKilling={!!killingIds[conn.id]}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground p-10 gap-3 select-none">
-                <Icon name="hub" size={40} className="opacity-60" />
-                <span className="text-xs font-bold text-foreground">
-                  {!isConnected ? 'Proxy service is disconnected.' : 'No active network connections found.'}
-                </span>
-                {isConnected && searchQuery && (
-                  <span className="text-[10px]">Try modifying your filter query.</span>
-                )}
-                {!isConnected && onNavigateToTab && (
-                  <Button variant="outline" onClick={() => onNavigateToTab('dashboard')}>
-                    <Icon name="speed" size={16} /> Go to Dashboard
-                  </Button>
-                )}
-              </div>
+        {!isConnected ? (
+          <Card className="my-auto max-w-md mx-auto w-full p-8 flex flex-col items-center justify-center text-center gap-3 border border-border/70 shadow-sm rounded-2xl select-none">
+            <div className="w-12 h-12 rounded-2xl bg-muted/60 flex items-center justify-center text-muted-foreground mb-1">
+              <Icon name="hub" size={24} />
+            </div>
+            <div className="flex flex-col gap-1 items-center">
+              <span className="text-sm font-semibold text-foreground">
+                Proxy service is disconnected.
+              </span>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                Connect to a server from the Dashboard to monitor live network connections and throughput.
+              </p>
+            </div>
+            {onNavigateToTab && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 font-semibold"
+                onClick={() => onNavigateToTab('dashboard')}
+              >
+                <Icon name="speed" size={15} /> Go to Dashboard
+              </Button>
             )}
-          </div>
-        </Card>
+          </Card>
+        ) : (
+          <Card className="flex-1 p-0 overflow-hidden bg-card flex flex-col min-h-[300px]">
+            <div data-slot="scroll-area" className="material-scroll-area utility-table flex-1 w-full relative overflow-auto size-full">
+              {sorted.length > 0 ? (
+                <Table>
+                  <caption className="sr-only">Active connections, routes, speeds and transferred data</caption>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent bg-muted/40 border-b border-border/80 text-[11px] font-semibold text-muted-foreground select-none">
+                      <TableHead className="h-9 px-4" aria-sort={sortBy === 'host' ? sortOrder === 'asc' ? 'ascending' : 'descending' : 'none'}>
+                        <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[120px] pr-2 text-left", sortBy === 'host' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('host')} aria-label="Sort by destination">
+                          <span>Destination</span>
+                          <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'host' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="h-9 px-4">
+                        <div className="min-w-[150px] pr-2">
+                          Network / Matched Rule
+                        </div>
+                      </TableHead>
+                      <TableHead className="h-9 px-4" aria-sort={sortBy === 'speed' ? sortOrder === 'asc' ? 'ascending' : 'descending' : 'none'}>
+                        <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'speed' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('speed')} aria-label="Sort by live speed">
+                          <span>Live speed</span>
+                          <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'speed' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="h-9 px-4" aria-sort={sortBy === 'bytes' ? sortOrder === 'asc' ? 'ascending' : 'descending' : 'none'}>
+                        <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[100px] pr-2 text-left", sortBy === 'bytes' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('bytes')} aria-label="Sort by total data">
+                          <span>Total data</span>
+                          <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'bytes' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="h-9 px-4" aria-sort={sortBy === 'time' ? sortOrder === 'asc' ? 'ascending' : 'descending' : 'none'}>
+                        <button type="button" className={cn("flex items-center justify-between gap-1 w-full min-w-[90px] pr-2 text-left", sortBy === 'time' ? 'text-foreground font-bold' : 'text-muted-foreground hover:text-foreground')} onClick={() => toggleSort('time')} aria-label="Sort by uptime">
+                          <span>Uptime</span>
+                          <Icon name="swap_vert" size={14} className={cn("shrink-0 transition-colors", sortBy === 'time' ? 'text-foreground' : 'text-muted-foreground/30')} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="h-9 px-4 w-14 text-center">
+                        <div className="w-full text-center">Kill</div>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sorted.map((conn) => (
+                      <ConnectionRow
+                        key={conn.id}
+                        conn={conn}
+                        isSelected={selectedId === conn.id}
+                        onSelect={() => setSelectedId(selectedId === conn.id ? null : conn.id)}
+                        onKill={handleKill}
+                        isKilling={!!killingIds[conn.id]}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-muted-foreground p-10 gap-3 select-none">
+                  <Icon name="hub" size={40} className="opacity-60" />
+                  <span className="text-xs font-bold text-foreground">
+                    No active network connections found.
+                  </span>
+                  {searchQuery && (
+                    <span className="text-[10px]">Try modifying your filter query.</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+        {selectedConnection && (
+          <Card className="p-4 bg-card" role="region" aria-label="Selected connection details">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="text-sm font-semibold text-foreground">Connection details</h2>
+              <Button variant="ghost" size="icon" aria-label="Close connection details" onClick={() => setSelectedId(null)}><Icon name="close" size={16} /></Button>
+            </div>
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div><dt className="text-muted-foreground">Destination</dt><dd className="font-mono break-all">{selectedConnection.metadata.host || selectedConnection.metadata.destinationIP}:{selectedConnection.metadata.destinationPort}</dd></div>
+              <div><dt className="text-muted-foreground">Source</dt><dd className="font-mono break-all">{selectedConnection.metadata.sourceIP}:{selectedConnection.metadata.sourcePort}</dd></div>
+              <div><dt className="text-muted-foreground">Route</dt><dd className="break-all">{selectedConnection.chains.join(' › ') || '—'}</dd></div>
+              <div><dt className="text-muted-foreground">Matched rule</dt><dd className="break-all">{selectedConnection.rule || '—'}</dd></div>
+            </dl>
+          </Card>
+        )}
       </div>
     </ViewShell>
   );
