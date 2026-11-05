@@ -718,8 +718,12 @@ pub fn decrypt_backup_envelope(
         .decrypt(nonce, ciphertext.as_ref())
         .map_err(|_| "Decryption failed. Incorrect passphrase or corrupted backup.".to_string())?;
 
-    serde_json::from_slice(&plaintext)
-        .map_err(|e| format!("Decrypted payload is not a valid ConfigBackupArchive: {}", e))
+    serde_json::from_slice(&plaintext).map_err(|e| {
+        format!(
+            "Decrypted payload is not a valid ConfigBackupArchive: {}",
+            e
+        )
+    })
 }
 
 pub fn resolve_archive_from_value(
@@ -731,7 +735,10 @@ pub fn resolve_archive_from_value(
             .map_err(|e| format!("Invalid v2 backup envelope: {}", e))?;
         let pass = passphrase.unwrap_or("").trim();
         if pass.is_empty() {
-            return Err("PASSPHRASE_REQUIRED: This backup is encrypted and requires a passphrase.".to_string());
+            return Err(
+                "PASSPHRASE_REQUIRED: This backup is encrypted and requires a passphrase."
+                    .to_string(),
+            );
         }
         decrypt_backup_envelope(&envelope, pass)
     } else {
@@ -820,7 +827,11 @@ pub async fn export_config_backup(
     };
     validate_backup_archive_internal(&archive)?;
 
-    if let Some(pass) = passphrase.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Some(pass) = passphrase
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         let envelope = encrypt_backup_archive(&archive, pass)?;
         Ok(BackupExportPayload::Encrypted(envelope))
     } else {
@@ -1244,8 +1255,8 @@ mod tests {
         };
 
         let passphrase = "SecretPassword123!";
-        let envelope = encrypt_backup_archive(&archive, passphrase)
-            .expect("Encryption should succeed");
+        let envelope =
+            encrypt_backup_archive(&archive, passphrase).expect("Encryption should succeed");
         assert_eq!(envelope.version, 2);
         assert!(!envelope.ciphertext.is_empty());
         assert!(!envelope.salt.is_empty());
@@ -1315,7 +1326,8 @@ mod tests {
         };
 
         let v1_val = serde_json::to_value(&archive).unwrap();
-        let resolved = resolve_archive_from_value(v1_val, None).expect("Should resolve v1 raw backup");
+        let resolved =
+            resolve_archive_from_value(v1_val, None).expect("Should resolve v1 raw backup");
         assert_eq!(resolved.metadata.schema_version, 1);
     }
 

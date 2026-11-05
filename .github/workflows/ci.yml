@@ -4,23 +4,36 @@ on:
   push:
     branches:
       - main
-      - develop
+      - dev
     paths:
       - 'src/**'
       - 'src-tauri/**'
       - 'package.json'
       - 'package-lock.json'
-      - '.github/workflows/ci.yml'
+      - 'scripts/**'
+      - 'index.html'
+      - 'vite.config.*'
+      - 'tsconfig*.json'
+      - 'eslint.config.*'
+      - '.github/workflows/**'
   pull_request:
     branches:
       - main
-      - develop
+      - dev
     paths:
       - 'src/**'
       - 'src-tauri/**'
       - 'package.json'
       - 'package-lock.json'
-      - '.github/workflows/ci.yml'
+      - 'scripts/**'
+      - 'index.html'
+      - 'vite.config.*'
+      - 'tsconfig*.json'
+      - 'eslint.config.*'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
 
 jobs:
   lint-and-format:
@@ -68,11 +81,7 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-
-      - name: Cache Cargo dependencies
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
+          cache-workspaces: './src-tauri -> target'
 
       - name: Rust Formatting Check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
@@ -100,7 +109,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -111,7 +120,7 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev
 
       - name: Export pkg-config path (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig" >> $GITHUB_ENV
           pkg-config --modversion glib-2.0
@@ -126,11 +135,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-
-      - name: Cache Cargo dependencies
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
+          cache-workspaces: './src-tauri -> target'
 
       - name: Install dependencies
         run: npm ci
@@ -138,22 +143,8 @@ jobs:
       - name: Setup Sidecars
         run: node scripts/setup-sidecars.cjs
 
-      - name: Cargo Check (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        env:
-          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
+      - name: Cargo Check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
-      - name: Cargo Check (non-Linux)
-        if: matrix.platform != 'ubuntu-22.04'
-        run: cargo check --manifest-path src-tauri/Cargo.toml
-
-      - name: Cargo Test (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        env:
-          PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - name: Cargo Test (non-Linux)
-        if: matrix.platform != 'ubuntu-22.04'
+      - name: Cargo Test
         run: cargo test --manifest-path src-tauri/Cargo.toml

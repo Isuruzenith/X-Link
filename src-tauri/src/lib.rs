@@ -258,7 +258,8 @@ fn sweep_orphan_sidecar_session(app: &tauri::AppHandle) {
         let session_file = app_data_dir.join("sidecar.session.json");
         if session_file.exists() {
             if let Ok(content) = std::fs::read_to_string(&session_file) {
-                if let Ok(session) = serde_json::from_str::<crate::state::SidecarSession>(&content) {
+                if let Ok(session) = serde_json::from_str::<crate::state::SidecarSession>(&content)
+                {
                     if session.proxy_mode == "system" {
                         let _ = crate::os::get_network_manager().restore_system_proxy_sync();
                     }

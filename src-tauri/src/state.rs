@@ -12,7 +12,7 @@ pub const LOG_BUFFER_RUST_MAX: usize = 500;
 pub enum SidecarChild {
     Shell(CommandChild),
     #[allow(dead_code)]
-    Tokio(tokio::process::Child),
+    Tokio(Box<tokio::process::Child>),
 }
 
 impl SidecarChild {

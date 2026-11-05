@@ -26,8 +26,8 @@ impl Default for DarwinNetworkManager {
 }
 
 pub fn is_darwin_helper_ready() -> bool {
-    let helper_exists = Path::new(DARWIN_SUPERVISOR_PATH).exists()
-        && Path::new(DARWIN_SINGBOX_PATH).exists();
+    let helper_exists =
+        Path::new(DARWIN_SUPERVISOR_PATH).exists() && Path::new(DARWIN_SINGBOX_PATH).exists();
     if !helper_exists {
         return false;
     }
@@ -183,17 +183,9 @@ impl PlatformNetworkManager for DarwinNetworkManager {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("nameserver[") {
                     if let Some((_, addr_part)) = rest.split_once(':') {
-                        let cleaned = addr_part
-                            .trim()
-                            .split('%')
-                            .next()
-                            .unwrap_or("")
-                            .trim();
+                        let cleaned = addr_part.trim().split('%').next().unwrap_or("").trim();
                         if let Ok(ip) = cleaned.parse::<IpAddr>() {
-                            if !ip.is_loopback()
-                                && !ip.is_unspecified()
-                                && !servers.contains(&ip)
-                            {
+                            if !ip.is_loopback() && !ip.is_unspecified() && !servers.contains(&ip) {
                                 servers.push(ip);
                             }
                         }

@@ -17,6 +17,7 @@ pub enum TunSupportStatus {
     UnsupportedPlatform,
 }
 
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait PlatformNetworkManager: Send + Sync {
     /// Configures the operating system's system proxy (HTTP/SOCKS).
@@ -38,7 +39,8 @@ pub trait PlatformNetworkManager: Send + Sync {
     ) -> Result<String, String>;
 
     /// Performs one-time elevation or helper tool installation.
-    async fn request_platform_elevation(&self, app_handle: &tauri::AppHandle) -> Result<(), String>;
+    async fn request_platform_elevation(&self, app_handle: &tauri::AppHandle)
+        -> Result<(), String>;
 
     /// Dynamically discovers host DNS server IP addresses to enforce Invariant 2 (route_exclude_address).
     async fn get_system_dns_servers(&self) -> Result<Vec<std::net::IpAddr>, String>;

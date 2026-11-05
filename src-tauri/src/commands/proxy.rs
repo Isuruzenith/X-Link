@@ -371,7 +371,10 @@ pub fn parse_singbox_dns_log_line(line: &str) -> Option<crate::state::DnsLogEntr
 
     let tokens: Vec<&str> = parts.collect();
     for (i, token) in tokens.iter().enumerate() {
-        if matches!(*token, "A" | "AAAA" | "HTTPS" | "CNAME" | "TXT" | "MX" | "PTR" | "SRV") {
+        if matches!(
+            *token,
+            "A" | "AAAA" | "HTTPS" | "CNAME" | "TXT" | "MX" | "PTR" | "SRV"
+        ) {
             qtype = (*token).to_string();
             for ans in tokens.iter().skip(i + 1) {
                 if ans.ends_with("ms") {
@@ -425,12 +428,18 @@ pub fn parse_singbox_route_trace_line(line: &str) -> Option<crate::state::TraceE
 
     let outbound = if let Some(start_p) = action_part.find('(') {
         if let Some(end_p) = action_part[start_p + 1..].find(')') {
-            action_part[start_p + 1..start_p + 1 + end_p].trim().to_string()
+            action_part[start_p + 1..start_p + 1 + end_p]
+                .trim()
+                .to_string()
         } else {
             action_part.to_string()
         }
     } else {
-        action_part.split_whitespace().next().unwrap_or("proxy").to_string()
+        action_part
+            .split_whitespace()
+            .next()
+            .unwrap_or("proxy")
+            .to_string()
     };
 
     let mut inbound = "mixed-in".to_string();
@@ -489,8 +498,7 @@ fn spawn_singbox_sidecar(
     let _ = std::fs::create_dir_all(&app_data_dir);
 
     #[cfg(target_os = "macos")]
-    let use_tokio_supervisor =
-        proxy_mode == "tun" && crate::os::darwin::is_darwin_helper_ready();
+    let use_tokio_supervisor = proxy_mode == "tun" && crate::os::darwin::is_darwin_helper_ready();
     #[cfg(target_os = "linux")]
     let use_tokio_supervisor = proxy_mode == "tun"
         && (crate::os::linux::get_linux_helper_dir()
@@ -515,7 +523,7 @@ fn spawn_singbox_sidecar(
                 .child_process
                 .lock()
                 .map_err(|e| format!("state_lock_poisoned: {}", e))?;
-            *process_lock = Some(crate::state::SidecarChild::Tokio(child));
+            *process_lock = Some(crate::state::SidecarChild::Tokio(Box::new(child)));
         }
 
         let settings = state.get_settings();
@@ -548,15 +556,16 @@ fn spawn_singbox_sidecar(
                 if let Some(tx) = guard.take() {
                     let _ = tx.send(None);
                 }
-                let is_active =
-                    if let Ok(active_id_guard) = state_for_logs.active_session_id.lock() {
-                        active_id_guard.as_ref() == Some(&session_id_clone)
-                    } else {
-                        false
-                    };
+                let is_active = if let Ok(active_id_guard) = state_for_logs.active_session_id.lock()
+                {
+                    active_id_guard.as_ref() == Some(&session_id_clone)
+                } else {
+                    false
+                };
                 if is_active {
                     let _ = app_out.emit("sing-box-terminated", Option::<i32>::None);
-                    state_for_logs.set_status(&app_out, crate::state::ConnectionStatus::Disconnected);
+                    state_for_logs
+                        .set_status(&app_out, crate::state::ConnectionStatus::Disconnected);
                     *CONNECTION_START_TIME.lock().unwrap() = None;
                     remove_sidecar_session(&app_out);
                     crate::tray::perform_clean_cleanup(&app_out);
@@ -1097,10 +1106,15 @@ pub async fn prepare_and_patch_config(
                 return Err(format!("TUN_DRIVER_MISSING: {}", msg));
             }
             Ok(crate::os::TunSupportStatus::UnsupportedPlatform) => {
-                return Err("TUN_UNSUPPORTED: TUN mode is not supported on this platform.".to_string());
+                return Err(
+                    "TUN_UNSUPPORTED: TUN mode is not supported on this platform.".to_string(),
+                );
             }
             Err(e) => {
-                return Err(format!("TUN_CHECK_FAILED: Failed to check TUN support: {}", e));
+                return Err(format!(
+                    "TUN_CHECK_FAILED: Failed to check TUN support: {}",
+                    e
+                ));
             }
         }
     }
@@ -1169,7 +1183,9 @@ pub async fn prepare_and_patch_config(
 
     let outbound_groups = crate::config::rules::load_outbound_groups_from_file(app);
     crate::config::validator::normalize_detour_references(&mut node_outbounds, &outbound_groups);
-    if let Err(err) = crate::config::validator::validate_detour_graph(&node_outbounds, &outbound_groups) {
+    if let Err(err) =
+        crate::config::validator::validate_detour_graph(&node_outbounds, &outbound_groups)
+    {
         return Err(format!("Detour graph validation failed: {}", err));
     }
 
@@ -1366,7 +1382,9 @@ pub async fn switch_node_hot(
         };
 
         // Try hot-reloading the configuration first so the running sing-box gets the updated active.json
-        if let Err(e) = hot_reload_via_api(&state.clash_client, &config_path, api_port, &api_secret).await {
+        if let Err(e) =
+            hot_reload_via_api(&state.clash_client, &config_path, api_port, &api_secret).await
+        {
             state.push_log(format!(
                 "[System] API config reload failed ({}), falling back to full reload.",
                 e
@@ -1699,20 +1717,22 @@ pub async fn toggle_proxy(
             crate::copy_wintun_dll_to_sidecar_dir(&app);
         }
 
-        let mut term_rx = match spawn_singbox_sidecar(&app, &state, &config_path, &session_id, &current_mode) {
-            Ok(rx) => rx,
-            Err(e) => {
-                last_error = e.clone();
-                state.push_log(format!(
-                    "[System] Attempt {} failed to spawn: {}",
-                    attempt + 1,
-                    e
-                ));
-                attempt += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS)).await;
-                continue;
-            }
-        };
+        let mut term_rx =
+            match spawn_singbox_sidecar(&app, &state, &config_path, &session_id, &current_mode) {
+                Ok(rx) => rx,
+                Err(e) => {
+                    last_error = e.clone();
+                    state.push_log(format!(
+                        "[System] Attempt {} failed to spawn: {}",
+                        attempt + 1,
+                        e
+                    ));
+                    attempt += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS))
+                        .await;
+                    continue;
+                }
+            };
 
         if let Err(e) = wait_for_startup_or_exit(&mut term_rx).await {
             stop_startup_child(&app, &state);
@@ -2281,7 +2301,8 @@ mod tests {
         assert_eq!(parsed.outbound, "node-us-1");
 
         let simple_line = "INFO[0012] [router] match[0] 1.1.1.1:53 => direct";
-        let parsed_simple = parse_singbox_route_trace_line(simple_line).expect("Should parse simple route trace");
+        let parsed_simple =
+            parse_singbox_route_trace_line(simple_line).expect("Should parse simple route trace");
         assert_eq!(parsed_simple.outbound, "direct");
         assert_eq!(parsed_simple.rule, Some("0".to_string()));
     }

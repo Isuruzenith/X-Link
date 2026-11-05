@@ -126,16 +126,8 @@ fn main() {
         let stop_flag_kq = Arc::clone(&stop_flag);
         std::thread::spawn(move || {
             let mut event: libc::kevent = unsafe { std::mem::zeroed() };
-            let rc = unsafe {
-                libc::kevent(
-                    kq,
-                    std::ptr::null(),
-                    0,
-                    &mut event,
-                    1,
-                    std::ptr::null(),
-                )
-            };
+            let rc =
+                unsafe { libc::kevent(kq, std::ptr::null(), 0, &mut event, 1, std::ptr::null()) };
             unsafe {
                 libc::close(kq);
             }
@@ -157,8 +149,8 @@ fn main() {
             }
             Ok(None) => {
                 if stop_flag.load(Ordering::SeqCst) {
-                    let deadline =
-                        *kill_deadline.get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
+                    let deadline = *kill_deadline
+                        .get_or_insert_with(|| Instant::now() + Duration::from_secs(3));
                     if Instant::now() >= deadline {
                         unsafe {
                             libc::kill(child_pid, libc::SIGKILL);

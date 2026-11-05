@@ -189,8 +189,10 @@ pub fn validate_detour_graph(
     // 3. Check detour to group & build adjacency map
     // Edge u -> v means node u detours through node v
     let mut detour_target_of: HashMap<&str, &str> = HashMap::new();
-    let mut in_degree: HashMap<&str, usize> =
-        normalized_nodes.iter().map(|n| (n.tag.as_str(), 0)).collect();
+    let mut in_degree: HashMap<&str, usize> = normalized_nodes
+        .iter()
+        .map(|n| (n.tag.as_str(), 0))
+        .collect();
     let mut adj: HashMap<&str, Vec<&str>> = normalized_nodes
         .iter()
         .map(|n| (n.tag.as_str(), Vec::new()))
@@ -516,4 +518,3 @@ mod tests {
         assert_eq!(err2.code, "INTERVAL_TOO_SHORT");
     }
 }
-
