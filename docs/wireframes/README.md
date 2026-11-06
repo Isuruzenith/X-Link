@@ -6,15 +6,17 @@ tags:
   - ui
   - frontend
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # X-Link — Current UI/UX Wireframes
 
-Low-fidelity layouts for the **current Tauri + React + Material Web desktop UI**. These are documentation of the implemented interface, not a proposal or a pixel-perfect rendering. Each note links to its source components; controls, responsive arrangements, and important alternative states are shown with text diagrams. The Tauri window is configured at **950 × 650 px**, minimum **380 × 550 px**; diagrams represent the webview client area rather than a fixed pixel canvas.
+Low-fidelity layouts for the **current Tauri + React + Material Web desktop UI**. These are documentation of the implemented interface, not a proposal or a pixel-perfect rendering. Each note links to its source components; controls, responsive arrangements, and important alternative states are shown with text diagrams. The canonical window is **1000 × 680 px**, minimum **720 × 520 px** (see [[00-window-and-grid]]); per-view notes below were captured from the source when the window was documented as `950 × 650` / min `380 × 550`, so their breakpoint tables show *today's CSS*, while [[00-window-and-grid]] and [[09-fit-layouts]] define the **target** that [[specs/003-responsive-fit-layout/spec]] implements.
 
 | Note | Coverage |
 | --- | --- |
+| **[[00-window-and-grid]]** | **Canonical** window size, size classes (Compact / Medium / Expanded), fit-to-window rules, vertical budgets, test matrix, legacy-breakpoint migration map |
+| **[[09-fit-layouts]]** | **Exact-scale** drawings (1 col = 10 px) of every view at 1000×680 and 720×520, per-view fit contract |
 | [[01-shell-navigation]] | Window shell, six destinations, session indicator, compact navigation drawer, toast and error states |
 | [[02-dashboard]] | Connection states, live traffic, server switching, telemetry and inbound listeners |
 | [[03-profiles]] | Profile list, import/preview, nodes, empty states, subscription diff dialog |

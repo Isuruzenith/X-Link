@@ -13,6 +13,9 @@ updated: 2026-11-05
 
 # Wireframe 07 — Live Console Logs
 
+> [!NOTE] Target geometry
+> Breakpoint tables in this note describe the **current CSS**. The target is three size classes (Compact `<600`, Medium `600–839`, Expanded `≥840`) in a **1000×680** default / **720×520** minimum window with zero document scroll — see [[wireframes/00-window-and-grid]] (rules, migration map) and [[wireframes/09-fit-layouts]] (exact-scale drawing for this view). Work is tracked in [[specs/003-responsive-fit-layout/tasks]].
+
 **Navigation**: [[00-Home-MOC]] | **Related Wireframes**: [[01-shell-navigation]] · [[02-dashboard]] · [[05-routing]] · [[06-connections]]
 **Source Components**:
 - Primary View: [LogsView.tsx](../../src/views/LogsView.tsx)

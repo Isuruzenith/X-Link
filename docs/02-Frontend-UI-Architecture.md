@@ -8,7 +8,7 @@ tags:
   - react
   - theme
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-06
 ---
 
 # 02 — Frontend UI Architecture & State Management
@@ -19,6 +19,9 @@ updated: 2026-11-03
 
 ## 1. Frontend Stack & Design System
 
+> [!WARNING] Documentation drift
+> This section lists Tailwind + shadcn/Radix/Base UI primitives **and** Material Web. The current wireframes reference `material-theme.css`. Treat Material Web + tokens as the direction ([[09-Design-System]]) and verify the live split against `src/` — see [[99-Vault-Changelog]] drift register.
+
 The X-Link frontend (`src/`) is a single-page desktop application engineered for native responsiveness, zero-jank scrolling, and strict keyboard/screen-reader accessibility.
 
 ### Core Libraries
@@ -26,11 +29,13 @@ The X-Link frontend (`src/`) is a single-page desktop application engineered for
 - **Tailwind CSS v4 (`@tailwindcss/vite ^4.2.1`)**: Configured in `src/index.css` and `src/App.css` with custom utility classes (`utility-view`, `utility-toolbar`, `material-scroll-area`, `settings-layout`, `routing-layout`, `profiles-grid`).
 - **Material Web (`@material/web ^2.4.1`) & Material Symbols**:
   - Uses Google's `<md-icon>` custom element wrapped in `src/components/ui/icon.tsx` (`<Icon name="..." size={16} />`) rendering the **Material Symbols Rounded** variable icon font.
+  - **The font must be self-hosted** (bundled npm font package, `--md-icon-font` set to its exact family, CSP `font-src 'self' data:`); a CDN link works in `tauri dev` but fails in the packaged app — see [[specs/001-self-hosted-icons/spec]] and [[09-Design-System]] §6.
+  - Full token, component and icon contract: [[09-Design-System]]. Library status note: Material Web is in maintenance mode, so controls are wrapped locally ([[specs/004-material-web-ui-conformance/spec]]).
 - **Radix / Base UI Primitives (`@base-ui/react`, `class-variance-authority`, `clsx`, `tailwind-merge`)**: Powers accessible primitives in `src/components/ui/` (`Button`, `Card`, `Badge`, `Sheet`, `Switch`, `Select`, `Table`, `ScrollArea`, `Separator`, `Input`).
 - **Virtualized Rendering (`react-window ^2.2.7`)**: Powers both `LogsView.tsx` (up to 2,000 syntax-highlighted log lines) and `ConnectionsView.tsx` (real-time active sockets table) at fixed row heights with zero DOM bloat and 60 FPS scrolling.
 - **Cross-Platform Window Ergonomics**:
   - `tauri.conf.json` configures `"titleBarStyle": "Overlay"` for macOS.
-  - Runtime macOS detection (`/Mac/.test(navigator.userAgent || '')`) injects a 72px top padding/inset (`pt-[72px]`) into `NavRail` and primary view headers to accommodate native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
+  - Runtime macOS detection (`/Mac/.test(navigator.userAgent || '')`) injects a 72px top padding/inset (`pt-[72px]`) into `NavRail` and primary view headers to accommodate native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins. *(Target: default window 1000×680, min 720×520, 40px macOS safe area — [[specs/002-desktop-window-shell/spec]].)*
 
 ### Theme Architecture (`dark` | `light` | `system`)
 - Controlled by `useSettingsStore().setTheme(theme)`.
@@ -52,7 +57,7 @@ The X-Link frontend (`src/`) is a single-page desktop application engineered for
 ### Responsibilities of `App.tsx`
 1. **Active Tab Routing**:
    - Holds `const [activeTab, setActiveTab] = useState<Tab>('dashboard')` where `Tab = 'dashboard' | 'config' | 'routing' | 'connections' | 'logs' | 'settings'`.
-   - Renders `<NavRail activeTab={activeTab} setActiveTab={setActiveTab} />` on the left (`220px` fixed width) and switches the active view inside `<main className="main-content">`.
+   - Renders `<NavRail activeTab={activeTab} setActiveTab={setActiveTab} />` on the left (`220px` Expanded / `80px` Medium via `--xl-rail-w`; see [[wireframes/00-window-and-grid]]) and switches the active view inside `<main className="main-content">`.
    - Always mounts `<NodeEditor />` (slide-over drawer controlled by `useNodeEditorStore`) and `<ToastContainer />` (floating notifications controlled by `useToastStore`).
 2. **Startup Hydration (`useEffect` on mount)**:
    - Calls `initSettings()`, `initProfiles()`, `initRouting()`, `initStats()` in parallel.

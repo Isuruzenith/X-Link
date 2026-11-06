@@ -7,7 +7,7 @@ tags:
   - ui
   - views
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-06
 ---
 
 # 03 — UI Components & Views Reference
@@ -43,7 +43,7 @@ flowchart LR
 ## 2. Shell, Layout & Global Components (`src/components/`)
 
 ### 2.1 `NavRail` (`src/components/NavRail.tsx`)
-- **Role**: Fixed left navigation rail (`220px` wide) providing top-level view switching and a live connection summary footer.
+- **Role**: Left navigation rail (`220px` Expanded, `80px` Medium icon-only, drawer in Compact — [[wireframes/00-window-and-grid]]) providing top-level view switching and a live connection summary footer.
 - **Props**: `{ activeTab: Tab; setActiveTab: (tab: Tab) => void }`.
 - **Structure**:
   1. **Brand Header**: X-Link logo (`X-Link-logo.png`), title `"X-Link"`, subtitle `"Private Tunnel"`.
@@ -59,7 +59,7 @@ flowchart LR
      - Status label (`"Connected"` / `"Connecting..."` / `"Disconnected"`).
      - Mode badge (`"TUN"` or `"SYS"`, showing `effectiveProxyMode ?? settings.proxyMode`).
      - Active node tag + country flag (`flagcdn.com/w20/{code}.png`) when a server is selected.
-     - Version label (`sing-box v1.13.14` + `X-Link v0.6.0`).
+     - Version label (`sing-box v1.13.14` + `X-Link v{appVersion}` (read from the app, not hard-coded)).
 
 ### 2.2 `ViewShell` (`src/components/ViewShell.tsx`)
 - **Role**: Standardized layout frame wrapping all 6 views.

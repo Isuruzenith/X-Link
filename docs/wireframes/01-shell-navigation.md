@@ -7,7 +7,7 @@ tags:
   - layout
   - navigation
 created: 2026-11-03
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # Wireframe 01 — Master Application Shell & Navigation
@@ -26,17 +26,20 @@ updated: 2026-11-05
 
 ## 1. Window Geometry & Responsive Breakpoints
 
-X-Link runs inside a Tauri v2 window configured at **950 × 650 px** (minimum **380 × 550 px**). The diagrams show the webview client area; the native window caption is OS-provided. The CSS adapts across three viewport tiers:
+X-Link runs inside a Tauri v2 window of **1000 × 680 px** by default (minimum **720 × 520 px**) — see [[00-window-and-grid]]. The diagrams show the webview client area; the native window caption is OS-provided. The target layout uses three size classes keyed on inner width:
 
-| Breakpoint Tier | Window Width | Navigation Layout | Padding & Gaps | View Host Styling |
+| Size class | Window Width | Navigation Layout | Padding & Gaps | View Host Styling |
 | :--- | :--- | :--- | :--- | :--- |
-| **Desktop Wide** | `> 1050px` | Fixed Left Rail (`212px`) with labels and brand copy | `padding: 0 18px 18px 0; gap: 12px;` | `border-radius: 0 0 24px 24px; background: var(--md-panel);` |
-| **Tablet / Medium** | `701px – 1050px` | Collapsed Left Rail (`64px`), icon-only, labels hidden | `padding: 0 10px 10px 0; gap: 6px;` | Same as desktop |
-| **Narrow / Mobile** | `≤ 700px` | Off-canvas Drawer (`min(290px, 82vw)`), top-left floating menu button | `padding: 0; gap: 0;` | `border-radius: 0;` (full flush viewport) |
+| **Expanded** | `≥ 840px` | Left Rail (`220px`) with labels and brand copy | `padding: 16px; gap: 16px;` | `border-radius: 0 0 24px 24px; background: var(--xl-panel);` |
+| **Medium** | `600 – 839px` (Tauri: `720 – 839`) | Icon-only Rail (`80px`), labels hidden | `padding: 12px; gap: 12px;` | Same |
+| **Compact** | `< 600px` (browser preview only) | Modal Drawer (`260px`), top-left menu button | `padding: 12px; gap: 12px;` | `border-radius: 0;` full-bleed |
+
+> [!NOTE] Legacy values
+> The previous implementation documented `212 / 64 / 290px` navigation widths and `1050 / 700px` breakpoints. They are mapped to the classes above in [[00-window-and-grid]] §6 and replaced by [[specs/003-responsive-fit-layout/tasks]].
 
 ---
 
-## 2. Desktop Shell Layout (`> 1050px`)
+## 2. Desktop Shell Layout (Expanded, `≥ 840px`)
 
 ```text
 +------------------------------------------------------------------------------------------------------------------------+
@@ -83,9 +86,9 @@ X-Link runs inside a Tauri v2 window configured at **950 × 650 px** (minimum **
 
 ---
 
-## 3. Tablet Collapsed Layout (`701px – 1050px`)
+## 3. Medium Collapsed Layout (`600px – 839px`)
 
-At widths between 701px and 1050px, the rail collapses into a compact icon bar (`64px`), hiding textual labels to preserve content width:
+At widths between 600px and 839px, the rail collapses into a compact icon bar (`80px`), hiding textual labels to preserve content width:
 
 ```text
 +----------------------------------------------------------------------------------------------------------------+
@@ -113,17 +116,17 @@ At widths between 701px and 1050px, the rail collapses into a compact icon bar (
 ```
 
 ### Key Differences:
-- `.app-navigation`: Width shrinks from `212px` to `64px`, `padding-inline: 8px`.
+- `.app-navigation`: Width shrinks from `220px` to `80px`, `padding-inline: 8px`.
 - `.nav-brand-text`, `.nav-session-text`, and `.nav-label`: Set to `display: none;`.
 - Icons centered horizontally inside `nav-destination` buttons.
 - `.nav-session`: Padding reduced to `15px 0`, icon/dot centered.
 
 ---
 
-## 4. Narrow Viewport Layout (`≤ 700px`)
+## 4. Compact Layout (`< 600px`, browser preview only)
 
 ### 4.1 Normal State (Drawer Closed)
-When width is ≤ 700px, the sidebar is hidden off-screen (`transform: translateX(-105%)`). A floating hamburger button appears in the top-left corner, and the header copy shifts right:
+When width is below 600px, the sidebar is hidden off-screen (`transform: translateX(-105%)`). A floating hamburger button appears in the top-left corner, and the header copy shifts right:
 
 ```text
 +--------------------------------------------------------------------------------+
@@ -230,7 +233,7 @@ If an active view throws while rendering, the view-level error boundary replaces
 1. **Floating Menu Button (`.mobile-menu-button`)**:
    - `aria-label="Open navigation"`, `aria-expanded={open}`, `aria-controls="primary-navigation"`.
    - Focus is restored to this button upon closing the mobile drawer.
-2. **Drawer Trapping (`≤ 700px`)**:
+2. **Drawer Trapping (Compact, `< 600px`)**:
    - Drawer container (`<aside id="primary-navigation">`) receives `inert={compact && !open}` when hidden, preventing off-screen keyboard tab navigation.
    - When opened, focus shifts automatically to the active destination (`[aria-current="page"]`).
    - A keyboard listener traps `Tab` and `Shift+Tab` within the drawer buttons.

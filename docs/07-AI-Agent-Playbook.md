@@ -123,3 +123,26 @@ When verifying changes in `C:\Projects\X-Link`:
   cargo test --manifest-path src-tauri/Cargo.toml
   ```
   *(Runs all unit tests across `generator.rs`, `adapters/mod.rs`, `rules.rs`, `os/mod.rs`, `proxy.rs`, `config.rs`, `diagnostics.rs`, `backup.rs`, `geo.rs`, and `system.rs`)*
+
+---
+
+## 4. Spec-Driven Workflow for UI Changes
+
+UI work follows [[specs/README]]: **spec → plan → tasks → one task per commit**. Before editing anything under `src/components`, `src/views` or `src/*.css`:
+
+1. Read [[specs/constitution]], [[09-Design-System]] and [[wireframes/00-window-and-grid]].
+2. Open the relevant `specs/NNN-*/tasks.md` and work only on the first unchecked task.
+3. UI work **never** changes Rust commands, IPC payloads, store schemas or the 7 invariants above (Constitution V).
+4. When done, tick the task, update any note the change made stale, stop.
+
+### Recipe D: Add an icon
+1. Add the name to `src/components/ui/icon-names.ts` (typed allow-list) — the compiler rejects unknown names.
+2. Use `<Icon name="…" size={20} />`; never a raw `<md-icon>`.
+3. Run `npm run build` (includes `check:offline`). Verify in a `tauri build --debug` window, not only `tauri dev`.
+
+### Recipe E: Add or change a view so it fits the window
+1. Body is `grid-template-rows: …; min-height: 0`; exactly one `.scroll-region` per list/table.
+2. No `vh`/`vw`, no fixed `max-height`, no raw `@media` — use `data-size` / `data-dense` ([[wireframes/00-window-and-grid]]).
+3. Add the view to `e2e/fit.spec.ts` and to [[wireframes/09-fit-layouts]] (edit `tools/gen_wireframes.py`).
+4. Long text gets `min-width: 0` + ellipsis + `title`.
+

@@ -17,9 +17,9 @@ updated: 2026-11-03
 > Some layouts and features below are proposals, not the running app. For source-aligned screens and states, see [[wireframes/README|Current UI/UX Wireframes]].
 
 > [!NOTE] Window Geometry & Cross-Platform Ergonomics
-> Default native window dimensions (`src-tauri/tauri.conf.json`): **1080 × 700 px** (Minimum: **900 × 620 px**).
-> The layout is divided into a fixed **220px Left Navigation Rail (`NavRail`)** and a flexible **860px+ Main Viewport (`ViewShell`)**.
-> On **macOS**, `"titleBarStyle": "Overlay"` is enabled with a **72px top padding/inset (`pt-[72px]`)** in `NavRail` and primary headers to provide full clearance for native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
+> **Superseded geometry.** This note was drawn for `1080 × 700` / min `900 × 620`. The canonical window is now **1000 × 680, minimum 720 × 520**, with rail `220px` (Expanded) / `80px` (Medium) — see [[wireframes/00-window-and-grid]] and drawings at exact scale in [[wireframes/09-fit-layouts]].
+> The layout is a **Left Navigation Rail (`NavRail`)** plus a flexible **Main Viewport (`ViewShell`)**.
+> On **macOS**, `"titleBarStyle": "Overlay"` is enabled with a **72px top padding/inset (`pt-[72px]`)** *(as documented here; target is 40px, see [[wireframes/00-window-and-grid]] §5)* in `NavRail` and primary headers to provide clearance for native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
 
 ---
 

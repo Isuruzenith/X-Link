@@ -7,7 +7,7 @@ tags:
   - ai-context
   - xlink
 created: 2026-11-03
-updated: 2026-11-05
+updated: 2026-11-06
 ---
 
 # X-Link — Complete AI Agent Knowledge Vault
@@ -31,6 +31,11 @@ updated: 2026-11-05
 | **[[06-IPC-Bridge-and-Data-Contracts]]** | Complete contract dictionary: all **49 Tauri `invoke` commands** (arguments, return types, side effects), all **8 Tauri events** (`emit` -> `listen`), Clash REST API (`127.0.0.1:9090`) integration, and on-disk JSON schemas (`settings.json`, `profiles.json`, `routing.json`, `stats.json`, `configs/active.json`, `sidecar.session.json`). | `#ipc` `#contracts` `#backend` `#frontend` |
 | **[[07-AI-Agent-Playbook]]** | Practical engineering guide for AI agents: 7 non-negotiable invariants, Dual-Store Synchronization Rule (`@tauri-apps/plugin-store` vs Rust `std::fs`), Connected-Apply Policy (`applyPolicy.ts`), and step-by-step recipes for adding settings, protocols, or IPC commands. | `#ai-context` `#playbook` `#architecture` |
 | **[[08-User-Guide-and-FAQ]]** | Comprehensive end-user guide: plain-English core concepts, platform-specific quickstarts (Windows, macOS, Linux), and operational runbooks for ghost TUN interface recovery and port conflict resolution. | `#user-guide` `#runbook` `#faq` |
+| **[[09-Design-System]]** | Material 3 tokens, typography, component map (Material Web vs custom), **icon strategy that survives `tauri build`**, accessibility baseline. | `#design-system` `#frontend` |
+| **[[wireframes/00-window-and-grid\|Window & Grid]]** | **Canonical** window (1000×680, min 720×520), size classes, fit-to-window rules, budgets, test matrix. | `#wireframe` `#layout` |
+| **[[wireframes/09-fit-layouts\|Fit Layouts]]** | Exact-scale wireframes of every view at 1000×680 and 720×520. | `#wireframe` `#layout` |
+| **[[specs/README\|Specs (SDD)]]** | Spec-driven development: constitution, templates and four ready-to-run feature specs (icons, window shell, responsive fit, Material Web conformance). | `#spec` `#sdd` |
+| **[[99-Vault-Changelog]]** | What changed in this revision and the documentation-drift register. | `#changelog` |
 
 ---
 
@@ -57,12 +62,12 @@ updated: 2026-11-05
    - Optional AES-256-GCM encryption with Argon2id key derivation strictly bounded to safe resource limits (1024 KiB to 65536 KiB memory, 1 to 10 iterations, parallelism = 1).
    - Backward-compatible with v1 unencrypted archives and v2 unencrypted envelopes.
    - Pre-lock proxy disconnection eliminating lock-inversion deadlocks.
-2. **Universal Protocol & Subscription Support**:
+5. **Universal Protocol & Subscription Support**:
    - **Outbound Protocols**: `VLESS` (with XTLS-Reality & uTLS), `VMess`, `Trojan`, `Shadowsocks`, `Hysteria2`, `TUIC v5`, `WireGuard`, `SSH`, `SOCKS5`, and `HTTP`.
    - **Import Formats**: Native `sing-box` JSON, Clash/Mihomo YAML, Base64-encoded subscription bundles, raw share links (`vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`, `hy2://`, `tuic://`, `wg://`), and remote HTTP/HTTPS subscriptions with **Subscription Diff Previews** and **Background Scheduled Auto-Updates**.
-3. **5-Stage Self-Healing Connection Engine**:
+6. **5-Stage Self-Healing Connection Engine**:
    - Automatically recovers from TLS fingerprint blocks, DNS poisoning, or TUN driver failures during connection startup (`Chrome uTLS` $\rightarrow$ `Firefox uTLS` $\rightarrow$ `Native Go TLS` $\rightarrow$ `Public DNS Bootstrap` $\rightarrow$ `TUN Compatibility Profile` $\rightarrow$ `System Proxy Fallback`).
-4. **Hot Node Switching & Validated Cold Restart**:
+7. **Hot Node Switching & Validated Cold Restart**:
    - Switches servers with zero downtime via the authenticated Clash-compatible REST API (`PUT /proxies/proxy`) when `apiEnabled` is true, or falls back to a transactional cold restart.
    - Edits to settings or routing while connected are debounced (`800ms`), validated via `sing-box check`, and applied transactionally with automatic rollback if the new configuration fails to boot.
 
@@ -98,7 +103,12 @@ C:\Projects\X-Link\
 │   ├── 05-Rust-Backend-Architecture.md    # Rust Modules, Config Engine, Process Supervisors & OS Layer
 │   ├── 06-IPC-Bridge-and-Data-Contracts.md# 49 Tauri Commands, 8 Events & Disk JSON Schemas
 │   ├── 07-AI-Agent-Playbook.md            # Invariants, Dual-Store Rules & Modification Recipes
-│   └── 08-User-Guide-and-FAQ.md           # End-User Guide, Platform Quickstarts & Emergency Triage
+│   ├── 08-User-Guide-and-FAQ.md           # End-User Guide, Platform Quickstarts & Emergency Triage
+│   ├── 09-Design-System.md                # Material 3 tokens, component map, icon strategy
+│   ├── 99-Vault-Changelog.md              # Revision notes + documentation drift register
+│   ├── specs\                             # Spec-driven development: constitution, templates, 001-004
+│   ├── wireframes\                        # 00 window/grid, 01-08 per-view, 09 exact-scale fit layouts
+│   └── tools\gen_wireframes.py            # Regenerates the exact-scale ASCII wireframes
 ├── src\                                   # Frontend React + TypeScript Application
 │   ├── App.tsx                            # Root lifecycle, event listeners, polling & tab switcher
 │   ├── App.css / index.css                # Tailwind v4 + Material 3 CSS variables & utility classes
@@ -135,7 +145,7 @@ C:\Projects\X-Link\
 │       └── SettingsView.tsx               # 6-tab settings + encrypted v2 backup export/import modal
 └── src-tauri\                             # Rust Native Backend (Tauri v2)
     ├── Cargo.toml                         # Rust dependencies, supervisor targets & Windows features
-    ├── tauri.conf.json                    # Window config (1080x700, Overlay titleBar), bundle resources
+    ├── tauri.conf.json                    # Window config (1000x680 default, min 720x520, Overlay titleBar on macOS), bundle resources
     ├── binaries\                          # sing-box-x86_64-pc-windows-msvc.exe & wintun.dll
     └── src\
         ├── main.rs / lib.rs               # App builder, setup hook, command registration, exit cleanup
@@ -168,34 +178,20 @@ C:\Projects\X-Link\
             ├── diagnostics.rs             # Sanitized report with ring buffers & offline routing simulator
             ├── backup.rs                  # Encrypted v2 backup (AES-256-GCM + Argon2id) export, validation & restore
             └── subscription_schedule.rs   # Background 60s ticker for auto-updating subscriptions
-    ├── Cargo.toml                         # Rust dependencies & Windows feature flags
-    ├── tauri.conf.json                    # Window config (1080x700), bundle resources, sidecar
-    ├── binaries\                          # sing-box-x86_64-pc-windows-msvc.exe & wintun.dll
-    └── src\
-        ├── main.rs / lib.rs               # App builder, setup hook, command registration, exit cleanup
-        ├── state.rs                       # ProxyState, ProxyStatus, PreviewedSubscription, LogBuffer
-        ├── constants.rs                   # File names, ports, DNS defaults, sidecar version constants
-        ├── tray.rs                        # Dynamic system tray menu (status, top 10 nodes, toggle)
-        ├── os\mod.rs                      # WinINet system proxy, UAC elevation, IpHlpApi DNS, port owner
-        ├── config\
-        │   ├── mod.rs                     # Config pipeline exports
-        │   ├── generator.rs               # Builds final sing-box JSON (Inbounds, Outbounds, DNS, Route)
-        │   ├── adapters\mod.rs            # Parses sing-box JSON, Clash YAML, Base64 & share links
-        │   ├── rules.rs                   # Compiles user routing rules, rule-sets & LAN bypass
-        │   ├── subscription.rs            # HTTP fetch with UA fallback & 10MB stream limit
-        │   └── validator.rs               # Runs `sing-box check -c <temp.json>` before commit
-        └── commands\
-            ├── mod.rs                     # Command module exports
-            ├── proxy.rs                   # toggle_proxy, 5-stage self-healing, hot switch, Clash API
-            ├── config.rs                  # Import, profiles, diff preview, transactional commit/rollback
-            ├── system.rs                  # Version gate, port conflict/status, UAC, autostart, processes
-            ├── latency.rs                 # Direct TCP ping & Clash API `/proxies/{tag}/delay` URL test
-            ├── geo.rs                     # Consent-gated public IP geolocation (`freeipapi.com`)
-            ├── logs.rs                    # Ring-buffer log retrieval (`get_buffered_logs`)
-            ├── diagnostics.rs             # Sanitized system report & offline routing/DNS simulator
-            ├── backup.rs                  # Full JSON backup export, validation & atomic restore
-            └── subscription_schedule.rs   # Background 60s ticker for auto-updating subscriptions
 ```
+
+---
+
+## Active Work & Known Issues
+
+| ID | Issue | Spec | Status |
+| :--- | :--- | :--- | :--- |
+| ICON-001 | Material icons not shown in the packaged (built) app | [[specs/001-self-hosted-icons/spec]] | Ready — do first |
+| WIN-001 | Window size inconsistent across notes; first paint/clamp not guaranteed | [[specs/002-desktop-window-shell/spec]] | Ready |
+| FIT-001 | UI does not consistently fit the window; five breakpoint sets | [[specs/003-responsive-fit-layout/spec]] | Ready |
+| MUI-001 | Mixed shadcn / Tailwind / Material Web look | [[specs/004-material-web-ui-conformance/spec]] | Ready |
+
+**Start any UI task here:** [[specs/README]] → [[specs/constitution]] → the feature's `spec.md`, `plan.md`, `tasks.md`.
 
 ---
 
@@ -206,3 +202,4 @@ C:\Projects\X-Link\
 - **Want to see how React state is stored and synced with Rust?** $\rightarrow$ See [[02-Frontend-UI-Architecture#3. Zustand State Management Stores]] and [[06-IPC-Bridge-and-Data-Contracts]]
 - **Want to modify `sing-box` config generation, TUN, or DNS?** $\rightarrow$ See [[05-Rust-Backend-Architecture#3. Configuration Engine (`src-tauri/src/config/`)]]
 - **Want to make code changes without breaking critical invariants?** $\rightarrow$ Read [[07-AI-Agent-Playbook]] first!
+- **Want to change how anything looks or fits the window?** $\rightarrow$ [[09-Design-System]], [[wireframes/00-window-and-grid]], then [[specs/README]]
