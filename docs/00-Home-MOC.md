@@ -203,3 +203,16 @@ C:\Projects\X-Link\
 - **Want to modify `sing-box` config generation, TUN, or DNS?** $\rightarrow$ See [[05-Rust-Backend-Architecture#3. Configuration Engine (`src-tauri/src/config/`)]]
 - **Want to make code changes without breaking critical invariants?** $\rightarrow$ Read [[07-AI-Agent-Playbook]] first!
 - **Want to change how anything looks or fits the window?** $\rightarrow$ [[09-Design-System]], [[wireframes/00-window-and-grid]], then [[specs/README]]
+
+## Obsidian Workspace
+
+| Area | Purpose |
+|---|---|
+| [[notes/README]] | General technical notes |
+| [[decisions/README]] | Architecture and product decisions |
+| [[meetings/README]] | Meeting notes and action items |
+| [[_inbox/README]] | Temporary capture area |
+| `_templates/` | Standard note, ADR, meeting, MOC and daily templates |
+| `assets/`, `wireframes/`, `designs/`, `specs/` | Existing project documentation and assets |
+
+Use `_templates/` when creating new notes. Keep established architecture-note filenames unchanged so existing wikilinks remain valid.
