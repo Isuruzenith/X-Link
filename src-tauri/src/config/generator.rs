@@ -43,8 +43,11 @@ pub fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde
     let address = address.trim();
     let mut server_obj = serde_json::Map::new();
     server_obj.insert("tag".to_string(), serde_json::json!(tag));
+    // A detour to the plain "direct" outbound is rejected by newer sing-box
+    // ("detour to an empty direct outbound makes no sense") and is redundant:
+    // DNS servers without a detour already dial directly.
     if let Some(d) = detour {
-        if !d.is_empty() {
+        if !d.is_empty() && d != "direct" {
             server_obj.insert("detour".to_string(), serde_json::json!(d));
         }
     }
@@ -52,8 +55,22 @@ pub fn parse_dns_server(tag: &str, address: &str, detour: Option<&str>) -> serde
     if address == "local" || address.is_empty() {
         server_obj.insert("type".to_string(), serde_json::json!("local"));
     } else if address.starts_with("https://") {
+        // sing-box `https` servers take host / server_port / path separately,
+        // never a full URL in `server`.
         server_obj.insert("type".to_string(), serde_json::json!("https"));
-        server_obj.insert("server".to_string(), serde_json::json!(address));
+        let stripped = address.strip_prefix("https://").unwrap();
+        let (authority, path) = match stripped.find('/') {
+            Some(idx) => (&stripped[..idx], &stripped[idx..]),
+            None => (stripped, ""),
+        };
+        let (host, port) = split_host_port(authority, 443);
+        server_obj.insert("server".to_string(), serde_json::json!(host));
+        if port != 443 {
+            server_obj.insert("server_port".to_string(), serde_json::json!(port));
+        }
+        if !path.is_empty() && path != "/dns-query" {
+            server_obj.insert("path".to_string(), serde_json::json!(path));
+        }
     } else if address.starts_with("tls://") {
         server_obj.insert("type".to_string(), serde_json::json!("tls"));
         let stripped = address.strip_prefix("tls://").unwrap();
@@ -1375,7 +1392,7 @@ mod tests {
         assert_eq!(parsed_bare_ipv6["type"], "udp");
         assert_eq!(parsed_bare_ipv6["server"], "2402:4000::2");
         assert_eq!(parsed_bare_ipv6["server_port"], 53);
-        assert_eq!(parsed_bare_ipv6["detour"], "direct");
+        assert!(parsed_bare_ipv6.get("detour").is_none());
 
         // Bracketed IPv6 with custom port
         let parsed_bracketed =
@@ -1397,7 +1414,7 @@ mod tests {
         let parsed_local = parse_dns_server("local-dns", "local", Some("direct"));
         assert_eq!(parsed_local["type"], "local");
         assert_eq!(parsed_local["tag"], "local-dns");
-        assert_eq!(parsed_local["detour"], "direct");
+        assert!(parsed_local.get("detour").is_none());
         assert!(parsed_local.get("server").is_none());
 
         let parsed_empty = parse_dns_server("local-dns", "", None);
@@ -1405,7 +1422,16 @@ mod tests {
 
         let parsed_doh = parse_dns_server("doh", "https://1.1.1.1/dns-query", Some("proxy"));
         assert_eq!(parsed_doh["type"], "https");
-        assert_eq!(parsed_doh["server"], "https://1.1.1.1/dns-query");
+        assert_eq!(parsed_doh["server"], "1.1.1.1");
+        assert_eq!(parsed_doh["detour"], "proxy");
+        assert!(parsed_doh.get("path").is_none());
+        assert!(parsed_doh.get("server_port").is_none());
+
+        let parsed_doh_custom =
+            parse_dns_server("doh2", "https://dns.example.com:8443/custom", Some("proxy"));
+        assert_eq!(parsed_doh_custom["server"], "dns.example.com");
+        assert_eq!(parsed_doh_custom["server_port"], 8443);
+        assert_eq!(parsed_doh_custom["path"], "/custom");
 
         let parsed_dot = parse_dns_server("dot", "tls://1.1.1.1:853", Some("proxy"));
         assert_eq!(parsed_dot["type"], "tls");

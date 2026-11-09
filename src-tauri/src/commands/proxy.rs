@@ -2203,7 +2203,10 @@ mod tests {
         assert_eq!(fb1["type"], "udp");
         assert_eq!(fb1["server"], FALLBACK_DNS_PRIMARY);
         assert_eq!(fb1["server_port"], 53);
-        assert_eq!(fb1["detour"], "direct");
+        assert!(
+            fb1.get("detour").is_none(),
+            "direct detour is redundant and rejected by newer sing-box"
+        );
         assert!(
             fb1.get("address").is_none(),
             "Must not use legacy address field"
