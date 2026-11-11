@@ -7,7 +7,7 @@ import { useSettingsStore, type ThemeMode } from '../stores/settingsStore';
 import { useConnectionStore } from '../stores/connectionStore';
 import { useToastStore } from '../stores/toastStore';
 import { useProfileStore } from '../stores/profileStore';
-import type { Settings, DnsMode } from '../utils/store';
+import type { Settings, DnsMode, RoutingMode } from '../utils/store';
 import { generateApiSecret, storeHelper } from '../utils/store';
 import { useRoutingStore } from '../stores/routingStore';
 import xLinkLogo from '../assets/X-Link-logo.png';
@@ -389,6 +389,7 @@ export function SettingsView() {
                       <CardTitle className="text-xs font-bold text-foreground">Connection Optimization</CardTitle>
                     </CardHeader>
                     <FormSwitchRow title="Enable Multiplexing (Mux)" desc="Multiplexes multiple streams over a single connection" checked={settings.multiplex} onChange={(v) => updateSettings({ multiplex: v })} />
+                    <FormSwitchRow title="Block QUIC (UDP 443)" desc="Rejects QUIC early to force TCP fallback on restricted networks" checked={settings.blockQuic} onChange={(v) => updateSettings({ blockQuic: v })} />
                   </Card>
 
                   <Card className="p-4 bg-card border-border shadow-sm flex flex-col gap-3">
@@ -680,6 +681,26 @@ export function SettingsView() {
                 <CardHeader className="p-0 pb-1 shrink-0 flex flex-row items-center justify-between space-y-0">
                   <CardTitle className="text-xs font-bold text-foreground">Routing</CardTitle>
                 </CardHeader>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-foreground">Network Routing Mode</label>
+                  <FormSelect
+                    value={settings.routingMode}
+                    onChange={(val) => updateSettings({ routingMode: val as RoutingMode })}
+                    options={[
+                      { value: 'rule', label: 'Rule (Split tunneling with custom rules)' },
+                      { value: 'sni_zero_data', label: 'SNI Zero-Data (Strict remote DNS, no leaks)' },
+                      { value: 'global', label: 'Global (All traffic via proxy)' },
+                      { value: 'direct', label: 'Direct (Bypass mode for diagnostics)' },
+                    ]}
+                    className="w-full text-xs"
+                  />
+                  <span className="text-[11px] text-muted-foreground leading-normal">
+                    {settings.routingMode === 'sni_zero_data' && 'Forces remote DNS detour, blocks QUIC, and suppresses direct rules to prevent unbilled data leaks.'}
+                    {settings.routingMode === 'rule' && 'Routes traffic according to user-defined routing rules and domain lists.'}
+                    {settings.routingMode === 'global' && 'Directs all non-loopback connections entirely through the proxy.'}
+                    {settings.routingMode === 'direct' && 'Bypasses the proxy completely for diagnostic and testing purposes.'}
+                  </span>
+                </div>
                 <FormSwitchRow title="Bypass LAN / Private IPs" desc="Route RFC-1918 addresses directly instead of through the proxy"
                   checked={settings.bypassLan} onChange={(v) => updateSettings({ bypassLan: v })} />
               </Card>

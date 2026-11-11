@@ -6,6 +6,24 @@ use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 
+/// Network routing mode that determines DNS strategy, route rules, and safety constraints.
+///
+/// - `SniZeroData`: Sri Lanka 0-data ISP package mode. Forces remote DNS detour through proxy,
+///   suppresses user `direct` rules and LAN-direct rules to prevent unbilled data leaks,
+///   forces QUIC block, and forces `proxy` as the final outbound.
+/// - `Rule`: Split tunneling with custom user rules (default).
+/// - `Global`: All traffic through proxy.
+/// - `Direct`: Full bypass mode for diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    SniZeroData,
+    #[default]
+    Rule,
+    Global,
+    Direct,
+}
+
 /// Maximum lines retained in the Rust-side log buffer and diagnostic ring buffers.
 pub const LOG_BUFFER_RUST_MAX: usize = 500;
 
@@ -154,7 +172,7 @@ pub fn generate_secure_secret() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UserSettings {
     pub proxy_mode: String,
@@ -194,6 +212,10 @@ pub struct UserSettings {
     pub dns_address: String,
     pub use_separate_ports: bool,
     pub multiplex: bool,
+    /// Reject QUIC and UDP/443 early to allow TCP fallback on restricted networks.
+    pub block_quic: bool,
+    /// Network routing mode (zero-data, rule-based, global, or direct).
+    pub routing_mode: RoutingMode,
 }
 
 impl Default for UserSettings {
@@ -213,6 +235,7 @@ impl Default for UserSettings {
             tun_mtu: 1500,
             tun_endpoint_independent_nat: false,
             multiplex: false,
+            block_quic: false,
             sniff_enabled: true,
             sniff_http: true,
             sniff_tls: true,
@@ -236,6 +259,7 @@ impl Default for UserSettings {
             bypass_lan: true,
             dns_address: "".to_string(),
             use_separate_ports: false,
+            routing_mode: RoutingMode::Rule,
         }
     }
 }
@@ -431,6 +455,16 @@ impl ProxyState {
                         if let Some(v) = val.get("multiplex").and_then(|v| v.as_bool()) {
                             default_s.multiplex = v;
                         }
+                        if let Some(v) = val.get("blockQuic").and_then(|v| v.as_bool()) {
+                            default_s.block_quic = v;
+                        }
+                        if let Some(v) = val.get("routingMode").and_then(|v| v.as_str()) {
+                            if let Ok(rm) = serde_json::from_value::<RoutingMode>(
+                                serde_json::Value::String(v.to_string()),
+                            ) {
+                                default_s.routing_mode = rm;
+                            }
+                        }
                         settings = default_s;
                     }
 
@@ -492,6 +526,7 @@ impl ProxyState {
             ConnectionStatus::Connected => "connected",
         };
         let _ = app.emit("proxy-status-changed", status_str);
+        let _ = app.emit("tunnel-status-changed", status_str);
     }
 
     pub fn is_running(&self) -> bool {
@@ -571,5 +606,190 @@ impl ProxyState {
             dns_queries,
             traces,
         }
+    }
+}
+
+/// Metadata representation of a profile within the persisted store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription_url: Option<String>,
+    #[serde(default)]
+    pub updated_at: u64,
+    #[serde(default)]
+    pub node_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_node_tag: Option<String>,
+}
+
+/// Strongly-typed single source of truth for persisted client state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedStore {
+    pub profiles: Vec<StoreProfile>,
+    pub active_profile_id: Option<String>,
+    pub selected_node_id: Option<String>,
+    pub settings: UserSettings,
+}
+
+impl PersistedStore {
+    /// Constructs a clean fallback store containing a default manual profile.
+    pub fn default_with_profile() -> Self {
+        let default_profile_id = "default-profile".to_string();
+        Self {
+            profiles: vec![StoreProfile {
+                id: default_profile_id.clone(),
+                name: "Default Profile".into(),
+                r#type: Some("manual".into()),
+                subscription_url: None,
+                updated_at: 0,
+                node_count: 0,
+                selected_node_tag: None,
+            }],
+            active_profile_id: Some(default_profile_id),
+            selected_node_id: None,
+            settings: UserSettings::default(),
+        }
+    }
+
+    /// Atomically writes state to `<data_dir>/xlink_store.json.tmp` and renames to `<data_dir>/xlink_store.json`.
+    #[allow(dead_code)]
+    pub fn save_to_dir<P: AsRef<std::path::Path>>(&self, data_dir: P) -> Result<(), String> {
+        let dir = data_dir.as_ref();
+        let _ = std::fs::create_dir_all(dir);
+        let tmp_path = dir.join("xlink_store.json.tmp");
+        let final_path = dir.join("xlink_store.json");
+
+        let serialized = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize store: {}", e))?;
+
+        std::fs::write(&tmp_path, serialized)
+            .map_err(|e| format!("Failed to write tmp store file: {}", e))?;
+
+        #[cfg(windows)]
+        if final_path.exists() {
+            use windows::core::PCWSTR;
+            use windows::Win32::Storage::FileSystem::ReplaceFileW;
+            use windows::Win32::Storage::FileSystem::REPLACE_FILE_FLAGS;
+            use std::os::windows::ffi::OsStrExt;
+
+            let target: Vec<u16> = final_path.as_os_str().encode_wide().chain(Some(0)).collect();
+            let replacement: Vec<u16> = tmp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+            unsafe {
+                ReplaceFileW(
+                    PCWSTR(target.as_ptr()),
+                    PCWSTR(replacement.as_ptr()),
+                    None,
+                    REPLACE_FILE_FLAGS(0),
+                    None,
+                    None,
+                )
+            }.map_err(|e| format!("Failed to atomically replace store file: {}", e))?;
+        } else {
+            std::fs::rename(&tmp_path, &final_path)
+                .map_err(|e| format!("Failed to commit store file: {}", e))?;
+        }
+        #[cfg(not(windows))]
+        std::fs::rename(&tmp_path, &final_path)
+            .map_err(|e| format!("Failed to commit store file: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Load a standalone store; reject legacy files that are still the application's live state.
+    pub fn load_from_dir<P: AsRef<std::path::Path>>(data_dir: P) -> Result<Self, String> {
+        let dir = data_dir.as_ref();
+        let store_path = dir.join("xlink_store.json");
+        // Legacy files are still live; an earlier xlink_store.json snapshot cannot supersede them.
+        if dir.join("profiles.json").exists() || dir.join("settings.json").exists() {
+            return Err("Legacy profiles.json or settings.json exists; migration is required before xlink_store.json can be used".to_string());
+        }
+        if store_path.exists() {
+            let raw = std::fs::read_to_string(&store_path)
+                .map_err(|e| format!("Failed to read xlink_store.json: {e}"))?;
+            return serde_json::from_str::<PersistedStore>(&raw)
+                .map_err(|e| format!("Invalid xlink_store.json: {e}"));
+        }
+        Ok(Self::default_with_profile())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_persisted_store_default_clean_boot() {
+        let store = PersistedStore::default_with_profile();
+        assert_eq!(store.profiles.len(), 1);
+        assert_eq!(store.profiles[0].id, "default-profile");
+        assert_eq!(store.active_profile_id.as_deref(), Some("default-profile"));
+        assert_eq!(store.settings.routing_mode, RoutingMode::Rule);
+    }
+
+    #[test]
+    fn test_persisted_store_atomic_save_and_reload() {
+        let temp_dir = std::env::temp_dir().join(format!("xlink-store-test-{}", uuid::Uuid::new_v4()));
+        let mut store = PersistedStore::default_with_profile();
+        store.profiles[0].name = "Test Profile Updated".to_string();
+        store.settings.routing_mode = RoutingMode::SniZeroData;
+
+        store.save_to_dir(&temp_dir).expect("save_to_dir must succeed");
+
+        let final_file = temp_dir.join("xlink_store.json");
+        let tmp_file = temp_dir.join("xlink_store.json.tmp");
+        assert!(final_file.exists());
+        assert!(!tmp_file.exists(), "temp file must be renamed away");
+
+        let loaded = PersistedStore::load_from_dir(&temp_dir).expect("saved store should load");
+        assert_eq!(loaded.profiles[0].name, "Test Profile Updated");
+        assert_eq!(loaded.settings.routing_mode, RoutingMode::SniZeroData);
+
+        store.profiles[0].name = "Saved Again".to_string();
+        store.save_to_dir(&temp_dir).expect("second save must atomically replace existing file");
+        assert_eq!(PersistedStore::load_from_dir(&temp_dir).expect("second save should load").profiles[0].name, "Saved Again");
+        assert!(!tmp_file.exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_persisted_store_corrupted_file_fails_closed() {
+        let temp_dir = std::env::temp_dir().join(format!("xlink-corrupt-test-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let final_file = temp_dir.join("xlink_store.json");
+        std::fs::write(&final_file, b"invalid corrupt json {{{").unwrap();
+
+        let error = PersistedStore::load_from_dir(&temp_dir).expect_err("corrupt store must not be replaced by defaults");
+        assert!(error.contains("Invalid xlink_store.json"));
+        assert_eq!(std::fs::read(&final_file).unwrap(), b"invalid corrupt json {{{");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_persisted_store_refuses_to_fabricate_legacy_profiles() {
+        let temp_dir = std::env::temp_dir().join(format!("xlink-legacy-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let legacy_path = temp_dir.join("profiles.json");
+        std::fs::write(&legacy_path, br#"{"profiles":[]}"#).unwrap();
+
+        let error = PersistedStore::load_from_dir(&temp_dir).expect_err("legacy profiles need migration");
+        assert!(error.contains("migration is required"));
+        assert!(!temp_dir.join("xlink_store.json").exists());
+        assert_eq!(std::fs::read(&legacy_path).unwrap(), br#"{"profiles":[]}"#);
+
+        let mut stale = PersistedStore::default_with_profile();
+        stale.profiles[0].name = "Stale snapshot".to_string();
+        stale.save_to_dir(&temp_dir).unwrap();
+        let error = PersistedStore::load_from_dir(&temp_dir).expect_err("live legacy data must take precedence over a stale snapshot");
+        assert!(error.contains("migration is required"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

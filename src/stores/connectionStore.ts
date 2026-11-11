@@ -41,6 +41,10 @@ interface ConnectionState {
   resetTrafficStats: () => void;
   toggleConnect: () => Promise<void>;
   requestElevation: () => Promise<void>;
+  startTunnel: (nodeTag?: string) => Promise<void>;
+  stopTunnel: () => Promise<void>;
+  reloadTunnel: () => Promise<void>;
+  selectActiveNode: (tag: string) => Promise<void>;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
@@ -123,12 +127,13 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
         }
       }
 
-      // Use a session override; never rewrite the saved TUN preference.
-      const modeOverride = settings.proxyMode === 'tun' && !isElevated ? 'system' : null;
-      if (modeOverride) {
-        logStore.pushSystemLog('TUN requires Administrator privileges. Using System Proxy for this session.');
-        useToastStore.getState().addToast('warning', 'Using System Proxy for this session (TUN requires Admin rights).', 'Fallback Activated');
+      // TUN is a safety boundary for zero-data routing: never silently fall back to system proxy.
+      if (settings.proxyMode === 'tun' && !isElevated) {
+        logStore.pushSystemLog('TUN requires Administrator privileges; connection was not started.');
+        useToastStore.getState().addToast('error', 'Administrator privileges are required for TUN mode.', 'Connection Blocked');
+        return;
       }
+      const modeOverride = null;
 
       try {
         const conflict = await invoke<number | null>('check_port_conflict', { ports: [httpPort, socksPort, mixedPort] });
@@ -177,6 +182,99 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     } catch (e) {
       logStore.pushSystemLog(`Elevation aborted: ${e}`);
       useToastStore.getState().addToast('error', toUserFriendlyError(String(e)), 'Elevation Error');
+    }
+  },
+
+  startTunnel: async (nodeTag?: string) => {
+    const { settings, isElevated } = useSettingsStore.getState();
+    const profileStore = useProfileStore.getState();
+    const activeProfile = profileStore.activeProfile();
+    const outboundTag = nodeTag || profileStore.selectedNodeTag;
+    const logStore = useLogStore.getState();
+
+    if (!activeProfile) {
+      logStore.pushSystemLog('Error: Import a configuration first.');
+      useToastStore.getState().addToast('error', 'Please select or import a profile first.', 'No Active Profile');
+      return;
+    }
+
+    if (settings.proxyMode === 'tun' && !isElevated) {
+      logStore.pushSystemLog('TUN requires Administrator privileges; tunnel was not started.');
+      useToastStore.getState().addToast('error', 'Administrator privileges are required for TUN mode.', 'Connection Blocked');
+      return;
+    }
+    const modeOverride = null;
+    logStore.pushSystemLog(`Starting tunnel with profile "${activeProfile.name}" [${outboundTag ?? 'default'}]...`);
+    set({ connectionStatus: 'connecting' });
+
+    try {
+      const result = await invoke<string>('start_tunnel', {
+        selectedOutboundTag: outboundTag ?? null,
+        modeOverride,
+      });
+      if (result !== 'started') throw new Error(`Unexpected tunnel start response: ${result}`);
+      const status = await invoke<{ effectiveProxyMode: 'tun' | 'system' | null }>('get_tunnel_status');
+      set({
+        isConnected: true,
+        connectionStatus: 'connected',
+        effectiveProxyMode: status.effectiveProxyMode ?? settings.proxyMode,
+      });
+      logStore.pushSystemLog('Sing-box tunnel established.');
+      useToastStore.getState().addToast('success', 'Tunnel started successfully.', 'Connected');
+    } catch (err) {
+      set({ isConnected: false, connectionStatus: 'disconnected', effectiveProxyMode: null });
+      logStore.pushSystemLog(`Failed to start tunnel: ${err}`);
+      useToastStore.getState().addToast('error', toUserFriendlyError(String(err)), 'Tunnel Error');
+      throw err;
+    }
+  },
+
+  stopTunnel: async () => {
+    const logStore = useLogStore.getState();
+    logStore.pushSystemLog('Stopping tunnel...');
+    try {
+      const result = await invoke<string>('stop_tunnel');
+      if (result !== 'stopped') throw new Error(`Unexpected tunnel stop response: ${result}`);
+      set({
+        isConnected: false,
+        connectionStatus: 'disconnected',
+        effectiveProxyMode: null,
+      });
+      get().resetTrafficStats();
+      logStore.pushSystemLog('Tunnel stopped cleanly.');
+      useToastStore.getState().addToast('info', 'Tunnel disconnected.', 'Disconnected');
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to stop tunnel: ${err}`);
+      useToastStore.getState().addToast('error', toUserFriendlyError(String(err)), 'Disconnect Error');
+      throw err;
+    }
+  },
+
+  reloadTunnel: async () => {
+    const logStore = useLogStore.getState();
+    logStore.pushSystemLog('Reloading tunnel configuration...');
+    try {
+      await invoke('reload_tunnel');
+      logStore.pushSystemLog('Tunnel configuration reloaded successfully.');
+      useToastStore.getState().addToast('success', 'Configuration reloaded.', 'Reloaded');
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to reload tunnel: ${err}`);
+      useToastStore.getState().addToast('error', toUserFriendlyError(String(err)), 'Reload Error');
+      throw err;
+    }
+  },
+
+  selectActiveNode: async (tag: string) => {
+    const logStore = useLogStore.getState();
+    logStore.pushSystemLog(`Selecting active node "${tag}"...`);
+    try {
+      await invoke('select_active_node', { tag });
+      useProfileStore.setState({ selectedNodeTag: tag });
+      logStore.pushSystemLog(`Active node set to "${tag}".`);
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to switch active node: ${err}`);
+      useToastStore.getState().addToast('error', `Failed to switch to "${tag}": ${err}`, 'Node Switch Error');
+      throw err;
     }
   }
 }));

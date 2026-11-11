@@ -106,7 +106,19 @@ pub fn run() {
             commands::backup::import_config_backup,
             commands::config::preview_subscription_refresh,
             commands::config::apply_previewed_subscription_refresh,
-            commands::config::preview_import_config
+            commands::config::preview_import_config,
+            commands::logs::get_logs,
+            commands::logs::clear_logs,
+            commands::proxy::get_tunnel_status,
+            commands::proxy::start_tunnel,
+            commands::proxy::stop_tunnel,
+            commands::proxy::reload_tunnel,
+            commands::proxy::select_active_node,
+            commands::config::get_persisted_state,
+            commands::config::save_generator_settings,
+            commands::config::save_routing_rules,
+            commands::config::preview_singbox_config,
+            commands::config::bulk_apply_bug_host
         ])
         .setup(|app| {
             // Preserve minimized launches now that the main window is visible by default.

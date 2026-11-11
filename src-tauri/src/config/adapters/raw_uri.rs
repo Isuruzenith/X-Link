@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use url::Url;
 
 fn decode_base64_padded(s: &str) -> Result<Vec<u8>, String> {
-    let mut s = s.trim().to_string();
-    while !s.len().is_multiple_of(4) {
-        s.push('=');
+    let mut cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    while !cleaned.len().is_multiple_of(4) {
+        cleaned.push('=');
     }
-    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &s)
-        .or_else(|_| base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, &s))
-        .map_err(|e| format!("Base64 decode failed: {}", e))
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &cleaned)
+        .or_else(|_| base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, &cleaned))
+        .map_err(|_| "Base64 decode failed".to_string())
 }
 
 fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
@@ -18,20 +18,28 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
         .get("security")
         .map(|s| s.as_str())
         .unwrap_or("");
-    let sni = query_params.get("sni").or_else(|| query_params.get("peer"));
+    let sni = query_params
+        .get("sni")
+        .or_else(|| query_params.get("peer"))
+        .or_else(|| query_params.get("serverName"))
+        .or_else(|| query_params.get("server_name"));
 
     if security == "tls" || security == "reality" || sni.is_some() {
         let mut tls = HashMap::new();
         tls.insert("enabled".to_string(), Value::Bool(true));
 
         if let Some(sni_val) = sni {
-            tls.insert(
-                "server_name".to_string(),
-                Value::String(sni_val.to_string()),
-            );
+            let trimmed = sni_val.trim();
+            if !trimmed.is_empty() {
+                tls.insert(
+                    "server_name".to_string(),
+                    Value::String(trimmed.to_string()),
+                );
+            }
         }
 
-        if let Some(fp) = query_params.get("fp") {
+        let fp = query_params.get("fp").map(|s| s.as_str()).unwrap_or("");
+        if !fp.is_empty() {
             let mut utls = HashMap::new();
             utls.insert("enabled".to_string(), Value::Bool(true));
             utls.insert("fingerprint".to_string(), Value::String(fp.to_string()));
@@ -68,14 +76,29 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
                 "reality".to_string(),
                 Value::Object(reality.into_iter().collect()),
             );
+
+            // sing-box requires uTLS for reality client. If fp was omitted, default to chrome:
+            if !tls.contains_key("utls") {
+                let mut utls = HashMap::new();
+                utls.insert("enabled".to_string(), Value::Bool(true));
+                utls.insert("fingerprint".to_string(), Value::String("chrome".to_string()));
+                tls.insert(
+                    "utls".to_string(),
+                    Value::Object(utls.into_iter().collect()),
+                );
+            }
         }
 
         if let Some(alpn_str) = query_params.get("alpn") {
             let alpn_list: Vec<Value> = alpn_str
                 .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
                 .map(|s| Value::String(s.to_string()))
                 .collect();
-            tls.insert("alpn".to_string(), Value::Array(alpn_list));
+            if !alpn_list.is_empty() {
+                tls.insert("alpn".to_string(), Value::Array(alpn_list));
+            }
         }
 
         return Some(Value::Object(tls.into_iter().collect()));
@@ -118,11 +141,52 @@ fn parse_transport_settings(query_params: &HashMap<String, String>) -> Option<Va
             if let Some(service_name) = query_params
                 .get("serviceName")
                 .or_else(|| query_params.get("servicename"))
+                .or_else(|| query_params.get("service_name"))
+                .or_else(|| query_params.get("path"))
             {
                 transport.insert(
                     "service_name".to_string(),
                     Value::String(service_name.to_string()),
                 );
+            }
+            transport.insert("idle_timeout".to_string(), Value::String("15s".to_string()));
+            transport.insert("ping_timeout".to_string(), Value::String("15s".to_string()));
+            transport.insert("permit_without_stream".to_string(), Value::Bool(true));
+        }
+        "http" | "h2" => {
+            transport.insert("type".to_string(), Value::String("http".to_string()));
+            if let Some(path) = query_params.get("path") {
+                transport.insert("path".to_string(), Value::String(path.to_string()));
+            }
+            if let Some(host) = query_params.get("host") {
+                let hosts: Vec<Value> = host
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+                    .collect();
+                if !hosts.is_empty() {
+                    transport.insert("host".to_string(), Value::Array(hosts));
+                }
+            }
+            transport.insert("idle_timeout".to_string(), Value::String("15s".to_string()));
+            transport.insert("ping_timeout".to_string(), Value::String("15s".to_string()));
+        }
+        "xhttp" | "splithttp" => {
+            transport.insert("type".to_string(), Value::String("http".to_string()));
+            if let Some(path) = query_params.get("path") {
+                transport.insert("path".to_string(), Value::String(path.to_string()));
+            }
+            if let Some(host) = query_params.get("host") {
+                let hosts: Vec<Value> = host
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Value::String(s.to_string()))
+                    .collect();
+                if !hosts.is_empty() {
+                    transport.insert("host".to_string(), Value::Array(hosts));
+                }
             }
         }
         _ => {}
@@ -228,6 +292,61 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
 
         // ── VMESS PARSING ────────────────────────────────────────────────────
         if let Some(b64_part) = trimmed.strip_prefix("vmess://") {
+            if b64_part.contains('@') {
+                let url = match Url::parse(trimmed) {
+                    Ok(url) => url,
+                    Err(_) => continue,
+                };
+                let (Some(server), Some(port)) = (url.host_str(), url.port()) else {
+                    continue;
+                };
+                let uuid = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                if uuid.is_empty() || port == 0 {
+                    continue;
+                }
+                let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+                let mut fields = HashMap::from([
+                    ("server".into(), serde_json::json!(server)),
+                    ("server_port".into(), serde_json::json!(port)),
+                    ("uuid".into(), serde_json::json!(uuid)),
+                    (
+                        "alter_id".into(),
+                        serde_json::json!(query
+                            .get("aid")
+                            .and_then(|s| s.parse::<u16>().ok())
+                            .unwrap_or(0)),
+                    ),
+                    (
+                        "security".into(),
+                        serde_json::json!(query
+                            .get("encryption")
+                            .map(String::as_str)
+                            .unwrap_or("auto")),
+                    ),
+                ]);
+                if let Some(tls) = parse_tls_settings(&query) {
+                    fields.insert("tls".into(), tls);
+                }
+                if let Some(transport) = parse_transport_settings(&query) {
+                    fields.insert("transport".into(), transport);
+                }
+                let tag = url
+                    .fragment()
+                    .map(|tag| {
+                        percent_encoding::percent_decode_str(tag)
+                            .decode_utf8_lossy()
+                            .into_owned()
+                    })
+                    .unwrap_or_else(|| "VMess Proxy".into());
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "vmess".into(),
+                    tag,
+                    fields,
+                });
+                continue;
+            }
             let parts: Vec<&str> = b64_part.split('#').collect();
             let b64_clean = parts[0];
             let fragment_tag = parts.get(1).map(|t| {
@@ -261,7 +380,10 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 .to_string();
 
             let port = match json.get("port") {
-                Some(Value::Number(n)) => n.as_u64().unwrap_or(0) as u16,
+                Some(Value::Number(n)) => n
+                    .as_u64()
+                    .and_then(|port| u16::try_from(port).ok())
+                    .unwrap_or(0),
                 Some(Value::String(s)) => s.parse::<u16>().unwrap_or(0),
                 _ => 0,
             };
@@ -271,7 +393,18 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                 .and_then(|u| u.as_str())
                 .unwrap_or("")
                 .to_string();
-            let alter_id = json.get("aid").and_then(|a| a.as_u64()).unwrap_or(0);
+            let alter_id = match json.get("aid") {
+                Some(Value::Number(n)) => n
+                    .as_u64()
+                    .and_then(|id| u16::try_from(id).ok())
+                    .unwrap_or(0),
+                Some(Value::String(s)) => s.parse::<u16>().unwrap_or(0),
+                _ => 0,
+            };
+
+            if server.trim().is_empty() || port == 0 || uuid.trim().is_empty() {
+                continue;
+            }
 
             let mut fields = HashMap::new();
             fields.insert("server".to_string(), Value::String(server));
@@ -380,6 +513,9 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
 
         let server = url.host_str().unwrap_or("").to_string();
         let port = url.port().unwrap_or(0);
+        if server.trim().is_empty() || port == 0 {
+            continue;
+        }
 
         let mut fields = HashMap::new();
         fields.insert("server".to_string(), Value::String(server));
@@ -388,7 +524,12 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         match url.scheme() {
             "vless" => {
                 // vless://[uuid]@host:port?query#tag
-                let uuid = url.username().to_string();
+                let uuid = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                if uuid.trim().is_empty() {
+                    continue;
+                }
                 fields.insert("uuid".to_string(), Value::String(uuid));
 
                 let query_params: HashMap<String, String> =
@@ -433,7 +574,12 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             }
             "trojan" => {
                 // trojan://[password]@host:port?query#tag
-                let password = url.username().to_string();
+                let password = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                if password.is_empty() {
+                    continue;
+                }
                 fields.insert("password".to_string(), Value::String(password));
 
                 let query_params: HashMap<String, String> =
@@ -452,6 +598,210 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
                     fields,
                 });
             }
+            "hysteria2" | "hy2" => {
+                let username =
+                    percent_encoding::percent_decode_str(url.username()).decode_utf8_lossy();
+                let password = url
+                    .password()
+                    .map(|pw| {
+                        format!(
+                            "{}:{}",
+                            username,
+                            percent_encoding::percent_decode_str(pw).decode_utf8_lossy()
+                        )
+                    })
+                    .unwrap_or_else(|| username.into_owned());
+                if password.is_empty() || port == 0 || fields["server"] == "" {
+                    continue;
+                }
+                fields.insert("password".into(), Value::String(password));
+                let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+                let mut tls = serde_json::json!({"enabled": true});
+                if let Some(sni) = query.get("sni") {
+                    tls["server_name"] = serde_json::json!(sni);
+                }
+                if query
+                    .get("insecure")
+                    .or_else(|| query.get("allowInsecure"))
+                    .is_some_and(|v| v == "1" || v == "true")
+                {
+                    tls["insecure"] = serde_json::json!(true);
+                }
+                fields.insert("tls".into(), tls);
+                if let (Some(kind), Some(secret)) = (query.get("obfs"), query.get("obfs-password"))
+                {
+                    if !kind.is_empty() && !secret.is_empty() {
+                        fields.insert(
+                            "obfs".into(),
+                            serde_json::json!({"type":kind,"password":secret}),
+                        );
+                    }
+                }
+                for (key, params) in [("up_mbps", "upmbps"), ("down_mbps", "downmbps")] {
+                    if let Some(rate) = query.get(params).and_then(|s| s.parse::<u32>().ok()) {
+                        fields.insert(key.into(), serde_json::json!(rate));
+                    }
+                }
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "hysteria2".into(),
+                    tag,
+                    fields,
+                });
+            }
+            "wireguard" | "wg" => {
+                let private_key = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+                let public_key = query.get("publickey").or_else(|| query.get("public_key"));
+                let address = query.get("address").or_else(|| query.get("ip"));
+                if private_key.is_empty()
+                    || public_key.is_none_or(String::is_empty)
+                    || address.is_none_or(String::is_empty)
+                    || port == 0
+                    || fields["server"] == ""
+                {
+                    continue;
+                }
+                fields.insert("private_key".into(), serde_json::json!(private_key));
+                fields.insert(
+                    "peer_public_key".into(),
+                    serde_json::json!(public_key.unwrap()),
+                );
+                fields.insert(
+                    "address".into(),
+                    serde_json::json!(address
+                        .unwrap()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|part| !part.is_empty())
+                        .collect::<Vec<_>>()),
+                );
+                if let Some(psk) = query.get("psk").or_else(|| query.get("presharedkey")) {
+                    fields.insert("pre_shared_key".into(), serde_json::json!(psk));
+                }
+                if let Some(reserved) = query.get("reserved") {
+                    let bytes: Option<Vec<u8>> = reserved
+                        .split(',')
+                        .map(|part| part.trim().parse::<u8>().ok())
+                        .collect();
+                    if bytes.as_ref().is_some_and(|bytes| bytes.len() == 3) {
+                        fields.insert("reserved".into(), serde_json::json!(bytes.unwrap()));
+                    }
+                }
+                if let Some(mtu) = query.get("mtu").and_then(|s| s.parse::<u16>().ok()) {
+                    fields.insert("mtu".into(), serde_json::json!(mtu));
+                }
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "wireguard".into(),
+                    tag,
+                    fields,
+                });
+            }
+            "tuic" => {
+                let uuid = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                let password = url
+                    .password()
+                    .map(|s| {
+                        percent_encoding::percent_decode_str(s)
+                            .decode_utf8_lossy()
+                            .into_owned()
+                    })
+                    .unwrap_or_default();
+                if uuid.is_empty() || password.is_empty() || port == 0 || fields["server"] == "" {
+                    continue;
+                }
+                fields.insert("uuid".into(), Value::String(uuid));
+                fields.insert("password".into(), Value::String(password));
+                let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
+                fields.insert(
+                    "congestion_control".into(),
+                    serde_json::json!(query
+                        .get("congestion_control")
+                        .or_else(|| query.get("congestion-control"))
+                        .map(String::as_str)
+                        .unwrap_or("bbr")),
+                );
+                if let Some(mode) = query
+                    .get("udp_relay_mode")
+                    .or_else(|| query.get("udp-relay-mode"))
+                {
+                    fields.insert("udp_relay_mode".into(), serde_json::json!(mode));
+                }
+                let mut tls = serde_json::json!({"enabled": true});
+                if let Some(sni) = query.get("sni") {
+                    tls["server_name"] = serde_json::json!(sni);
+                }
+                if query
+                    .get("insecure")
+                    .or_else(|| query.get("allowInsecure"))
+                    .is_some_and(|v| v == "1" || v == "true")
+                {
+                    tls["insecure"] = serde_json::json!(true);
+                }
+                fields.insert("tls".into(), tls);
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "tuic".into(),
+                    tag,
+                    fields,
+                });
+            }
+            "socks5" | "socks" => {
+                let username = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                let password = url
+                    .password()
+                    .map(|p| {
+                        percent_encoding::percent_decode_str(p)
+                            .decode_utf8_lossy()
+                            .into_owned()
+                    })
+                    .unwrap_or_default();
+                fields.insert("version".to_string(), Value::String("5".to_string()));
+                if !username.is_empty() {
+                    fields.insert("username".to_string(), Value::String(username));
+                }
+                if !password.is_empty() {
+                    fields.insert("password".to_string(), Value::String(password));
+                }
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "socks".to_string(),
+                    tag,
+                    fields,
+                });
+            }
+            "http" | "https" => {
+                let username = percent_encoding::percent_decode_str(url.username())
+                    .decode_utf8_lossy()
+                    .into_owned();
+                let password = url
+                    .password()
+                    .map(|p| {
+                        percent_encoding::percent_decode_str(p)
+                            .decode_utf8_lossy()
+                            .into_owned()
+                    })
+                    .unwrap_or_default();
+                if !username.is_empty() {
+                    fields.insert("username".to_string(), Value::String(username));
+                }
+                if !password.is_empty() {
+                    fields.insert("password".to_string(), Value::String(password));
+                }
+                if url.scheme() == "https" {
+                    let mut tls = HashMap::new();
+                    tls.insert("enabled".to_string(), Value::Bool(true));
+                    fields.insert("tls".to_string(), Value::Object(tls.into_iter().collect()));
+                }
+                outbounds.push(SingBoxOutbound {
+                    outbound_type: "http".to_string(),
+                    tag,
+                    fields,
+                });
+            }
             _ => {}
         }
     }
@@ -462,6 +812,122 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encoded_ws_early_data_and_unpadded_base64() {
+        let uri = "vless://uuid@proxy.example:443?security=tls&sni=tls.example&type=ws&host=cdn.example&path=%2Ftunnel%3Fed%3D2048#VLESS";
+        let nodes = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].fields["transport"]["path"], "/tunnel?ed=2048");
+        assert_eq!(
+            nodes[0].fields["transport"]["headers"]["Host"],
+            "cdn.example"
+        );
+        assert_eq!(nodes[0].fields["tls"]["server_name"], "tls.example");
+
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            r#"{"add":"proxy.example","port":"443","id":"uuid","aid":"1"}"#,
+        );
+        let nodes = adapt(format!("vmess://{}", encoded).as_bytes()).unwrap();
+        assert_eq!(nodes[0].fields["alter_id"], 1);
+        assert_eq!(nodes[0].fields["server_port"], 443);
+    }
+
+    #[test]
+    fn test_incomplete_raw_nodes_are_skipped() {
+        let nodes = adapt(b"vmess://uuid@proxy.example:443?security=tls\nvless://@proxy.example:443\ntrojan://@proxy.example:443\nvless://uuid@proxy.example:443").unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].outbound_type, "vmess");
+        assert_eq!(nodes[1].outbound_type, "vless");
+    }
+
+    #[test]
+    fn test_tuic_udp_relay_aliases() {
+        let nodes = adapt(b"tuic://uuid:password@proxy.example:443?congestion-control=cubic&udp-relay-mode=native").unwrap();
+        assert_eq!(nodes[0].fields["congestion_control"], "cubic");
+        assert_eq!(nodes[0].fields["udp_relay_mode"], "native");
+    }
+
+    #[test]
+    fn test_vmess_uri_style_import() {
+        let uri = "vmess://user-uuid@proxy.example:443?security=tls&sni=tls.example&type=ws&path=%2Ftunnel%3Fed%3D1024&aid=4#VMess";
+        let nodes = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].fields["server_port"], 443);
+        assert_eq!(nodes[0].fields["alter_id"], 4);
+        assert_eq!(nodes[0].fields["tls"]["server_name"], "tls.example");
+        assert_eq!(nodes[0].fields["transport"]["path"], "/tunnel?ed=1024");
+    }
+
+    #[test]
+    fn test_wireguard_share_link() {
+        let nodes = adapt(b"wg://privatekey@node.example:51820?publickey=peerkey&address=10.0.0.2%2F32&psk=shared&reserved=1%2C2%2C3#WG").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].outbound_type, "wireguard");
+        assert_eq!(
+            nodes[0].fields["address"],
+            serde_json::json!(["10.0.0.2/32"])
+        );
+        assert_eq!(nodes[0].fields["peer_public_key"], "peerkey");
+        assert_eq!(nodes[0].fields["pre_shared_key"], "shared");
+        assert_eq!(nodes[0].fields["reserved"], serde_json::json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_udp_share_link_protocols() {
+        let nodes = adapt(b"hy2://secret@node.example:443?sni=tls.example&obfs=salamander&obfs-password=abc&upmbps=10#HY2\ntuic://uuid:secret@node.example:443?sni=tls.example&congestion_control=bbr#TUIC").unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].outbound_type, "hysteria2");
+        assert_eq!(nodes[0].fields["obfs"]["password"], "abc");
+        assert_eq!(nodes[0].fields["up_mbps"], 10);
+        assert_eq!(nodes[1].outbound_type, "tuic");
+        assert_eq!(nodes[1].fields["uuid"], "uuid");
+        assert_eq!(nodes[1].fields["tls"]["server_name"], "tls.example");
+        assert!(
+            adapt(b"hy2://@node.example:443\ntuic://uuid@node.example:443")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_vmess_json_string_aid_and_overflow_port() {
+        let vmess = serde_json::json!({
+            "ps": "test", "add": "proxy.example", "port": "443", "id": "uuid", "aid": "5"
+        });
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            vmess.to_string(),
+        );
+        let nodes = adapt(format!("vmess://{}", encoded).as_bytes()).unwrap();
+        assert_eq!(nodes[0].fields["server_port"], 443);
+        assert_eq!(nodes[0].fields["alter_id"], 5);
+
+        let vmess = serde_json::json!({
+            "ps": "overflow", "add": "proxy.example", "port": 65536, "id": "uuid", "aid": 65536
+        });
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            vmess.to_string(),
+        );
+        let nodes = adapt(format!("vmess://{}", encoded).as_bytes()).unwrap();
+        assert!(
+            nodes.is_empty(),
+            "nodes with out-of-range ports must be rejected"
+        );
+
+        let vmess = serde_json::json!({
+            "ps": "overflow-aid", "add": "proxy.example", "port": 443, "id": "uuid", "aid": 65536
+        });
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            vmess.to_string(),
+        );
+        let nodes = adapt(format!("vmess://{}", encoded).as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].fields["alter_id"], 0);
+    }
 
     #[test]
     fn test_adapt_raw_uris() {
@@ -858,5 +1324,71 @@ mod tests {
                 .unwrap(),
             "aka.ms"
         );
+    }
+
+    #[test]
+    fn test_adapt_socks5_and_http_uris() {
+        let uris = "socks5://user:pass@1.2.3.4:1080#MySocks\nhttp://admin:secret@5.6.7.8:8080#MyHttp\nhttps://9.10.11.12:8443#MyHttps";
+        let nodes = adapt(uris.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        // Socks5
+        assert_eq!(nodes[0].outbound_type, "socks");
+        assert_eq!(nodes[0].tag, "MySocks");
+        assert_eq!(nodes[0].fields["server"], "1.2.3.4");
+        assert_eq!(nodes[0].fields["server_port"], 1080);
+        assert_eq!(nodes[0].fields["version"], "5");
+        assert_eq!(nodes[0].fields["username"], "user");
+        assert_eq!(nodes[0].fields["password"], "pass");
+
+        // Plain HTTP
+        assert_eq!(nodes[1].outbound_type, "http");
+        assert_eq!(nodes[1].tag, "MyHttp");
+        assert_eq!(nodes[1].fields["server"], "5.6.7.8");
+        assert_eq!(nodes[1].fields["server_port"], 8080);
+        assert_eq!(nodes[1].fields["username"], "admin");
+        assert_eq!(nodes[1].fields["password"], "secret");
+        assert!(nodes[1].fields.get("tls").is_none());
+
+        // HTTPS with TLS
+        assert_eq!(nodes[2].outbound_type, "http");
+        assert_eq!(nodes[2].tag, "MyHttps");
+        assert_eq!(nodes[2].fields["server"], "9.10.11.12");
+        assert_eq!(nodes[2].fields["server_port"], 8443);
+        assert_eq!(nodes[2].fields["tls"]["enabled"], true);
+    }
+
+    #[test]
+    fn test_reality_without_fp_defaults_to_chrome_utls() {
+        let uri = "vless://00000000-0000-0000-0000-000000000000@server.example:443?security=reality&pbk=fakekey&sid=1234&sni=example.com#RealityNoFP";
+        let nodes = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 1);
+        let tls = &nodes[0].fields["tls"];
+        assert_eq!(tls["reality"]["enabled"], true);
+        assert_eq!(tls["reality"]["public_key"], "fakekey");
+        assert_eq!(tls["reality"]["short_id"], "1234");
+        assert_eq!(tls["utls"]["enabled"], true);
+        assert_eq!(tls["utls"]["fingerprint"], "chrome");
+    }
+
+    #[test]
+    fn test_grpc_and_h2_transport_options() {
+        let uris = "vless://00000000-0000-0000-0000-000000000000@server.example:443?type=grpc&serviceName=my-service#GrpcNode\nvless://00000000-0000-0000-0000-000000000000@server.example:443?type=http&path=%2Fh2path&host=h2.example.com#H2Node";
+        let nodes = adapt(uris.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 2);
+
+        // gRPC
+        let grpc_transport = &nodes[0].fields["transport"];
+        assert_eq!(grpc_transport["type"], "grpc");
+        assert_eq!(grpc_transport["service_name"], "my-service");
+        assert_eq!(grpc_transport["idle_timeout"], "15s");
+        assert_eq!(grpc_transport["ping_timeout"], "15s");
+        assert_eq!(grpc_transport["permit_without_stream"], true);
+
+        // H2
+        let h2_transport = &nodes[1].fields["transport"];
+        assert_eq!(h2_transport["type"], "http");
+        assert_eq!(h2_transport["path"], "/h2path");
+        assert_eq!(h2_transport["host"], serde_json::json!(["h2.example.com"]));
     }
 }

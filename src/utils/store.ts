@@ -35,6 +35,8 @@ export type RoutingRuleType =
 
 export type OutboundAction = 'proxy' | 'direct' | 'block' | 'dns';
 
+export type RoutingMode = 'sni_zero_data' | 'rule' | 'global' | 'direct';
+
 export interface RoutingRule {
   id: string;
   type: RoutingRuleType;
@@ -193,6 +195,8 @@ export interface Settings {
   dnsAddress: string;
   theme: ThemeMode;
   multiplex: boolean;
+  blockQuic: boolean;
+  routingMode: RoutingMode;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -240,6 +244,8 @@ export const DEFAULT_SETTINGS: Settings = {
 
   dnsAddress: '',
   multiplex: false,
+  blockQuic: false,
+  routingMode: 'rule',
 };
 
 const DEFAULT_ROUTING_RULES: RoutingRule[] = [

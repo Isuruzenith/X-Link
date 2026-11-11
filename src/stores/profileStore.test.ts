@@ -137,6 +137,21 @@ describe('subscription refresh', () => {
   });
 });
 
+describe('node switching failure', () => {
+  it('does not change selected node or metadata when hot switch fails', async () => {
+    native.mockImplementation(async (command) => {
+      if (command === 'switch_node_hot') throw new Error('Clash API unavailable');
+      return undefined;
+    });
+
+    await useProfileStore.getState().selectNode({ tag: 'new' });
+
+    expect(useProfileStore.getState().selectedNodeTag).toBe('old');
+    expect(useProfileStore.getState().profiles[0].selectedNodeTag).toBe('old');
+    expect(storeHelper.saveProfiles).not.toHaveBeenCalled();
+  });
+});
+
 describe('tray node events', () => {
   it('persists a valid tag only for the active profile', async () => {
     native.mockResolvedValue([{ tag: 'old' }, { tag: 'new' }]);

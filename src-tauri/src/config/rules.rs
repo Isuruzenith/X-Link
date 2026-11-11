@@ -26,7 +26,7 @@ pub struct OutboundGroup {
     pub tolerance: Option<u32>,
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingRule {
     pub id: String,
@@ -39,7 +39,7 @@ pub struct RoutingRule {
     pub enabled: Option<bool>,
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleSet {
     pub id: String,
@@ -170,9 +170,16 @@ pub fn build_singbox_rule(
     };
 
     if let Some(map) = obj.as_object_mut() {
-        if map.get("outbound").and_then(|v| v.as_str()) == Some("block") {
-            map.remove("outbound");
-            map.insert("action".to_string(), serde_json::json!("reject"));
+        match map.get("outbound").and_then(|v| v.as_str()) {
+            Some("block") => {
+                map.remove("outbound");
+                map.insert("action".to_string(), serde_json::json!("reject"));
+            }
+            Some("dns") => {
+                map.remove("outbound");
+                map.insert("action".to_string(), serde_json::json!("hijack-dns"));
+            }
+            _ => {}
         }
         if invert {
             map.insert("invert".to_string(), serde_json::json!(true));

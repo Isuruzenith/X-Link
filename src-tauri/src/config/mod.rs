@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::net::IpAddr;
 
+use crate::state::RoutingMode;
+
 pub mod adapters;
 pub mod generator;
 pub mod rules;
@@ -86,17 +88,25 @@ pub fn build_route_rules(
     geosite_db_exists: bool,
     geoip_db_exists: bool,
     outbound_groups: &[crate::config::rules::OutboundGroup],
+    routing_mode: RoutingMode,
 ) -> Vec<Value> {
-    let mut rules = vec![serde_json::json!({ "port": 53, "action": "hijack-dns" })];
+    let mut rules = Vec::new();
 
+    // Rule 1: Protocol & SNI Sniffer (must come before hijack-dns so DNS is sniffed first)
     if sniff_enabled {
         rules.push(serde_json::json!({
             "action": "sniff",
-            "sniffer": ["http", "tls", "quic"]
+            "timeout": "300ms"
         }));
     }
 
-    if bypass_lan {
+    // Rule 2: DNS Hijacker (uses sniffed protocol, not port-based matching)
+    rules.push(serde_json::json!({ "protocol": "dns", "action": "hijack-dns" }));
+
+    // In SniZeroData mode, suppress LAN-direct rules to prevent unbilled data leaks
+    let effective_bypass_lan = bypass_lan && routing_mode != RoutingMode::SniZeroData;
+
+    if effective_bypass_lan {
         // Native, database-free private-network matching (no geoip/geosite
         // resource files required, unlike the deprecated geoip/geosite fields).
         rules.push(serde_json::json!({ "ip_is_private": true, "outbound": "direct" }));
@@ -109,6 +119,10 @@ pub fn build_route_rules(
     // User-defined rules evaluated top-to-bottom
     for rule in user_rules {
         if rule.enabled.unwrap_or(true) {
+            // In SniZeroData mode, suppress user "direct" rules to prevent unbilled data leaks
+            if routing_mode == RoutingMode::SniZeroData && rule.outbound == "direct" {
+                continue;
+            }
             if let Some(json_rule) = crate::config::rules::build_singbox_rule(
                 rule,
                 geosite_db_exists,
@@ -120,6 +134,45 @@ pub fn build_route_rules(
         }
     }
 
+    rules
+}
+
+/// Keep QUIC rejection ahead of custom routing rules while preserving the older rule-builder API.
+pub fn build_route_rules_with_quic(
+    bypass_lan: bool,
+    sniff_enabled: bool,
+    block_quic: bool,
+    user_rules: &[crate::config::rules::RoutingRule],
+    rule_sets: &[crate::config::rules::RuleSet],
+    geosite_db_exists: bool,
+    geoip_db_exists: bool,
+    outbound_groups: &[crate::config::rules::OutboundGroup],
+    routing_mode: RoutingMode,
+) -> Vec<Value> {
+    let mut rules = build_route_rules(
+        bypass_lan,
+        sniff_enabled,
+        user_rules,
+        rule_sets,
+        geosite_db_exists,
+        geoip_db_exists,
+        outbound_groups,
+        routing_mode,
+    );
+    // In SniZeroData mode, always force QUIC block regardless of user setting
+    let effective_block_quic = block_quic || routing_mode == RoutingMode::SniZeroData;
+    if effective_block_quic {
+        // Insert QUIC reject rules after sniff+hijack-dns but before LAN/user rules
+        let index = if sniff_enabled { 2 } else { 1 };
+        rules.insert(
+            index,
+            serde_json::json!({ "protocol": "quic", "action": "reject" }),
+        );
+        rules.insert(
+            index + 1,
+            serde_json::json!({ "network": "udp", "port": 443, "action": "reject" }),
+        );
+    }
     rules
 }
 
@@ -592,6 +645,47 @@ mod tests {
     }
 
     #[test]
+    fn test_build_route_rules_with_quic_enabled() {
+        let rules = build_route_rules_with_quic(
+            false,
+            true,
+            true,
+            &[],
+            &[],
+            false,
+            false,
+            &[],
+            RoutingMode::Rule,
+        );
+        // Order: sniff, hijack-dns, quic reject, udp/443 reject
+        assert_eq!(rules[0]["action"], "sniff");
+        assert_eq!(rules[1]["action"], "hijack-dns");
+        assert_eq!(
+            rules[2],
+            serde_json::json!({"protocol":"quic","action":"reject"})
+        );
+        assert_eq!(
+            rules[3],
+            serde_json::json!({"network":"udp","port":443,"action":"reject"})
+        );
+        assert_eq!(
+            build_route_rules_with_quic(
+                false,
+                false,
+                false,
+                &[],
+                &[],
+                false,
+                false,
+                &[],
+                RoutingMode::Rule,
+            )
+            .len(),
+            1 // just hijack-dns
+        );
+    }
+
+    #[test]
     fn test_build_route_rules_respects_user_rules_and_does_not_auto_route_rule_sets() {
         let user_rules = vec![crate::config::rules::RoutingRule {
             id: "r1".to_string(),
@@ -613,9 +707,18 @@ mod tests {
             update_interval: "1d".to_string(),
         }];
 
-        let rules = build_route_rules(true, true, &user_rules, &rule_sets, true, true, &[]);
+        let rules = build_route_rules(
+            true,
+            true,
+            &user_rules,
+            &rule_sets,
+            true,
+            true,
+            &[],
+            RoutingMode::Rule,
+        );
 
-        // rules should contain hijack-dns (port 53), sniff, bypass_lan (ip_is_private & domain_suffix),
+        // rules should contain sniff, hijack-dns (protocol dns), bypass_lan (ip_is_private & domain_suffix),
         // and our user rule (custom-bypass.com).
         // It must NOT contain any auto-generated rule-set routing rules for "geosite-youtube"!
 
@@ -634,6 +737,92 @@ mod tests {
                 .unwrap_or(false)
         });
         assert!(auto_ruleset_rule.is_none());
+    }
+
+    #[test]
+    fn test_sni_zero_data_routing_mode_enforces_safety_constraints() {
+        let user_rules = vec![
+            crate::config::rules::RoutingRule {
+                id: "r1".to_string(),
+                rule_type: "domain".to_string(),
+                value: "direct-leak.com".to_string(),
+                outbound: "direct".to_string(),
+                invert: false,
+                notes: None,
+                enabled: Some(true),
+            },
+            crate::config::rules::RoutingRule {
+                id: "r2".to_string(),
+                rule_type: "domain".to_string(),
+                value: "proxy-safe.com".to_string(),
+                outbound: "proxy".to_string(),
+                invert: false,
+                notes: None,
+                enabled: Some(true),
+            },
+        ];
+
+        // In SniZeroData mode:
+        // 1. bypass_lan (LAN direct rules) must be suppressed even if requested
+        // 2. User direct rules must be suppressed
+        // 3. User proxy rules must remain
+        // 4. QUIC block must be forced even if block_quic is false
+        let rules = build_route_rules_with_quic(
+            true, // bypass_lan requested
+            true,
+            false, // block_quic disabled
+            &user_rules,
+            &[],
+            false,
+            false,
+            &[],
+            RoutingMode::SniZeroData,
+        );
+
+        // Check rule 1: sniff
+        assert_eq!(rules[0]["action"], "sniff");
+        // Check rule 2: hijack-dns
+        assert_eq!(rules[1]["action"], "hijack-dns");
+        // Check rule 3 & 4: QUIC block forced
+        assert_eq!(
+            rules[2],
+            serde_json::json!({"protocol":"quic","action":"reject"})
+        );
+        assert_eq!(
+            rules[3],
+            serde_json::json!({"network":"udp","port":443,"action":"reject"})
+        );
+
+        // Ensure no LAN bypass rules are present
+        let has_lan_private_ip = rules.iter().any(|r| r.get("ip_is_private").is_some());
+        assert!(
+            !has_lan_private_ip,
+            "SniZeroData mode must suppress LAN ip_is_private rules to prevent unbilled leaks"
+        );
+
+        // Ensure user direct rule is suppressed
+        let has_direct_leak = rules.iter().any(|r| {
+            r.get("domain")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v.as_str() == Some("direct-leak.com")))
+                .unwrap_or(false)
+        });
+        assert!(
+            !has_direct_leak,
+            "SniZeroData mode must suppress user direct rules"
+        );
+
+        // Ensure user proxy rule is kept
+        let has_proxy_safe = rules.iter().any(|r| {
+            r.get("domain")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v.as_str() == Some("proxy-safe.com")))
+                .unwrap_or(false)
+        });
+        assert!(
+            has_proxy_safe,
+            "SniZeroData mode must preserve user proxy rules"
+        );
     }
 
     #[test]

@@ -40,11 +40,34 @@ pub fn detect_format(raw: &[u8]) -> SubscriptionFormat {
         || trimmed.contains("vless://")
         || trimmed.contains("ss://")
         || trimmed.contains("trojan://")
+        || trimmed.contains("hysteria2://")
+        || trimmed.contains("hy2://")
+        || trimmed.contains("tuic://")
+        || trimmed.contains("wireguard://")
+        || trimmed.contains("wg://")
+        || trimmed.contains("socks5://")
+        || trimmed.contains("socks://")
+        || trimmed.contains("http://")
+        || trimmed.contains("https://")
     {
         return SubscriptionFormat::RawUriList;
     }
 
     SubscriptionFormat::Unknown
+}
+
+pub fn sanitize_node(node: &mut SingBoxOutbound) {
+    if let Some(Value::String(server)) = node.fields.get("server") {
+        let trimmed = server.trim();
+        let bare = trimmed
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(trimmed);
+        if bare != server {
+            node.fields
+                .insert("server".to_string(), Value::String(bare.to_string()));
+        }
+    }
 }
 
 pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
@@ -72,7 +95,7 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
         }
     };
 
-    match detect_format(&decoded_bytes) {
+    let mut outbounds = match detect_format(&decoded_bytes) {
         SubscriptionFormat::SingBoxNative => {
             // Parse as full sing-box JSON and extract outbounds
             #[derive(serde::Deserialize)]
@@ -82,14 +105,20 @@ pub fn adapt(raw: &[u8]) -> Result<Vec<SingBoxOutbound>, String> {
             let config: SingboxConfig = serde_json::from_slice(&decoded_bytes)
                 .map_err(|e| format!("Failed to parse sing-box native JSON: {}", e))?;
 
-            Ok(config.outbounds.unwrap_or_default())
+            config.outbounds.unwrap_or_default()
         }
-        SubscriptionFormat::ClashYaml => clash::adapt(&decoded_bytes),
-        SubscriptionFormat::RawUriList => raw_uri::adapt(&decoded_bytes),
+        SubscriptionFormat::ClashYaml => clash::adapt(&decoded_bytes)?,
+        SubscriptionFormat::RawUriList => raw_uri::adapt(&decoded_bytes)?,
         SubscriptionFormat::Unknown => {
-            Err("subscription_format_unknown: Unsupported subscription format".to_string())
+            return Err("subscription_format_unknown: Unsupported subscription format".to_string())
         }
+    };
+
+    for outbound in &mut outbounds {
+        sanitize_node(outbound);
     }
+
+    Ok(outbounds)
 }
 
 #[cfg(test)]
@@ -112,5 +141,41 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].outbound_type, "shadowsocks");
         assert_eq!(res[0].tag, "Shadowsocks Node");
+    }
+
+    #[test]
+    fn test_sanitize_node_strips_ipv6_brackets() {
+        let mut outbound = SingBoxOutbound {
+            outbound_type: "vless".into(),
+            tag: "ipv6-bracketed".into(),
+            fields: {
+                let mut map = HashMap::new();
+                map.insert("server".into(), Value::String("[2606:4700:4700::1111]".into()));
+                map
+            },
+        };
+        sanitize_node(&mut outbound);
+        assert_eq!(
+            outbound.fields.get("server").and_then(Value::as_str),
+            Some("2606:4700:4700::1111")
+        );
+    }
+
+    #[test]
+    fn test_sanitize_node_preserves_clean_hosts() {
+        let mut outbound = SingBoxOutbound {
+            outbound_type: "vmess".into(),
+            tag: "normal-node".into(),
+            fields: {
+                let mut map = HashMap::new();
+                map.insert("server".into(), Value::String("1.1.1.1".into()));
+                map
+            },
+        };
+        sanitize_node(&mut outbound);
+        assert_eq!(
+            outbound.fields.get("server").and_then(Value::as_str),
+            Some("1.1.1.1")
+        );
     }
 }

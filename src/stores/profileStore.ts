@@ -47,6 +47,27 @@ export interface ImportPreview {
   sampleNodes: string[];
 }
 
+export interface ConfigPreviewResult {
+  config: Record<string, unknown>;
+  isValid: boolean;
+  validationErrors: string[];
+}
+
+export interface PersistedStorePayload {
+  profiles: Array<{
+    id: string;
+    name: string;
+    type?: string;
+    subscriptionUrl?: string | null;
+    updatedAt: number;
+    nodeCount: number;
+    selectedNodeTag?: string | null;
+  }>;
+  activeProfileId: string | null;
+  selectedNodeId: string | null;
+  settings: Record<string, unknown>;
+}
+
 interface ProfileState {
   // Multi-profile state
   profiles: Profile[];
@@ -112,11 +133,18 @@ interface ProfileState {
   deleteNode: (tag: string) => Promise<void>;
   fetchNodeGeo: (server: string, tag: string) => Promise<void>;
   clearNodeGeoCache: () => void;
+  hydrateFromBackend: () => Promise<void>;
+  bulkApplyBugHost: (bugHost: string, mode: 'disabled' | 'sni_spoof' | 'cdn_fronting') => Promise<number>;
+  previewSingboxConfig: () => Promise<ConfigPreviewResult>;
 }
 
 const detectNameFromContent = (text: string): string => {
   const trimmedText = text.trim();
-  if (trimmedText.startsWith('vless://') || trimmedText.startsWith('vmess://') || trimmedText.startsWith('trojan://') || trimmedText.startsWith('ss://')) {
+  const knownPrefixes = [
+    'vless://', 'vmess://', 'trojan://', 'ss://', 'hysteria2://', 'hy2://',
+    'tuic://', 'wireguard://', 'wg://', 'socks5://', 'socks://', 'http://', 'https://'
+  ];
+  if (knownPrefixes.some(prefix => trimmedText.startsWith(prefix))) {
     if (trimmedText.startsWith('vmess://')) {
       try {
         let b64 = trimmedText.replace('vmess://', '').trim();
@@ -314,19 +342,10 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     const logStore = useLogStore.getState();
     const connectionStore = useConnectionStore.getState();
 
-    set({ selectedNodeTag: node.tag, activatingNodeTag: node.tag });
+    set({ activatingNodeTag: node.tag });
 
     try {
-      // Update the target profile's selectedNodeTag
-      if (targetProfileId) {
-        const updatedProfiles = profiles.map((p) =>
-          p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
-        );
-        set({ profiles: updatedProfiles });
-        await storeHelper.saveProfiles(updatedProfiles);
-      }
-
-      // Node-wise profile activation
+      // Perform native switching before changing frontend selection or persisted metadata.
       if (targetProfileId && targetProfileId !== activeProfileId) {
         const targetProfileName = profiles.find((p) => p.id === targetProfileId)?.name || 'Unknown';
         logStore.pushSystemLog(`Activating profile "${targetProfileName}"...`);
@@ -334,18 +353,22 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         await storeHelper.setActiveProfileId(targetProfileId);
         set({ activeProfileId: targetProfileId });
       } else if (connectionStore.isConnected) {
-        const apiEnabled = useSettingsStore.getState().settings.apiEnabled;
-        if (!apiEnabled) {
-          logStore.pushSystemLog(`Clash API is disabled. Reconnecting to switch active node to "${node.tag}"...`);
-          useToastStore.getState().addToast('warning', `Clash API is disabled. Reconnecting to switch server to "${node.tag}"...`, 'Reconnecting');
-        } else {
-          logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
-        }
+        logStore.pushSystemLog(`Switching active node to "${node.tag}"...`);
         await invoke('switch_node_hot', { tag: node.tag });
         logStore.pushSystemLog(`Successfully switched to "${node.tag}".`);
       }
+
+      if (targetProfileId) {
+        const updatedProfiles = get().profiles.map((p) =>
+          p.id === targetProfileId ? { ...p, selectedNodeTag: node.tag } : p
+        );
+        await storeHelper.saveProfiles(updatedProfiles);
+        set({ profiles: updatedProfiles });
+      }
+      set({ selectedNodeTag: node.tag });
     } catch (err) {
       logStore.pushSystemLog(`Failed to switch: ${err}`);
+      useToastStore.getState().addToast('error', String(err), 'Node Switch Failed');
     } finally {
       set({ activatingNodeTag: null });
     }
@@ -863,5 +886,63 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       : `set to every ${intervalMinutes >= 60 ? `${intervalMinutes / 60}h` : `${intervalMinutes}m`}`;
     useLogStore.getState().pushSystemLog(`Auto-update for profile "${profile.name}" ${label}.`);
     useToastStore.getState().addToast('info', `Auto-update ${label} for "${profile.name}".`, 'Auto-update Updated');
+  },
+
+  hydrateFromBackend: async () => {
+    try {
+      const persisted = await invoke<PersistedStorePayload>('get_persisted_state');
+      if (persisted && Array.isArray(persisted.profiles)) {
+        const mappedProfiles: Profile[] = persisted.profiles.map((p) => ({
+          id: p.id,
+          name: p.name,
+          type: (p.type || 'manual') as Profile['type'],
+          importedAt: p.updatedAt,
+          lastUpdated: p.updatedAt,
+          nodeCount: p.nodeCount,
+          selectedNodeTag: p.selectedNodeTag ?? null,
+          subscriptionUrl: p.subscriptionUrl ?? undefined,
+        }));
+
+        set({
+          profiles: mappedProfiles,
+          activeProfileId: persisted.activeProfileId,
+          selectedProfileId: persisted.activeProfileId,
+          selectedNodeTag: persisted.selectedNodeId ?? null,
+        });
+
+        if (persisted.activeProfileId) {
+          await get().refreshNodes(persisted.activeProfileId);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to hydrate state from backend:', err);
+    }
+  },
+
+  bulkApplyBugHost: async (bugHost: string, mode: 'disabled' | 'sni_spoof' | 'cdn_fronting') => {
+    const logStore = useLogStore.getState();
+    try {
+      logStore.pushSystemLog(`Applying bug host "${bugHost}" (${mode})...`);
+      const count = await invoke<number>('bulk_apply_bug_host', { bugHost, mode });
+      logStore.pushSystemLog(`Successfully updated bug host across ${count} outbounds.`);
+      useToastStore.getState().addToast(
+        'success',
+        `Applied bug host "${bugHost}" to ${count} outbounds.`,
+        'Bug Host Applied'
+      );
+      const activeId = get().activeProfileId;
+      if (activeId) {
+        await get().refreshNodes(activeId);
+      }
+      return count;
+    } catch (err) {
+      logStore.pushSystemLog(`Failed to apply bug host: ${err}`);
+      useToastStore.getState().addToast('error', `Failed to apply bug host: ${err}`, 'Bug Host Error');
+      throw err;
+    }
+  },
+
+  previewSingboxConfig: async (): Promise<ConfigPreviewResult> => {
+    return await invoke<ConfigPreviewResult>('preview_singbox_config');
   },
 }));

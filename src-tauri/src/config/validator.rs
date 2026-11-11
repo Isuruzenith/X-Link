@@ -1,13 +1,14 @@
 use crate::config::adapters::SingBoxOutbound;
 use crate::config::rules::{OutboundGroup, OutboundGroupType};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use tauri::AppHandle;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
-pub const RESERVED_OUTBOUND_TAGS: &[&str] = &["proxy", "direct", "block", "dns"];
+pub const RESERVED_OUTBOUND_TAGS: &[&str] = &["proxy", "auto", "direct", "block", "dns"];
 pub const MAX_AUTOMATED_GROUP_NODES: usize = 10;
 pub const MIN_HEALTH_CHECK_INTERVAL_SECS: u64 = 300;
 
@@ -334,6 +335,87 @@ pub fn validate_detour_graph(
     Ok(())
 }
 
+/// Check local invariants before invoking the sidecar. Warnings do not block imports.
+pub fn validate_profile_and_config(
+    mixed_port: u16,
+    clash_api_port: Option<u16>,
+    outbounds: &[SingBoxOutbound],
+    config: &Value,
+    sni_zero_data: bool,
+) -> Result<Vec<String>, String> {
+    if mixed_port == 0 || clash_api_port == Some(mixed_port) {
+        return Err("Invalid or conflicting mixed and Clash API ports".into());
+    }
+    for key in ["outbounds", "inbounds", "dns", "route"] {
+        if config.get(key).is_none_or(Value::is_null) {
+            return Err(format!("Configuration is missing required section '{key}'"));
+        }
+    }
+    if config["outbounds"].as_array().is_none_or(Vec::is_empty)
+        || config["inbounds"].as_array().is_none_or(Vec::is_empty)
+        || !config["dns"].is_object()
+        || !config["route"].is_object()
+    {
+        return Err("Configuration has invalid or empty required sections".into());
+    }
+
+    let mut warnings = Vec::new();
+    for outbound in outbounds {
+        if !matches!(
+            outbound.outbound_type.as_str(),
+            "vless" | "vmess" | "trojan" | "shadowsocks" | "hysteria2" | "tuic" | "wireguard"
+        ) {
+            continue;
+        }
+        let server = outbound
+            .fields
+            .get("server")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let port = outbound
+            .fields
+            .get("server_port")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if server.trim().is_empty() || port == 0 || port > u16::MAX as u64 {
+            return Err(format!(
+                "Node '{}' has an invalid server or port",
+                outbound.tag
+            ));
+        }
+        if sni_zero_data {
+            let has_host = [
+                outbound
+                    .fields
+                    .get("tls")
+                    .and_then(|v| v.get("server_name"))
+                    .and_then(Value::as_str),
+                outbound
+                    .fields
+                    .get("transport")
+                    .and_then(|v| v.get("host"))
+                    .and_then(Value::as_str),
+                outbound
+                    .fields
+                    .get("transport")
+                    .and_then(|v| v.get("headers"))
+                    .and_then(|v| v.get("Host"))
+                    .and_then(Value::as_str),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|host| !host.trim().is_empty());
+            if !has_host {
+                warnings.push(format!(
+                    "Node '{}' has no SNI or transport host",
+                    outbound.tag
+                ));
+            }
+        }
+    }
+    Ok(warnings)
+}
+
 pub async fn validate_singbox_config(app: &AppHandle, config_path: &Path) -> Result<(), String> {
     // Verify sing-box sidecar binary version compatibility before validating config
     crate::commands::system::ensure_sidecar_compatible(app)
@@ -389,6 +471,43 @@ mod tests {
             tag: tag.to_string(),
             fields,
         }
+    }
+
+    #[test]
+    fn test_static_profile_validation_rejects_invalid_nodes_and_ports() {
+        let valid = make_node("node", "vless", None);
+        let config = serde_json::json!({
+            "outbounds": [{"type": "vless"}],
+            "inbounds": [{"type": "mixed"}],
+            "dns": {},
+            "route": {}
+        });
+        assert!(
+            validate_profile_and_config(7892, Some(9090), &[valid.clone()], &config, false).is_ok()
+        );
+        assert!(
+            validate_profile_and_config(7892, Some(7892), &[valid.clone()], &config, false)
+                .is_err()
+        );
+        let mut invalid = valid.clone();
+        invalid
+            .fields
+            .insert("server_port".into(), serde_json::json!(0));
+        assert!(validate_profile_and_config(7892, None, &[invalid], &config, false).is_err());
+        assert!(validate_profile_and_config(
+            7892,
+            None,
+            &[valid.clone()],
+            &serde_json::json!({"outbounds": []}),
+            false
+        )
+        .is_err());
+        assert_eq!(
+            validate_profile_and_config(7892, None, &[valid], &config, true)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -460,7 +579,7 @@ mod tests {
     #[test]
     fn test_reserved_group_tags_and_collisions_rejected() {
         let nodes = vec![make_node("sg-01", "vless", None)];
-        for reserved in ["proxy", "direct", "block", "dns"] {
+        for reserved in ["proxy", "auto", "direct", "block", "dns"] {
             let group = OutboundGroup {
                 id: "g1".into(),
                 tag: reserved.into(),

@@ -46,6 +46,8 @@ pub fn load_tun_settings(app: &tauri::AppHandle) -> TunSettings {
         fakeip_filter: s.fakeip_filter.clone(),
         dns_leak_protection: s.dns_leak_protection,
         multiplex: s.multiplex,
+        block_quic: s.block_quic,
+        routing_mode: s.routing_mode,
     }
 }
 
@@ -476,7 +478,8 @@ fn ingest_singbox_log_line(state: &crate::state::ProxyState, app: &tauri::AppHan
         state.push_trace(trace_entry);
     }
     state.push_log(text.clone());
-    let _ = app.emit("sing-box-log", text);
+    let _ = app.emit("sing-box-log", text.clone());
+    let _ = app.emit("singbox-log", text);
 }
 
 fn spawn_singbox_sidecar(
@@ -793,19 +796,26 @@ async fn probe_via_http_proxy(port: u16) -> Result<(), String> {
         .build()
         .map_err(|e| format!("HTTP proxy probe setup failed: {}", e))?;
 
-    client
-        .get(HEALTH_CHECK_URL)
-        .send()
-        .await
-        .map_err(|e| {
-            format!(
-                "HTTP proxy probe failed: node/outbound/config did not carry HTTPS traffic ({})",
-                e
-            )
-        })?
-        .error_for_status()
-        .map(|_| ())
-        .map_err(|e| format!("HTTP proxy probe failed: upstream returned {}", e))
+    let primary_res = client.get(HEALTH_CHECK_URL).send().await;
+    match primary_res {
+        Ok(resp) => {
+            if resp.status().is_success() || resp.status().as_u16() == 204 {
+                return Ok(());
+            }
+        }
+        Err(_) => {
+            // Attempt fallback health check URL if primary is blocked or times out
+            if let Ok(resp) = client.get(HEALTH_CHECK_FALLBACK_URL).send().await {
+                if resp.status().is_success() || resp.status().as_u16() == 204 {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(
+        "HTTP proxy probe failed: node/outbound/config did not carry HTTPS traffic (error sending request to health check endpoints)".to_string(),
+    )
 }
 
 async fn probe_via_tun_route() -> Result<(), String> {
@@ -815,19 +825,25 @@ async fn probe_via_tun_route() -> Result<(), String> {
         .build()
         .map_err(|e| format!("TUN probe client failed: {}", e))?;
 
-    client
-        .get(HEALTH_CHECK_URL)
-        .send()
-        .await
-        .map_err(|e| {
-            format!(
-                "TUN probe failed: OS traffic did not traverse TUN successfully ({})",
-                e
-            )
-        })?
-        .error_for_status()
-        .map(|_| ())
-        .map_err(|e| format!("TUN probe failed: upstream returned {}", e))
+    let primary_res = client.get(HEALTH_CHECK_URL).send().await;
+    match primary_res {
+        Ok(resp) => {
+            if resp.status().is_success() || resp.status().as_u16() == 204 {
+                return Ok(());
+            }
+        }
+        Err(_) => {
+            if let Ok(resp) = client.get(HEALTH_CHECK_FALLBACK_URL).send().await {
+                if resp.status().is_success() || resp.status().as_u16() == 204 {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(
+        "TUN probe failed: OS traffic did not traverse TUN successfully (error sending request to health check endpoints)".to_string(),
+    )
 }
 
 async fn run_startup_health_checks(port: u16, proxy_mode: &str) -> Result<(), String> {
@@ -835,155 +851,6 @@ async fn run_startup_health_checks(port: u16, proxy_mode: &str) -> Result<(), St
     if proxy_mode == "tun" {
         probe_via_tun_route().await?;
     }
-    Ok(())
-}
-
-fn patch_config_for_fallback(config_path: &std::path::Path, attempt: usize) -> Result<(), String> {
-    let content = std::fs::read_to_string(config_path)
-        .map_err(|e| format!("Failed to read active config for fallback patching: {}", e))?;
-    let mut config_val: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse active config for fallback patching: {}", e))?;
-
-    match attempt {
-        1 => {
-            // Attempt 2 (attempt = 1): Firefox uTLS fingerprint
-            if let Some(outbounds) = config_val
-                .get_mut("outbounds")
-                .and_then(|o| o.as_array_mut())
-            {
-                for outbound in outbounds {
-                    let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    if ob_type == "vless" || ob_type == "vmess" || ob_type == "trojan" {
-                        if let Some(tls) = outbound.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut())
-                            {
-                                utls.insert("enabled".to_string(), serde_json::Value::Bool(true));
-                                utls.insert(
-                                    "fingerprint".to_string(),
-                                    serde_json::json!("firefox"),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        2 => {
-            // Attempt 3 (attempt = 2): Disable uTLS completely (Native Go TLS)
-            if let Some(outbounds) = config_val
-                .get_mut("outbounds")
-                .and_then(|o| o.as_array_mut())
-            {
-                for outbound in outbounds {
-                    let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    if ob_type == "vless" || ob_type == "vmess" || ob_type == "trojan" {
-                        if let Some(tls) = outbound.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                            if let Some(utls) = tls.get_mut("utls").and_then(|u| u.as_object_mut())
-                            {
-                                utls.insert("enabled".to_string(), serde_json::Value::Bool(false));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        3 => {
-            // Attempt 4 (attempt = 3): DNS Fallback (Switch DNS rules resolving proxy domains to direct query via public bootstrap dns)
-            // First, add public DNS servers detoured direct using modern sing-box typed format
-            if let Some(dns) = config_val.get_mut("dns").and_then(|d| d.as_object_mut()) {
-                if let Some(servers) = dns.get_mut("servers").and_then(|s| s.as_array_mut()) {
-                    // Update local-dns to point to fallback public DNS
-                    for server in servers.iter_mut() {
-                        if server.get("tag").and_then(|t| t.as_str()) == Some("local-dns") {
-                            *server = crate::config::generator::parse_dns_server(
-                                "local-dns",
-                                FALLBACK_DNS_PRIMARY,
-                                Some("direct"),
-                            );
-                        }
-                    }
-
-                    // Add bootstrap-dns tags if not already present
-                    if !servers.iter().any(|s| {
-                        s.get("tag").and_then(|t| t.as_str()) == Some("fallback-bootstrap-1")
-                    }) {
-                        servers.push(crate::config::generator::parse_dns_server(
-                            "fallback-bootstrap-1",
-                            FALLBACK_DNS_PRIMARY,
-                            Some("direct"),
-                        ));
-                        servers.push(crate::config::generator::parse_dns_server(
-                            "fallback-bootstrap-2",
-                            FALLBACK_DNS_SECONDARY,
-                            Some("direct"),
-                        ));
-                    }
-                }
-
-                // Point proxy domain resolution rule to our fallback public DNS instead of local-dns
-                if let Some(rules) = dns.get_mut("rules").and_then(|r| r.as_array_mut()) {
-                    for rule in rules {
-                        // Find rule containing domain list
-                        if rule.get("domain").is_some() {
-                            rule["server"] = serde_json::json!("fallback-bootstrap-1");
-                        }
-                    }
-                }
-            }
-
-            // Ensure route.default_domain_resolver points to the fallback DNS
-            if let Some(route) = config_val.get_mut("route").and_then(|r| r.as_object_mut()) {
-                route.insert(
-                    "default_domain_resolver".to_string(),
-                    serde_json::json!("fallback-bootstrap-1"),
-                );
-            }
-
-            // Explicitly set domain_resolver on outbound proxy nodes so node dialling uses fallback DNS
-            if let Some(outbounds) = config_val
-                .get_mut("outbounds")
-                .and_then(|o| o.as_array_mut())
-            {
-                for outbound in outbounds {
-                    let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                    if ob_type != "direct" && ob_type != "block" && ob_type != "dns" {
-                        outbound["domain_resolver"] = serde_json::json!("fallback-bootstrap-1");
-                    }
-                }
-            }
-
-            // Ensure fallback DNS IPs are excluded from TUN interface routing
-            if let Some(inbounds) = config_val
-                .get_mut("inbounds")
-                .and_then(|i| i.as_array_mut())
-            {
-                for inbound in inbounds {
-                    if inbound.get("type").and_then(|t| t.as_str()) == Some("tun") {
-                        if let Some(excludes) = inbound
-                            .get_mut("route_exclude_address")
-                            .and_then(|e| e.as_array_mut())
-                        {
-                            let fb1 = serde_json::json!(format!("{}/32", FALLBACK_DNS_PRIMARY));
-                            let fb2 = serde_json::json!(format!("{}/32", FALLBACK_DNS_SECONDARY));
-                            if !excludes.contains(&fb1) {
-                                excludes.push(fb1);
-                            }
-                            if !excludes.contains(&fb2) {
-                                excludes.push(fb2);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    std::fs::write(
-        config_path,
-        serde_json::to_string_pretty(&config_val).unwrap(),
-    )
-    .map_err(|e| format!("Failed to write fallback config: {}", e))?;
     Ok(())
 }
 
@@ -1094,6 +961,7 @@ pub async fn prepare_and_patch_config(
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
     let requested_mode = mode_override.unwrap_or(&settings.proxy_mode);
+    validate_proxy_mode_for_routing(settings.routing_mode, requested_mode)?;
 
     if requested_mode == "tun" {
         match crate::os::get_network_manager().check_tun_support().await {
@@ -1122,40 +990,6 @@ pub async fn prepare_and_patch_config(
 
     let listen_address = if wifi_sharing { "0.0.0.0" } else { "127.0.0.1" };
     let config_path = crate::commands::config::get_active_config_path(app)?;
-
-    // Write a default valid config if the file doesn't exist
-    if !config_path.exists() {
-        let mixed_port = settings.mixed_port;
-        let default_config = format!(
-            r#"{{
-  "log": {{
-    "level": "info",
-    "timestamp": true
-  }},
-  "inbounds": [
-    {{
-      "type": "mixed",
-      "tag": "mixed-in",
-      "listen": "127.0.0.1",
-      "listen_port": {}
-    }}
-  ],
-  "outbounds": [
-    {{ "type": "direct", "tag": "direct" }}
-  ],
-  "route": {{
-    "rules": [
-      {{ "ip_is_private": true, "outbound": "direct" }}
-    ],
-    "final": "direct",
-    "auto_detect_interface": true
-  }}
-}}"#,
-            mixed_port
-        );
-        std::fs::write(&config_path, default_config)
-            .map_err(|e| format!("Failed to write default config: {}", e))?;
-    }
 
     // Get the active profile ID and load its outbounds instead of reading the stale/fallback active.json
     let active_profile_id =
@@ -1202,7 +1036,7 @@ pub async fn prepare_and_patch_config(
     // Generate a clean sing-box config from scratch
     let generated_config = crate::config::generator::generate_singbox_config(
         mixed_port,
-        node_outbounds,
+        node_outbounds.clone(),
         &proxy_mode,
         &dns_address,
         listen_address,
@@ -1217,6 +1051,17 @@ pub async fn prepare_and_patch_config(
 
     let mut final_config_val: serde_json::Value = serde_json::from_str(&generated_config)
         .map_err(|e| format!("Generated config is invalid JSON: {}", e))?;
+
+    let warnings = crate::config::validator::validate_profile_and_config(
+        mixed_port,
+        settings.api_enabled.then_some(settings.api_port),
+        &node_outbounds,
+        &final_config_val,
+        settings.routing_mode == crate::state::RoutingMode::SniZeroData,
+    )?;
+    for warning in warnings {
+        log::warn!("Configuration warning: {}", warning);
+    }
 
     // Inject Clash API experimental settings if enabled and authenticated
     if let Some(clash_api) = build_clash_api_config(
@@ -1245,12 +1090,14 @@ pub async fn prepare_and_patch_config(
     }
 
     // Safe Overwrite (Transactional Write): Validate first
-    let temp_config_path = config_path.with_extension("json.tmp");
-    std::fs::write(
-        &temp_config_path,
-        serde_json::to_string_pretty(&final_config_val).unwrap(),
-    )
-    .map_err(|e| format!("Failed to write temporary config: {}", e))?;
+    let temp_config_path = config_path.with_file_name(format!(
+        "active.{}.json.tmp",
+        uuid::Uuid::new_v4()
+    ));
+    let candidate_bytes = serde_json::to_vec_pretty(&final_config_val)
+        .map_err(|e| format!("Failed to serialize candidate config: {e}"))?;
+    std::fs::write(&temp_config_path, &candidate_bytes)
+        .map_err(|e| format!("Failed to write temporary config: {e}"))?;
 
     // Perform validation check
     if let Err(err) =
@@ -1260,9 +1107,13 @@ pub async fn prepare_and_patch_config(
         return Err(format!("Configuration check failed: {}", err));
     }
 
-    // Overwrite the original active.json only if validation passes
-    std::fs::rename(&temp_config_path, &config_path)
-        .map_err(|e| format!("Failed to finalize active config write: {}", e))?;
+    // Commit only the bytes checked above; keep a recoverable previous config
+    // if activation fails on an existing Windows target.
+    let commit_result = crate::commands::config::commit_validated_config(&temp_config_path, &config_path);
+    if commit_result.is_err() {
+        let _ = std::fs::remove_file(&temp_config_path);
+    }
+    commit_result?;
 
     Ok((config_path, proxy_mode, api_port, api_secret))
 }
@@ -1343,6 +1194,16 @@ async fn switch_selector_node_via_api(
     Ok(())
 }
 
+fn validate_proxy_mode_for_routing(
+    routing_mode: crate::state::RoutingMode,
+    requested_mode: &str,
+) -> Result<(), String> {
+    if routing_mode == crate::state::RoutingMode::SniZeroData && requested_mode != "tun" {
+        return Err("SNI zero-data routing requires TUN; system proxy fallback is forbidden".to_string());
+    }
+    Ok(())
+}
+
 /// Switch the active node via the Clash API without restarting sing-box.
 /// Falls back to a full config reload if the API call fails or the API is disabled.
 #[tauri::command]
@@ -1360,8 +1221,19 @@ pub async fn switch_node_hot(
     let api_port = settings.api_port;
     let api_secret = settings.api_secret.clone();
     let api_enabled = settings.api_enabled && !api_secret.trim().is_empty();
+    let connected = state.get_status() == crate::state::ConnectionStatus::Connected;
+    if connected && settings.routing_mode == crate::state::RoutingMode::SniZeroData && !api_enabled {
+        return Err("Zero-data node switching requires the authenticated Clash API; refusing a TUN restart".to_string());
+    }
 
-    if state.get_status() == crate::state::ConnectionStatus::Connected && api_enabled {
+    if connected && api_enabled {
+        let previous_config = if settings.routing_mode == crate::state::RoutingMode::SniZeroData {
+            let path = crate::commands::config::get_active_config_path(&app)?;
+            Some((path.clone(), std::fs::read(&path)
+                .map_err(|e| format!("Failed to preserve active config before node switch: {}", e))?))
+        } else {
+            None
+        };
         let (config_path, _, _, _) = match prepare_and_patch_config(
             &app,
             &state,
@@ -1373,6 +1245,9 @@ pub async fn switch_node_hot(
             Ok(res) => res,
             Err(e) => {
                 state.push_log(format!("[System] Config patch failed: {}", e));
+                if settings.routing_mode == crate::state::RoutingMode::SniZeroData {
+                    return Err(format!("Zero-data node switch rejected without restarting TUN: {}", e));
+                }
                 try_reload_proxy_config(&app, &state, Some(tag.clone())).await?;
                 if let Ok(mut lock) = state.selected_outbound_tag.lock() {
                     *lock = Some(tag);
@@ -1385,6 +1260,10 @@ pub async fn switch_node_hot(
         if let Err(e) =
             hot_reload_via_api(&state.clash_client, &config_path, api_port, &api_secret).await
         {
+            if let Some((path, contents)) = &previous_config {
+                crate::commands::config::restore_active_config_for_failed_switch(path, contents)?;
+                return Err(format!("Zero-data node switch rejected without restarting TUN: {}", e));
+            }
             state.push_log(format!(
                 "[System] API config reload failed ({}), falling back to full reload.",
                 e
@@ -1406,6 +1285,10 @@ pub async fn switch_node_hot(
                 return Ok(());
             }
             Err(e) => {
+                if let Some((path, contents)) = &previous_config {
+                    crate::commands::config::restore_active_config_for_failed_switch(path, contents)?;
+                    return Err(format!("Zero-data node switch rejected without restarting TUN: {}", e));
+                }
                 state.push_log(format!(
                     "[System] Selector switch API failed ({}), falling back to full reload.",
                     e
@@ -1414,6 +1297,9 @@ pub async fn switch_node_hot(
         }
     }
 
+    if connected && settings.routing_mode == crate::state::RoutingMode::SniZeroData {
+        return Err("Zero-data node switching must not restart the TUN interface".to_string());
+    }
     try_reload_proxy_config(&app, &state, Some(tag.clone())).await?;
     if let Ok(mut lock) = state.selected_outbound_tag.lock() {
         *lock = Some(tag);
@@ -1672,39 +1558,12 @@ pub async fn toggle_proxy(
     }
 
     let current_mode = resolved_proxy_mode.clone();
-    let mut attempt = 0;
     let mut last_error = String::new();
     let mut connected_successfully = false;
 
-    // Helper to apply TUN compatibility in-place
-    let apply_tun_compatibility_in_place = |path: &std::path::Path| -> Result<(), String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read active config for TUN compatibility: {}", e))?;
-        let mut config_val = serde_json::from_str::<serde_json::Value>(&content)
-            .map_err(|e| format!("Failed to parse active config for TUN compatibility: {}", e))?;
-        crate::config::apply_tun_compatibility_profile(&mut config_val);
-        std::fs::write(path, serde_json::to_string_pretty(&config_val).unwrap())
-            .map_err(|e| format!("Failed to write TUN compatibility fallback config: {}", e))?;
-        Ok(())
-    };
-
-    while attempt < MAX_FALLBACK_ATTEMPTS {
-        if attempt > 0 {
-            // Apply fallback patch for current attempt
-            if attempt <= MAX_CONFIG_PATCH_ATTEMPTS {
-                if let Err(e) = patch_config_for_fallback(&config_path, attempt) {
-                    state.push_log(format!("[System] Fallback patching failed: {}", e));
-                }
-            } else if attempt == (MAX_FALLBACK_ATTEMPTS - 1) && current_mode == "tun" {
-                state.push_log(
-                    "[System] Retrying with Windows TUN compatibility profile...".to_string(),
-                );
-                if let Err(e) = apply_tun_compatibility_in_place(&config_path) {
-                    state.push_log(format!("[System] TUN compatibility patching failed: {}", e));
-                }
-            }
-        }
-
+    // A generic spawn or HTTP probe error cannot identify a safe DNS/TUN
+    // recovery. Never mutate a checked config to guess at a fix.
+    for _ in 0..1 {
         let session_id = uuid::Uuid::new_v4().to_string();
         {
             if let Ok(mut session_lock) = state.active_session_id.lock() {
@@ -1723,14 +1582,10 @@ pub async fn toggle_proxy(
                 Err(e) => {
                     last_error = e.clone();
                     state.push_log(format!(
-                        "[System] Attempt {} failed to spawn: {}",
-                        attempt + 1,
+                        "[System] Proxy failed to spawn: {}",
                         e
                     ));
-                    attempt += 1;
-                    tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS))
-                        .await;
-                    continue;
+                    break;
                 }
             };
 
@@ -1738,13 +1593,10 @@ pub async fn toggle_proxy(
             stop_startup_child(&app, &state);
             last_error = e.clone();
             state.push_log(format!(
-                "[System] Attempt {} process exited early: {}",
-                attempt + 1,
+                "[System] Proxy process exited early: {}",
                 e
             ));
-            attempt += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS)).await;
-            continue;
+            break;
         }
 
         let port = health_check_port(&state.get_settings());
@@ -1758,30 +1610,11 @@ pub async fn toggle_proxy(
                 stop_startup_child(&app, &state);
                 last_error = probe_err.clone();
                 state.push_log(format!(
-                    "[System] Attempt {} probe failed: {}",
-                    attempt + 1,
+                    "[System] Proxy probe failed: {}",
                     probe_err
                 ));
 
-                attempt += 1;
-                if attempt < MAX_FALLBACK_ATTEMPTS {
-                    match attempt {
-                        1 => state.push_log(
-                            "[System] Retrying with Firefox TLS fingerprint fallback..."
-                                .to_string(),
-                        ),
-                        2 => state.push_log(
-                            "[System] Retrying with Native TLS (uTLS disabled) fallback..."
-                                .to_string(),
-                        ),
-                        3 => state.push_log(
-                            "[System] Retrying with Public DNS bootstrap fallback...".to_string(),
-                        ),
-                        _ => {}
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(FALLBACK_RETRY_DELAY_MS))
-                        .await;
-                }
+                break;
             }
         }
     }
@@ -1794,10 +1627,7 @@ pub async fn toggle_proxy(
             let _ = app.emit("tun-startup-failed", ());
             return Err(format!("TUN mode failed to start: {}", last_error));
         } else {
-            return Err(format!(
-                "Connection failed after {} fallback attempts: {}",
-                MAX_FALLBACK_ATTEMPTS, last_error
-            ));
+            return Err(format!("Connection failed: {}", last_error));
         }
     }
 
@@ -2135,113 +1965,90 @@ pub async fn close_all_connections(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelStatusResponse {
+    pub status: String,
+    pub effective_proxy_mode: Option<String>,
+    pub selected_outbound_tag: Option<String>,
+    pub is_running: bool,
+    pub api_port: u16,
+    pub mixed_port: u16,
+}
+
+#[tauri::command]
+pub fn get_tunnel_status(
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<TunnelStatusResponse, String> {
+    let status_str = match state.get_status() {
+        crate::state::ConnectionStatus::Disconnected => "disconnected",
+        crate::state::ConnectionStatus::Connecting => "connecting",
+        crate::state::ConnectionStatus::Connected => "connected",
+    };
+    let settings = state.get_settings();
+    let mode = state.effective_proxy_mode.lock().ok().and_then(|m| m.clone());
+    let tag = state.selected_outbound_tag.lock().ok().and_then(|t| t.clone());
+    Ok(TunnelStatusResponse {
+        status: status_str.to_string(),
+        effective_proxy_mode: mode,
+        selected_outbound_tag: tag,
+        is_running: state.is_running(),
+        api_port: settings.api_port,
+        mixed_port: settings.mixed_port,
+    })
+}
+
+#[tauri::command]
+pub async fn start_tunnel(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+    selected_outbound_tag: Option<String>,
+    mode_override: Option<String>,
+) -> Result<String, String> {
+    toggle_proxy(app, state, true, selected_outbound_tag, mode_override).await
+}
+
+#[tauri::command]
+pub async fn stop_tunnel(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<String, String> {
+    toggle_proxy(app, state, false, None, None).await
+}
+
+#[tauri::command]
+pub async fn reload_tunnel(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<(), String> {
+    reload_active_config(app, state, None).await
+}
+
+#[tauri::command]
+pub async fn select_active_node(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+    tag: Option<String>,
+    node_tag: Option<String>,
+    node_id: Option<String>,
+) -> Result<(), String> {
+    let target = tag
+        .or(node_tag)
+        .or(node_id)
+        .ok_or_else(|| "Node tag or ID required".to_string())?;
+    switch_node_hot(app, state, target).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_patch_config_for_fallback_dns_attempt_3() {
-        let temp_dir = std::env::temp_dir();
-        let config_path =
-            temp_dir.join(format!("test_patch_fallback_{}.json", uuid::Uuid::new_v4()));
-
-        let initial_config = serde_json::json!({
-            "dns": {
-                "servers": [
-                    { "tag": "local-dns", "type": "local", "detour": "direct" },
-                    { "tag": "remote-dns", "type": "https", "server": "https://1.1.1.1/dns-query", "detour": "proxy" }
-                ],
-                "rules": [
-                    { "domain": ["zoomconnector.duckdns.org"], "server": "local-dns" }
-                ]
-            },
-            "inbounds": [
-                {
-                    "type": "tun",
-                    "tag": "tun-in",
-                    "route_exclude_address": ["192.168.1.1/32"]
-                }
-            ],
-            "outbounds": [
-                {
-                    "type": "vless",
-                    "tag": "proxy-node",
-                    "server": "zoomconnector.duckdns.org",
-                    "server_port": 443
-                },
-                {
-                    "type": "direct",
-                    "tag": "direct"
-                }
-            ],
-            "route": {
-                "default_domain_resolver": "local-dns"
-            }
-        });
-
-        std::fs::write(
-            &config_path,
-            serde_json::to_string_pretty(&initial_config).unwrap(),
-        )
-        .unwrap();
-
-        // Run Attempt 3 (DNS Fallback)
-        let result = patch_config_for_fallback(&config_path, 3);
-        assert!(result.is_ok(), "patch_config_for_fallback should succeed");
-
-        let patched_content = std::fs::read_to_string(&config_path).unwrap();
-        let patched: serde_json::Value = serde_json::from_str(&patched_content).unwrap();
-
-        let _ = std::fs::remove_file(&config_path);
-
-        // 1. Verify fallback servers exist with modern format
-        let servers = patched["dns"]["servers"].as_array().unwrap();
-        let fb1 = servers
-            .iter()
-            .find(|s| s["tag"] == "fallback-bootstrap-1")
-            .unwrap();
-        assert_eq!(fb1["type"], "udp");
-        assert_eq!(fb1["server"], FALLBACK_DNS_PRIMARY);
-        assert_eq!(fb1["server_port"], 53);
-        assert!(
-            fb1.get("detour").is_none(),
-            "direct detour is redundant and rejected by newer sing-box"
-        );
-        assert!(
-            fb1.get("address").is_none(),
-            "Must not use legacy address field"
-        );
-
-        // 2. Verify local-dns is updated to fallback public DNS
-        let local_dns = servers.iter().find(|s| s["tag"] == "local-dns").unwrap();
-        assert_eq!(local_dns["type"], "udp");
-        assert_eq!(local_dns["server"], FALLBACK_DNS_PRIMARY);
-
-        // 3. Verify domain rule points to fallback-bootstrap-1
-        let rules = patched["dns"]["rules"].as_array().unwrap();
-        assert_eq!(rules[0]["server"], "fallback-bootstrap-1");
-
-        // 4. Verify route.default_domain_resolver is updated
-        assert_eq!(
-            patched["route"]["default_domain_resolver"],
-            "fallback-bootstrap-1"
-        );
-
-        // 5. Verify outbound proxy node domain_resolver is updated
-        let outbounds = patched["outbounds"].as_array().unwrap();
-        let proxy_node = outbounds.iter().find(|o| o["tag"] == "proxy-node").unwrap();
-        assert_eq!(proxy_node["domain_resolver"], "fallback-bootstrap-1");
-
-        // 6. Verify route_exclude_address contains bootstrap DNS
-        let inbounds = patched["inbounds"].as_array().unwrap();
-        let tun = &inbounds[0];
-        let excludes = tun["route_exclude_address"].as_array().unwrap();
-        assert!(excludes
-            .iter()
-            .any(|e| e == &serde_json::json!(format!("{}/32", FALLBACK_DNS_PRIMARY))));
-        assert!(excludes
-            .iter()
-            .any(|e| e == &serde_json::json!(format!("{}/32", FALLBACK_DNS_SECONDARY))));
+    fn test_zero_data_refuses_system_proxy_fallback() {
+        use crate::state::RoutingMode;
+        assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "tun").is_ok());
+        assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "system").is_err());
+        assert!(validate_proxy_mode_for_routing(RoutingMode::Rule, "system").is_ok());
     }
 
     #[test]

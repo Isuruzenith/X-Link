@@ -5,6 +5,287 @@ use super::resolve_server_ips;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Compilation-only overlay; never serialized into a sing-box outbound.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BugHostMode {
+    #[default]
+    Disabled,
+    SniSpoof,
+    CdnFronting,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BugHostSettings {
+    pub mode: BugHostMode,
+    pub bug_host: String,
+    pub original_server: String,
+}
+
+/// Extract a valid WebSocket early-data parameter without disturbing other query parameters.
+pub fn parse_ws_path_and_early_data(raw_path: &str) -> (String, Option<u32>) {
+    let Some((path, query)) = raw_path.split_once('?') else {
+        return (raw_path.to_string(), None);
+    };
+    let mut early_data = None;
+    let mut retained = Vec::new();
+    for part in query.split('&') {
+        if let Some(value) = part.strip_prefix("ed=") {
+            if let Ok(size) = value.parse::<u32>() {
+                if size > 0 {
+                    if early_data.replace(size).is_some() {
+                        return (raw_path.to_string(), None);
+                    }
+                    continue;
+                }
+            }
+        }
+        retained.push(part);
+    }
+    if early_data.is_none() {
+        return (raw_path.to_string(), None);
+    }
+    let clean = if retained.is_empty() {
+        path.to_string()
+    } else {
+        format!("{}?{}", path, retained.join("&"))
+    };
+    (clean, early_data)
+}
+
+fn clean_host(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    let bare = value.strip_prefix('[').and_then(|s| s.strip_suffix(']'));
+    if let Some(ip) = bare {
+        return ip
+            .parse::<std::net::Ipv6Addr>()
+            .map(|ip| ip.to_string())
+            .map_err(|_| "Invalid bracketed IPv6 server address".to_string());
+    }
+    if let Ok(ip) = value.parse::<std::net::IpAddr>() {
+        return Ok(ip.to_string());
+    }
+    if value.is_empty()
+        || value.len() > 253
+        || value.contains(':')
+        || value.trim_end_matches('.').split('.').any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+    {
+        return Err("Invalid server host (expected a hostname or IP without a port)".to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn prepare_node_outbound(
+    node: &mut SingBoxOutbound,
+    bug_host: Option<&BugHostSettings>,
+) -> Result<(), String> {
+    let Some(server) = node.fields.get("server").and_then(Value::as_str) else {
+        if bug_host.is_some_and(|settings| settings.mode != BugHostMode::Disabled) {
+            return Err(format!("Bug-host node '{}' has no server", node.tag));
+        }
+        // Some legacy direct/group outbounds have no dial address.
+        return Ok(());
+    };
+    let server = clean_host(server)?;
+    node.fields
+        .insert("server".into(), Value::String(server.clone()));
+
+    if let Some(settings) = bug_host.filter(|s| s.mode != BugHostMode::Disabled) {
+        let original = clean_host(&settings.original_server)?;
+        let bug = clean_host(&settings.bug_host)?;
+        if original != server || bug.parse::<std::net::IpAddr>().is_ok() {
+            return Err(format!(
+                "Invalid or stale bug-host settings for node '{}'",
+                node.tag
+            ));
+        }
+        if settings.mode == BugHostMode::CdnFronting && original.parse::<std::net::IpAddr>().is_ok()
+        {
+            return Err(format!(
+                "CDN fronting requires an original domain for node '{}'",
+                node.tag
+            ));
+        }
+        if !matches!(node.outbound_type.as_str(), "vless" | "vmess" | "trojan") {
+            return Err(format!(
+                "Bug-host mode requires a TLS-capable TCP outbound: '{}'",
+                node.tag
+            ));
+        }
+        let tls = node
+            .fields
+            .get_mut("tls")
+            .and_then(Value::as_object_mut)
+            .filter(|tls| tls.get("enabled").and_then(Value::as_bool) == Some(true))
+            .ok_or_else(|| format!("Bug-host mode requires TLS for node '{}'", node.tag))?;
+        if tls.get("reality").and_then(|r| r.get("enabled")) == Some(&Value::Bool(true)) {
+            return Err(format!(
+                "Bug-host mode is incompatible with Reality for node '{}'",
+                node.tag
+            ));
+        }
+        tls.insert(
+            "server_name".into(),
+            Value::String(if settings.mode == BugHostMode::SniSpoof {
+                bug.clone()
+            } else {
+                original.clone()
+            }),
+        );
+        let transport = node
+            .fields
+            .get_mut("transport")
+            .and_then(Value::as_object_mut);
+        if let Some(transport) = transport {
+            match transport.get("type").and_then(Value::as_str) {
+                Some("ws") => {
+                    let headers = transport
+                        .entry("headers")
+                        .or_insert_with(|| serde_json::json!({}));
+                    let headers = headers.as_object_mut().ok_or("Invalid WS headers")?;
+                    headers.retain(|key, _| !key.eq_ignore_ascii_case("host"));
+                    headers.insert(
+                        "Host".into(),
+                        Value::String(if settings.mode == BugHostMode::SniSpoof {
+                            bug.clone()
+                        } else {
+                            original.clone()
+                        }),
+                    );
+                }
+                Some("httpupgrade") => {
+                    transport.insert(
+                        "host".into(),
+                        Value::String(if settings.mode == BugHostMode::SniSpoof {
+                            bug.clone()
+                        } else {
+                            original.clone()
+                        }),
+                    );
+                    if let Some(headers) =
+                        transport.get_mut("headers").and_then(Value::as_object_mut)
+                    {
+                        headers.retain(|key, _| !key.eq_ignore_ascii_case("host"));
+                    }
+                }
+                Some("http") => {
+                    transport.insert(
+                        "host".into(),
+                        serde_json::json!([if settings.mode == BugHostMode::SniSpoof {
+                            bug.clone()
+                        } else {
+                            original.clone()
+                        }]),
+                    );
+                }
+                Some("grpc") | Some("quic") => {
+                    return Err(format!(
+                        "Bug-host mode cannot set HTTP Host for node '{}'",
+                        node.tag
+                    ))
+                }
+                _ => {}
+            }
+        }
+        if settings.mode == BugHostMode::CdnFronting {
+            node.fields.insert("server".into(), Value::String(bug));
+        }
+    }
+
+    let transport_type = node
+        .fields
+        .get("transport")
+        .and_then(|t| t.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if transport_type.as_deref() == Some("ws") {
+        if let Some(transport) = node
+            .fields
+            .get_mut("transport")
+            .and_then(Value::as_object_mut)
+        {
+            if let Some(raw_path) = transport.get("path").and_then(Value::as_str) {
+                let (path, early_data) = parse_ws_path_and_early_data(raw_path);
+                if let Some(size) = early_data {
+                    transport.insert("path".into(), Value::String(path));
+                    transport
+                        .entry("max_early_data")
+                        .or_insert(serde_json::json!(size));
+                    transport
+                        .entry("early_data_header_name")
+                        .or_insert(Value::String("Sec-WebSocket-Protocol".into()));
+                }
+            }
+        }
+    }
+    if node.fields.get("flow").and_then(Value::as_str) == Some("xtls-rprx-vision")
+        && !matches!(transport_type.as_deref(), None | Some("tcp"))
+    {
+        node.fields.remove("flow");
+    }
+    if node
+        .fields
+        .get("flow")
+        .and_then(Value::as_str)
+        .is_some_and(|flow| flow.contains("vision"))
+    {
+        node.fields.remove("multiplex");
+    }
+    if transport_type.as_deref() == Some("grpc") {
+        if let Some(transport) = node
+            .fields
+            .get_mut("transport")
+            .and_then(Value::as_object_mut)
+        {
+            transport
+                .entry("idle_timeout".to_string())
+                .or_insert(serde_json::json!("15s"));
+            transport
+                .entry("ping_timeout".to_string())
+                .or_insert(serde_json::json!("15s"));
+            transport
+                .entry("permit_without_stream".to_string())
+                .or_insert(serde_json::json!(true));
+        }
+    }
+    if let Some(tls) = node.fields.get("tls").and_then(Value::as_object) {
+        if tls.get("reality").and_then(|r| r.get("enabled")) == Some(&Value::Bool(true)) {
+            let key = tls
+                .get("reality")
+                .and_then(|r| r.get("public_key"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let fingerprint = tls
+                .get("utls")
+                .and_then(Value::as_object)
+                .filter(|utls| utls.get("enabled").and_then(Value::as_bool) == Some(true))
+                .and_then(|utls| utls.get("fingerprint"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if tls.get("enabled").and_then(Value::as_bool) != Some(true)
+                || tls.get("insecure").and_then(Value::as_bool) == Some(true)
+                || key.trim().is_empty()
+                || fingerprint.trim().is_empty()
+            {
+                return Err(format!(
+                    "Invalid Reality TLS settings for node '{}'",
+                    node.tag
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn split_host_port(addr: &str, default_port: u16) -> (String, u16) {
     let addr = addr.trim();
     // Bracketed IPv6: [2402:4000::2] or [2402:4000::2]:53
@@ -134,6 +415,8 @@ pub struct TunSettings {
     pub fakeip_filter: String,
     pub dns_leak_protection: bool,
     pub multiplex: bool,
+    pub block_quic: bool,
+    pub routing_mode: crate::state::RoutingMode,
 }
 
 impl Default for TunSettings {
@@ -165,6 +448,8 @@ impl Default for TunSettings {
             fakeip_filter: "geosite:private".to_string(),
             dns_leak_protection: true,
             multiplex: false,
+            block_quic: false,
+            routing_mode: crate::state::RoutingMode::Rule,
         }
     }
 }
@@ -175,6 +460,38 @@ pub fn should_include_tun_interface_name(target_os: &str) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 pub fn generate_singbox_config(
+    mixed_port: u16,
+    outbounds: Vec<SingBoxOutbound>,
+    proxy_mode: &str,
+    dns_address: &str,
+    listen_address: &str,
+    tun_settings: &TunSettings,
+    default_outbound_tag: Option<&str>,
+    user_rules: &[crate::config::rules::RoutingRule],
+    rule_sets: &[crate::config::rules::RuleSet],
+    app_data_dir: &std::path::Path,
+    outbound_groups: &[crate::config::rules::OutboundGroup],
+    host_dns_servers: &[std::net::IpAddr],
+) -> Result<String, String> {
+    generate_singbox_config_with_bug_hosts(
+        mixed_port,
+        outbounds,
+        proxy_mode,
+        dns_address,
+        listen_address,
+        tun_settings,
+        default_outbound_tag,
+        user_rules,
+        rule_sets,
+        app_data_dir,
+        outbound_groups,
+        host_dns_servers,
+        &HashMap::new(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn generate_singbox_config_with_bug_hosts(
     mixed_port: u16,
     mut outbounds: Vec<SingBoxOutbound>,
     proxy_mode: &str,
@@ -187,7 +504,21 @@ pub fn generate_singbox_config(
     app_data_dir: &std::path::Path,
     outbound_groups: &[crate::config::rules::OutboundGroup],
     host_dns_servers: &[std::net::IpAddr],
+    bug_hosts: &HashMap<String, BugHostSettings>,
 ) -> Result<String, String> {
+    let mut overlay_tags = std::collections::HashSet::new();
+    for node in &mut outbounds {
+        if bug_hosts.contains_key(&node.tag) && !overlay_tags.insert(node.tag.clone()) {
+            return Err(format!(
+                "Ambiguous bug-host settings for node '{}'",
+                node.tag
+            ));
+        }
+        prepare_node_outbound(node, bug_hosts.get(&node.tag))?;
+    }
+    if bug_hosts.keys().any(|tag| !overlay_tags.contains(tag)) {
+        return Err("Bug-host settings reference a missing outbound".into());
+    }
     let check_and_cleanup_db = |path: &std::path::Path| -> bool {
         if path.exists() {
             if let Ok(metadata) = path.metadata() {
@@ -211,6 +542,9 @@ pub fn generate_singbox_config(
 
     // Strip dangling detour references gracefully before compilation
     crate::config::validator::normalize_detour_references(&mut outbounds, outbound_groups);
+    if tun_settings.routing_mode == crate::state::RoutingMode::SniZeroData {
+        return Err("SniZeroData is unavailable until DNS bootstrap and route exclusions are verified fail-closed on the target OS".into());
+    }
 
     let mut server_hosts = Vec::new();
     for outbound in &outbounds {
@@ -331,6 +665,9 @@ pub fn generate_singbox_config(
 
     let mut selector_tags: Vec<String> = Vec::new();
     selector_tags.extend(group_tags);
+    if !dialable_node_tags.is_empty() {
+        selector_tags.push("auto".to_string());
+    }
     for nt in all_node_tags {
         if !selector_tags.contains(&nt) {
             selector_tags.push(nt);
@@ -363,26 +700,37 @@ pub fn generate_singbox_config(
     // First, push our root selector outbound
     final_outbounds.push(Value::Object(selector.into_iter().collect()));
 
+    // Add automatic selection after the root selector without changing the selected node.
+    if !dialable_node_tags.is_empty() {
+        final_outbounds.push(serde_json::json!({
+            "type": "urltest",
+            "tag": "auto",
+            "outbounds": dialable_node_tags.iter().take(crate::config::validator::MAX_AUTOMATED_GROUP_NODES).collect::<Vec<_>>(),
+            "url": "https://cp.cloudflare.com/generate_204",
+            "interval": "600s",
+            "tolerance": 50
+        }));
+    }
+
     // Next, push user-defined OutboundGroup outbounds
     final_outbounds.extend(compiled_groups);
 
     // Push the parsed node outbounds
     for node in outbounds {
         if node.outbound_type == "wireguard" {
-            let address = if let Some(addr) = node
+            let address = node
                 .fields
                 .get("address")
                 .or_else(|| node.fields.get("local_address"))
-            {
-                if addr.is_array() {
-                    addr.clone()
-                } else if let Some(s) = addr.as_str() {
-                    serde_json::json!([s])
-                } else {
-                    serde_json::json!(["10.0.0.2/32"])
-                }
+                .filter(|addr| {
+                    addr.as_array().is_some_and(|arr| !arr.is_empty())
+                        || addr.as_str().is_some_and(|s| !s.is_empty())
+                })
+                .ok_or_else(|| format!("WireGuard node '{}' requires a local address", node.tag))?;
+            let address = if address.is_array() {
+                address.clone()
             } else {
-                serde_json::json!(["10.0.0.2/32"])
+                serde_json::json!([address])
             };
 
             let private_key = node
@@ -390,7 +738,8 @@ pub fn generate_singbox_config(
                 .get("private_key")
                 .or_else(|| node.fields.get("secret_key"))
                 .and_then(|k| k.as_str())
-                .unwrap_or("")
+                .filter(|key| !key.trim().is_empty())
+                .ok_or_else(|| format!("WireGuard node '{}' requires a private key", node.tag))?
                 .to_string();
 
             let server_address = node
@@ -411,7 +760,8 @@ pub fn generate_singbox_config(
                 .get("peer_public_key")
                 .or_else(|| node.fields.get("public_key"))
                 .and_then(|k| k.as_str())
-                .unwrap_or("")
+                .filter(|key| !key.trim().is_empty())
+                .ok_or_else(|| format!("WireGuard node '{}' requires a peer public key", node.tag))?
                 .to_string();
 
             let allowed_ips = if let Some(ips) = node.fields.get("allowed_ips") {
@@ -435,6 +785,9 @@ pub fn generate_singbox_config(
 
             if let Some(reserved) = node.fields.get("reserved") {
                 peer_obj["reserved"] = reserved.clone();
+            }
+            if let Some(psk) = node.fields.get("pre_shared_key") {
+                peer_obj["pre_shared_key"] = psk.clone();
             }
 
             let mut endpoint_obj = serde_json::json!({
@@ -464,7 +817,13 @@ pub fn generate_singbox_config(
 
         if tun_settings.multiplex {
             let outbound_type = node.outbound_type.as_str();
-            if outbound_type == "vless" || outbound_type == "vmess" || outbound_type == "trojan" {
+            if matches!(outbound_type, "vless" | "vmess" | "trojan")
+                && !obj
+                    .get("flow")
+                    .and_then(Value::as_str)
+                    .is_some_and(|flow| flow.contains("vision"))
+                && !obj.contains_key("multiplex")
+            {
                 obj.insert(
                     "multiplex".to_string(),
                     serde_json::json!({
@@ -479,29 +838,13 @@ pub fn generate_singbox_config(
             }
         }
 
-        // If TLS is enabled, ensure a default ALPN is specified if missing (default to "http/1.1")
-        if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
-            let enabled = tls
-                .get("enabled")
-                .and_then(|e| e.as_bool())
-                .unwrap_or(false);
-            if enabled && tls.get("alpn").is_none() {
-                tls.insert("alpn".to_string(), serde_json::json!(["http/1.1"]));
-            }
-        }
-
-        // WebSocket and HTTPUpgrade handshakes require HTTP/1.1; normalize imported
-        // HTTPUpgrade Host headers so existing profiles generate the correct request host.
+        // Preserve the imported ALPN, including its absence. Normalize imported
+        // HTTPUpgrade Host headers without rewriting TLS protocol negotiation.
         let transport_type = obj
             .get("transport")
             .and_then(|t| t.get("type"))
             .and_then(|t| t.as_str())
             .map(str::to_string);
-        if matches!(transport_type.as_deref(), Some("ws" | "httpupgrade")) {
-            if let Some(tls) = obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
-                tls.insert("alpn".to_string(), serde_json::json!(["http/1.1"]));
-            }
-        }
         if transport_type.as_deref() == Some("httpupgrade") {
             if let Some(transport) = obj.get_mut("transport").and_then(|t| t.as_object_mut()) {
                 let host = transport
@@ -619,19 +962,30 @@ pub fn generate_singbox_config(
     }
 
     // Build route rules incorporating user routing rules from routing.json
-    let route_rules = crate::config::build_route_rules(
+    let route_rules = crate::config::build_route_rules_with_quic(
         tun_settings.bypass_lan,
         tun_settings.sniff_enabled,
+        tun_settings.block_quic,
         user_rules,
         rule_sets,
         geosite_db_exists,
         geoip_db_exists,
         outbound_groups,
+        tun_settings.routing_mode,
     );
+
+    // Determine effective route final outbound based on routing mode
+    let effective_final_outbound = match tun_settings.routing_mode {
+        crate::state::RoutingMode::SniZeroData | crate::state::RoutingMode::Global => {
+            "proxy".to_string()
+        }
+        crate::state::RoutingMode::Direct => "direct".to_string(),
+        crate::state::RoutingMode::Rule => tun_settings.final_outbound.clone(),
+    };
 
     let mut route_section = serde_json::json!({
         "rules": route_rules,
-        "final": tun_settings.final_outbound,
+        "final": effective_final_outbound,
         "auto_detect_interface": true,
         "default_domain_resolver": "local-dns"
     });
@@ -699,7 +1053,7 @@ pub fn generate_singbox_config(
             Some("proxy"),
         ));
     }
-    if is_fakeip {
+    if is_fakeip && proxy_mode == "tun" {
         if !tun_settings.fakeip_filter.trim().is_empty() {
             let filters: Vec<String> = tun_settings
                 .fakeip_filter
@@ -775,12 +1129,19 @@ pub fn generate_singbox_config(
         }));
     }
 
+    // Determine DNS final server based on routing mode
+    let dns_final = match tun_settings.routing_mode {
+        crate::state::RoutingMode::Direct => "local-dns",
+        _ => "remote-dns", // SniZeroData, Rule, Global all use remote-dns
+    };
+
     let dns_section = if proxy_mode == "tun" {
         let mut section = serde_json::json!({
             "servers": dns_servers,
             "rules": dns_rules,
             "strategy": tun_settings.dns_strategy,
-            "final": "remote-dns"
+            "final": dns_final,
+            "independent_cache": true
         });
         section["disable_cache"] = serde_json::json!(!tun_settings.dns_caching);
         section
@@ -789,7 +1150,9 @@ pub fn generate_singbox_config(
             "servers": [
                 parse_dns_server("local-dns", &local_dns_addr, Some("direct"))
             ],
-            "rules": dns_rules
+            "rules": dns_rules,
+            "strategy": tun_settings.dns_strategy,
+            "independent_cache": true
         });
         section["disable_cache"] = serde_json::json!(!tun_settings.dns_caching);
         section
@@ -818,6 +1181,238 @@ pub fn generate_singbox_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compile_test_node(
+        fields: HashMap<String, Value>,
+        mode: Option<BugHostSettings>,
+    ) -> Result<Value, String> {
+        let outbounds = vec![SingBoxOutbound {
+            outbound_type: "vless".into(),
+            tag: "sample-node".into(),
+            fields,
+        }];
+        let overlays = mode
+            .map(|settings| HashMap::from([("sample-node".into(), settings)]))
+            .unwrap_or_default();
+        let json = generate_singbox_config_with_bug_hosts(
+            7890,
+            outbounds,
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &TunSettings::default(),
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+            &[],
+            &[],
+            &overlays,
+        )?;
+        let config: Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        Ok(config["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["tag"] == "sample-node")
+            .unwrap()
+            .clone())
+    }
+
+    #[test]
+    fn test_sni_spoof_and_early_data_generation() {
+        let fields = HashMap::from([
+            ("server".into(), serde_json::json!("proxy.example")),
+            ("server_port".into(), serde_json::json!(443)),
+            (
+                "uuid".into(),
+                serde_json::json!("00000000-0000-0000-0000-000000000000"),
+            ),
+            (
+                "tls".into(),
+                serde_json::json!({"enabled": true, "server_name": "original.example"}),
+            ),
+            (
+                "transport".into(),
+                serde_json::json!({"type":"ws", "path":"/tunnel?x=1&ed=2048", "headers":{"host":"old.example", "X-Test":"yes"}}),
+            ),
+        ]);
+        let node = compile_test_node(
+            fields.clone(),
+            Some(BugHostSettings {
+                mode: BugHostMode::SniSpoof,
+                bug_host: "zoom.us".into(),
+                original_server: "proxy.example".into(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(node["server"], "proxy.example");
+        assert_eq!(node["tls"]["server_name"], "zoom.us");
+        assert_eq!(node["transport"]["headers"]["Host"], "zoom.us");
+        assert!(node["transport"]["headers"].get("host").is_none());
+        assert_eq!(node["transport"]["path"], "/tunnel?x=1");
+        assert_eq!(node["transport"]["max_early_data"], 2048);
+        assert_eq!(
+            node["transport"]["early_data_header_name"],
+            "Sec-WebSocket-Protocol"
+        );
+        assert_eq!(node["transport"]["headers"]["X-Test"], "yes");
+
+        let fronted = compile_test_node(
+            fields,
+            Some(BugHostSettings {
+                mode: BugHostMode::CdnFronting,
+                bug_host: "cdn.example".into(),
+                original_server: "proxy.example".into(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(fronted["server"], "cdn.example");
+        assert_eq!(fronted["tls"]["server_name"], "proxy.example");
+        assert_eq!(fronted["transport"]["headers"]["Host"], "proxy.example");
+    }
+
+    #[test]
+    fn test_generator_outbound_guardrails() {
+        assert_eq!(
+            parse_ws_path_and_early_data("/t?ed=bad&x=1"),
+            ("/t?ed=bad&x=1".into(), None)
+        );
+        assert_eq!(
+            parse_ws_path_and_early_data("/t?ed=2048&x=1"),
+            ("/t?x=1".into(), Some(2048))
+        );
+        let mut fields = HashMap::from([
+            ("server".into(), serde_json::json!("[2001:db8::1]")),
+            ("tls".into(), serde_json::json!({"enabled":true})),
+            (
+                "transport".into(),
+                serde_json::json!({"type":"ws", "path":"/t?ed=1024"}),
+            ),
+            ("flow".into(), serde_json::json!("xtls-rprx-vision")),
+        ]);
+        let node = compile_test_node(fields.clone(), None).unwrap();
+        assert_eq!(node["server"], "2001:db8::1");
+        assert!(node.get("flow").is_none());
+        assert_eq!(node["transport"]["max_early_data"], 1024);
+        fields.insert("tls".into(), serde_json::json!({"enabled":true,"insecure":true,"reality":{"enabled":true,"public_key":"key"}}));
+        assert!(compile_test_node(fields.clone(), None)
+            .unwrap_err()
+            .contains("Reality"));
+        fields.insert(
+            "tls".into(),
+            serde_json::json!({"enabled":true,"reality":{"enabled":true}}),
+        );
+        assert!(compile_test_node(fields.clone(), None)
+            .unwrap_err()
+            .contains("Reality"));
+        fields.insert(
+            "tls".into(),
+            serde_json::json!({"enabled":true,"reality":{"enabled":true,"public_key":"key"}}),
+        );
+        assert!(compile_test_node(fields.clone(), None)
+            .unwrap_err()
+            .contains("Reality"));
+        fields.insert(
+            "tls".into(),
+            serde_json::json!({"enabled":true,"reality":{"enabled":true,"public_key":"key"},"utls":{"enabled":false,"fingerprint":"chrome"}}),
+        );
+        assert!(compile_test_node(fields.clone(), None)
+            .unwrap_err()
+            .contains("Reality"));
+        fields.insert(
+            "tls".into(),
+            serde_json::json!({"enabled":true,"reality":{"enabled":true,"public_key":"key"},"utls":{"enabled":true,"fingerprint":"chrome"}}),
+        );
+        assert!(compile_test_node(fields, None).is_ok());
+    }
+
+    #[test]
+    fn test_auto_urltest_follows_root_selector() {
+        let node = SingBoxOutbound {
+            outbound_type: "vless".into(),
+            tag: "sample-node".into(),
+            fields: HashMap::from([
+                ("server".into(), serde_json::json!("proxy.example")),
+                ("server_port".into(), serde_json::json!(443)),
+                ("uuid".into(), serde_json::json!("user-id")),
+            ]),
+        };
+        let generated = generate_singbox_config(
+            7892,
+            vec![node],
+            "system",
+            "1.1.1.1",
+            "127.0.0.1",
+            &TunSettings::default(),
+            Some("sample-node"),
+            &[],
+            &[],
+            std::path::Path::new(""),
+            &[],
+            &[],
+        )
+        .unwrap();
+        let config: Value = serde_json::from_str(&generated).unwrap();
+        assert_eq!(config["outbounds"][0]["tag"], "proxy");
+        assert_eq!(config["outbounds"][0]["default"], "sample-node");
+        assert!(config["outbounds"][0]["outbounds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tag| tag == "auto"));
+        assert_eq!(config["outbounds"][1]["type"], "urltest");
+        assert_eq!(config["outbounds"][1]["tag"], "auto");
+        assert_eq!(
+            config["outbounds"][1]["outbounds"],
+            serde_json::json!(["sample-node"])
+        );
+    }
+
+    #[test]
+    fn test_udp_tls_keeps_protocol_alpn_defaults() {
+        for outbound_type in ["hysteria2", "tuic"] {
+            let mut fields = HashMap::from([
+                ("server".into(), serde_json::json!("proxy.example")),
+                ("server_port".into(), serde_json::json!(443)),
+                ("tls".into(), serde_json::json!({"enabled": true})),
+            ]);
+            fields.insert("password".into(), serde_json::json!("secret"));
+            if outbound_type == "tuic" {
+                fields.insert(
+                    "uuid".into(),
+                    serde_json::json!("00000000-0000-0000-0000-000000000000"),
+                );
+            }
+            let json = generate_singbox_config(
+                7890,
+                vec![SingBoxOutbound {
+                    outbound_type: outbound_type.into(),
+                    tag: "udp-node".into(),
+                    fields,
+                }],
+                "system",
+                "1.1.1.1",
+                "127.0.0.1",
+                &TunSettings::default(),
+                None,
+                &[],
+                &[],
+                std::path::Path::new(""),
+                &[],
+                &[],
+            )
+            .unwrap();
+            let config: Value = serde_json::from_str(&json).unwrap();
+            let node = config["outbounds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|outbound| outbound["tag"] == "udp-node")
+                .unwrap();
+            assert!(node["tls"].get("alpn").is_none());
+        }
+    }
 
     #[test]
     fn test_generate_singbox_config_listen_addresses() {
@@ -851,6 +1446,17 @@ mod tests {
         let mixed_inbound_local = &inbounds_local[0];
         assert_eq!(mixed_inbound_local["listen"].as_str().unwrap(), "127.0.0.1");
         assert_eq!(mixed_inbound_local["listen_port"].as_u64().unwrap(), 7890);
+        let system_dns_servers = config_local["dns"]["servers"].as_array().unwrap();
+        for rule in config_local["dns"]["rules"].as_array().unwrap() {
+            if let Some(target) = rule.get("server").and_then(Value::as_str) {
+                assert!(
+                    system_dns_servers
+                        .iter()
+                        .any(|server| server["tag"] == target),
+                    "DNS rule references an undefined server: {target}"
+                );
+            }
+        }
 
         // Case 2: Wifi sharing is enabled -> binds to 0.0.0.0
         let config_str_wifi = generate_singbox_config(
@@ -877,7 +1483,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_singbox_config_alpn_self_healing() {
+    fn test_generate_singbox_config_preserves_explicit_alpn() {
         let mut fields = std::collections::HashMap::new();
         fields.insert(
             "server".to_string(),
@@ -941,9 +1547,7 @@ mod tests {
             .expect("Should find our node outbound");
 
         let alpn = node_outbound["tls"]["alpn"].as_array().unwrap();
-        // Check that "h2" has been stripped
-        assert!(alpn.iter().all(|v| v.as_str() != Some("h2")));
-        assert!(alpn.iter().any(|v| v.as_str() == Some("http/1.1")));
+        assert_eq!(alpn, &vec![serde_json::json!("h2"), serde_json::json!("http/1.1")]);
     }
 
     #[test]
@@ -999,7 +1603,7 @@ mod tests {
             .iter()
             .find(|o| o["tag"] == "HTTPUpgrade Node")
             .unwrap();
-        assert_eq!(node["tls"]["alpn"], serde_json::json!(["http/1.1"]));
+        assert_eq!(node["tls"]["alpn"], serde_json::json!(["h2", "http/1.1"]));
         assert!(node["tls"].get("insecure").is_none());
         assert_eq!(node["transport"]["host"], "cdn.example");
         assert_eq!(node["transport"]["headers"]["X-Custom"], "value");
@@ -1049,7 +1653,7 @@ mod tests {
             .unwrap();
         assert_eq!(node["transport"]["host"], "explicit.example");
         assert!(node["transport"].get("headers").is_none());
-        assert_eq!(node["tls"]["alpn"], serde_json::json!(["http/1.1"]));
+        assert!(node["tls"].get("alpn").is_none());
     }
 
     #[test]
@@ -1442,5 +2046,62 @@ mod tests {
         assert_eq!(parsed_udp_prefix["type"], "udp");
         assert_eq!(parsed_udp_prefix["server"], "1.1.1.1");
         assert_eq!(parsed_udp_prefix["server_port"], 53);
+    }
+
+    #[test]
+    fn test_routing_mode_config_generation_overrides() {
+        let outbounds = vec![SingBoxOutbound {
+            outbound_type: "vless".into(),
+            tag: "sample-node".into(),
+            fields: HashMap::new(),
+        }];
+
+        // Case 1: SniZeroData mode
+        let mut tun_zero_data = TunSettings::default();
+        tun_zero_data.routing_mode = crate::state::RoutingMode::SniZeroData;
+        tun_zero_data.final_outbound = "direct".to_string(); // User attempted direct, should be overridden
+
+        let zero_data_error = generate_singbox_config(
+            7890,
+            outbounds.clone(),
+            "tun",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun_zero_data,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+            &[],
+            &[],
+        )
+        .expect_err("zero-data must fail closed until network validation is complete");
+        assert!(zero_data_error.contains("unavailable until DNS bootstrap"));
+
+        // Case 2: Direct routing mode
+        let mut tun_direct = TunSettings::default();
+        tun_direct.routing_mode = crate::state::RoutingMode::Direct;
+
+        let json_dir = generate_singbox_config(
+            7890,
+            outbounds,
+            "tun",
+            "1.1.1.1",
+            "127.0.0.1",
+            &tun_direct,
+            None,
+            &[],
+            &[],
+            std::path::Path::new(""),
+            &[],
+            &[],
+        )
+        .unwrap();
+        let config_dir: Value = serde_json::from_str(&json_dir).unwrap();
+
+        // 1. Route final must be "direct"
+        assert_eq!(config_dir["route"]["final"], "direct");
+        // 2. DNS final must be "local-dns"
+        assert_eq!(config_dir["dns"]["final"], "local-dns");
     }
 }

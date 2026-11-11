@@ -102,7 +102,7 @@ fn get_temp_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     path.push("configs");
     std::fs::create_dir_all(&path)
         .map_err(|e| format!("Failed to create configs directory: {}", e))?;
-    path.push("active_temp.json");
+    path.push(format!("xlink-validate-{}.json", uuid::Uuid::new_v4()));
     Ok(path)
 }
 
@@ -118,6 +118,45 @@ struct StagedFile {
 /// Stages related files beside their destinations and restores earlier files if a commit fails.
 fn commit_files_transactionally(files: Vec<(PathBuf, Vec<u8>)>) -> Result<(), String> {
     commit_files_transactionally_with(files, |from, to| std::fs::rename(from, to))
+}
+
+pub(crate) fn restore_active_config_for_failed_switch(
+    path: &std::path::Path,
+    original: &[u8],
+) -> Result<(), String> {
+    commit_files_transactionally(vec![(path.to_path_buf(), original.to_vec())])
+        .map_err(|error| format!("Failed to restore active config after rejected switch: {}", error))
+}
+
+/// Commit the exact bytes that passed sidecar validation, retaining the previous
+/// active configuration until the replacement is in place. The caller owns the
+/// staged file and must not modify it between validation and this call.
+pub(crate) fn commit_validated_config(staged: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
+    let backup = target.with_file_name(format!(
+        "{}.{}.bak",
+        target.file_name().ok_or("Invalid config destination")?.to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+    let had_original = target.exists();
+    if had_original {
+        std::fs::copy(target, &backup).map_err(|e| format!("Failed to back up active config: {e}"))?;
+        if let Err(e) = std::fs::remove_file(target) {
+            let _ = std::fs::remove_file(&backup);
+            return Err(format!("Failed to prepare active config replacement: {e}"));
+        }
+    }
+    if let Err(e) = std::fs::rename(staged, target) {
+        if had_original {
+            if let Err(restore) = std::fs::rename(&backup, target) {
+                return Err(format!("Failed to activate config: {e}; rollback incomplete: {restore}; backup: {}", backup.display()));
+            }
+        }
+        return Err(format!("Failed to activate config: {e}"));
+    }
+    if had_original {
+        let _ = std::fs::remove_file(backup);
+    }
+    Ok(())
 }
 
 fn commit_files_transactionally_with<F>(
@@ -379,7 +418,10 @@ fn sanitize_subscription_outbounds(
         outbound_groups.iter().map(|g| g.tag.as_str()).collect();
     for ob in &mut outbounds {
         let lower = ob.tag.trim().to_ascii_lowercase();
-        let is_reserved = matches!(lower.as_str(), "proxy" | "direct" | "block" | "dns");
+        let is_reserved = matches!(
+            lower.as_str(),
+            "proxy" | "auto" | "direct" | "block" | "dns"
+        );
         if is_reserved || group_tags.contains(ob.tag.as_str()) {
             ob.tag = format!("{}_node", ob.tag.trim());
         }
@@ -453,7 +495,7 @@ pub async fn import_config(
 
     let generated_config = generate_singbox_config(
         mixed_port,
-        outbounds,
+        outbounds.clone(),
         &proxy_mode,
         &dns_address,
         &listen_address,
@@ -471,6 +513,13 @@ pub async fn import_config(
     {
         let parsed: serde_json::Value = serde_json::from_str(&generated_config)
             .map_err(|e| format!("Generated config is not valid JSON: {}", e))?;
+        crate::config::validator::validate_profile_and_config(
+            mixed_port,
+            None,
+            &outbounds,
+            &parsed,
+            tun_settings.routing_mode == crate::state::RoutingMode::SniZeroData,
+        )?;
         if parsed
             .get("outbounds")
             .and_then(|o| o.as_array())
@@ -677,6 +726,13 @@ async fn refresh_subscription_internal(
     {
         let parsed: serde_json::Value = serde_json::from_str(&generated_config)
             .map_err(|e| format!("Generated config is not valid JSON: {}", e))?;
+        crate::config::validator::validate_profile_and_config(
+            mixed_port,
+            None,
+            &outbounds,
+            &parsed,
+            tun_settings.routing_mode == crate::state::RoutingMode::SniZeroData,
+        )?;
         if parsed
             .get("outbounds")
             .and_then(|o| o.as_array())
@@ -1220,6 +1276,7 @@ mod transaction_tests {
         assert_eq!(ep["peers"][0]["address"], "1.2.3.4");
         assert_eq!(ep["peers"][0]["port"], 51820);
         assert_eq!(ep["peers"][0]["public_key"], "pubkey456");
+        assert_eq!(ep["peers"][0]["pre_shared_key"], "psk789");
 
         let config = serde_json::json!({
             "outbounds": [
@@ -1806,6 +1863,118 @@ mod transaction_tests {
         assert!(!diff.is_selected_node_preserved);
         assert_eq!(diff.fallback_selected_tag, Some("node-3".to_string()));
     }
+
+    #[test]
+    fn test_bulk_apply_bug_host_transformations() {
+        let mut config = serde_json::json!({
+            "outbounds": [
+                {
+                    "type": "vless",
+                    "tag": "vless-node",
+                    "server": "1.2.3.4",
+                    "tls": {
+                        "enabled": true,
+                        "server_name": "original.com"
+                    },
+                    "transport": {
+                        "type": "ws",
+                        "headers": {
+                            "Host": "original.com"
+                        }
+                    }
+                },
+                {
+                    "type": "direct",
+                    "tag": "direct-out"
+                }
+            ]
+        });
+
+        // Test SniSpoof
+        let bug_host = "bughost.isp.net";
+        if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            for outbound in outbounds.iter_mut() {
+                let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if !matches!(ob_type, "vless" | "vmess" | "trojan") {
+                    continue;
+                }
+                let ob_obj = outbound.as_object_mut().unwrap();
+                let tls = ob_obj
+                    .entry("tls".to_string())
+                    .or_insert_with(|| serde_json::json!({ "enabled": true }));
+                if let Some(tls_obj) = tls.as_object_mut() {
+                    tls_obj.insert("enabled".to_string(), serde_json::Value::Bool(true));
+                    tls_obj.insert(
+                        "server_name".to_string(),
+                        serde_json::Value::String(bug_host.to_string()),
+                    );
+                }
+                if let Some(transport) = ob_obj.get_mut("transport").and_then(|t| t.as_object_mut()) {
+                    let headers = transport
+                        .entry("headers".to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    if let Some(h_obj) = headers.as_object_mut() {
+                        h_obj.insert(
+                            "Host".to_string(),
+                            serde_json::Value::String(bug_host.to_string()),
+                        );
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            config["outbounds"][0]["tls"]["server_name"].as_str().unwrap(),
+            "bughost.isp.net"
+        );
+        assert_eq!(
+            config["outbounds"][0]["transport"]["headers"]["Host"].as_str().unwrap(),
+            "bughost.isp.net"
+        );
+        assert_eq!(config["outbounds"][0]["server"].as_str().unwrap(), "1.2.3.4");
+        assert_eq!(config["outbounds"][1]["type"].as_str().unwrap(), "direct");
+
+        // Test CdnFronting
+        if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+            for outbound in outbounds.iter_mut() {
+                let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if !matches!(ob_type, "vless" | "vmess" | "trojan") {
+                    continue;
+                }
+                let server = outbound
+                    .get("server")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let ob_obj = outbound.as_object_mut().unwrap();
+                let tls = ob_obj
+                    .entry("tls".to_string())
+                    .or_insert_with(|| serde_json::json!({ "enabled": true }));
+                if let Some(tls_obj) = tls.as_object_mut() {
+                    tls_obj.insert("enabled".to_string(), serde_json::Value::Bool(true));
+                    if !server.is_empty() {
+                        tls_obj.insert(
+                            "server_name".to_string(),
+                            serde_json::Value::String(server.clone()),
+                        );
+                    }
+                }
+                ob_obj.insert(
+                    "server".to_string(),
+                    serde_json::Value::String(bug_host.to_string()),
+                );
+            }
+        }
+
+        assert_eq!(
+            config["outbounds"][0]["server"].as_str().unwrap(),
+            "bughost.isp.net"
+        );
+        assert_eq!(
+            config["outbounds"][0]["tls"]["server_name"].as_str().unwrap(),
+            "1.2.3.4"
+        );
+    }
 }
 
 /// Returns the customizable proxy outbounds and endpoints (i.e. not selector/direct/block/dns)
@@ -1890,6 +2059,9 @@ pub fn convert_wireguard_outbound_to_endpoint(node: &serde_json::Value) -> serde
 
     if let Some(reserved) = node.get("reserved") {
         peer_obj["reserved"] = reserved.clone();
+    }
+    if let Some(psk) = node.get("pre_shared_key") {
+        peer_obj["pre_shared_key"] = psk.clone();
     }
 
     let mut endpoint_obj = serde_json::json!({
@@ -2883,4 +3055,306 @@ pub async fn update_rule_set(
     stage_and_commit_rule_set_content(&rule_set_dir, tag, format, &bytes)?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigPreviewPayload {
+    pub config: serde_json::Value,
+    pub is_valid: bool,
+    pub validation_errors: Vec<String>,
+}
+
+/// Previews full Sing-box configuration and static pre-flight validation report without writing to disk.
+#[tauri::command]
+pub async fn preview_singbox_config(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+) -> Result<ConfigPreviewPayload, String> {
+    let settings = state.get_settings();
+    let tun_settings = load_tun_settings(&app);
+    let mixed_port = settings.mixed_port;
+    let (user_rules, rule_sets) = crate::config::rules::load_routing_rules_from_file(&app);
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let outbound_groups = crate::config::rules::load_outbound_groups_from_file(&app);
+    let host_dns = crate::os::get_network_manager()
+        .get_system_dns_servers()
+        .await
+        .unwrap_or_default();
+    let proxy_mode = &settings.proxy_mode;
+    let dns_address = &settings.dns_address;
+    let listen_address = if settings.wifi_sharing {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
+    let profile_id = get_active_profile_id(&app)?
+        .ok_or_else(|| "No active profile selected".to_string())?;
+    let raw_nodes = get_profile_outbounds(app.clone(), profile_id)?;
+    let node_outbounds: Vec<crate::config::adapters::SingBoxOutbound> = raw_nodes
+        .into_iter()
+        .map(|val| serde_json::from_value::<crate::config::adapters::SingBoxOutbound>(val)
+            .map_err(|e| format!("Cannot preview an unsupported outbound: {}", e)))
+        .collect::<Result<_, _>>()?;
+    let selected_tag = get_selected_outbound_tag(&app);
+
+    let generated_config = match crate::config::generator::generate_singbox_config(
+        mixed_port,
+        node_outbounds.clone(),
+        proxy_mode,
+        dns_address,
+        listen_address,
+        &tun_settings,
+        selected_tag.as_deref(),
+        &user_rules,
+        &rule_sets,
+        &app_data_dir,
+        &outbound_groups,
+        &host_dns,
+    ) {
+        Ok(config) => config,
+        Err(error) if tun_settings.routing_mode == crate::state::RoutingMode::SniZeroData => {
+            return Ok(ConfigPreviewPayload {
+                config: serde_json::Value::Null,
+                is_valid: false,
+                validation_errors: vec![error],
+            });
+        }
+        Err(error) => return Err(error),
+    };
+
+    let config_val: serde_json::Value = serde_json::from_str(&generated_config)
+        .map_err(|e| format!("Generated config is invalid JSON: {}", e))?;
+
+    let is_sni_zero = tun_settings.routing_mode == crate::state::RoutingMode::SniZeroData;
+    let report = crate::config::validator::validate_profile_and_config(
+        mixed_port,
+        settings.api_enabled.then_some(settings.api_port),
+        &node_outbounds,
+        &config_val,
+        is_sni_zero,
+    );
+
+    let (is_valid, validation_errors) = match report {
+        Ok(warnings) => (true, warnings),
+        Err(err) => (false, vec![err]),
+    };
+
+    Ok(ConfigPreviewPayload {
+        config: config_val,
+        is_valid,
+        validation_errors,
+    })
+}
+
+/// Loads persisted state from <app_data_dir>/xlink_store.json or cleanly initializes defaults.
+#[tauri::command]
+pub fn get_persisted_state(
+    app: tauri::AppHandle,
+) -> Result<crate::state::PersistedStore, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    crate::state::PersistedStore::load_from_dir(data_dir)
+}
+
+/// Saves user generator settings atomically to disk.
+#[tauri::command]
+pub fn save_generator_settings(
+    app: tauri::AppHandle,
+    settings: crate::state::UserSettings,
+) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let _ = (data_dir, settings);
+    Err("Generator settings must be saved through the active settings store until authoritative state migration is complete".to_string())
+}
+
+/// Saves user custom routing rules and rule sets atomically to disk.
+#[tauri::command]
+pub fn save_routing_rules(
+    app: tauri::AppHandle,
+    routing_rules: Vec<crate::config::rules::RoutingRule>,
+    rule_sets: Option<Vec<crate::config::rules::RuleSet>>,
+) -> Result<(), String> {
+    let mut path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    std::fs::create_dir_all(&path)
+        .map_err(|e| format!("Failed to create routing directory: {}", e))?;
+    path.push("routing.json");
+
+    let mut payload: serde_json::Value = if path.exists() {
+        serde_json::from_slice(&std::fs::read(&path)
+            .map_err(|e| format!("Failed to read routing.json: {}", e))?)
+            .map_err(|e| format!("Failed to parse routing.json: {}", e))?
+    } else {
+        serde_json::json!({})
+    };
+    let fields = payload.as_object_mut()
+        .ok_or_else(|| "routing.json must contain a JSON object".to_string())?;
+    fields.insert("rules".to_string(), serde_json::to_value(routing_rules)
+        .map_err(|e| format!("Failed to serialize routing rules: {}", e))?);
+    if let Some(rule_sets) = rule_sets {
+        fields.insert("ruleSets".to_string(), serde_json::to_value(rule_sets)
+            .map_err(|e| format!("Failed to serialize rule sets: {}", e))?);
+    }
+
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|e| format!("Failed to serialize routing json: {}", e))?;
+
+    commit_files_transactionally(vec![(path, bytes)])
+}
+
+/// Bulk applies a bug host preset (SNI spoof or CDN fronting) across all eligible TLS outbounds.
+#[tauri::command]
+pub async fn bulk_apply_bug_host(
+    app: tauri::AppHandle,
+    state: State<'_, crate::state::ProxyState>,
+    bug_host: String,
+    mode: crate::config::generator::BugHostMode,
+) -> Result<usize, String> {
+    let profile_id = get_active_profile_id(&app)?
+        .ok_or_else(|| "No active profile selected".to_string())?;
+    let config_path = get_profile_config_path(&app, &profile_id)?;
+    if !config_path.exists() {
+        return Err("No active profile configuration found".to_string());
+    }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read active profile config: {}", e))?;
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse active config file: {}", e))?;
+
+    let trimmed_bh = bug_host.trim().to_string();
+    let mut modified_count = 0;
+
+    if let Some(outbounds) = config.get_mut("outbounds").and_then(|o| o.as_array_mut()) {
+        for outbound in outbounds.iter_mut() {
+            let ob_type = outbound.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            if !matches!(ob_type, "vless" | "vmess" | "trojan") {
+                continue;
+            }
+
+            let server = outbound
+                .get("server")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let ob_obj = match outbound.as_object_mut() {
+                Some(o) => o,
+                None => continue,
+            };
+
+            match mode {
+                crate::config::generator::BugHostMode::Disabled => {
+                    if let Some(tls) = ob_obj.get_mut("tls").and_then(|t| t.as_object_mut()) {
+                        if !server.is_empty() {
+                            tls.insert(
+                                "server_name".to_string(),
+                                serde_json::Value::String(server.clone()),
+                            );
+                        }
+                    }
+                    if let Some(transport) = ob_obj.get_mut("transport").and_then(|t| t.as_object_mut()) {
+                        if let Some(headers) = transport.get_mut("headers").and_then(|h| h.as_object_mut()) {
+                            if !server.is_empty() {
+                                headers.insert(
+                                    "Host".to_string(),
+                                    serde_json::Value::String(server.clone()),
+                                );
+                            }
+                        }
+                    }
+                    modified_count += 1;
+                }
+                crate::config::generator::BugHostMode::SniSpoof => {
+                    if !trimmed_bh.is_empty() {
+                        let tls = ob_obj
+                            .entry("tls".to_string())
+                            .or_insert_with(|| serde_json::json!({ "enabled": true }));
+                        if let Some(tls_obj) = tls.as_object_mut() {
+                            tls_obj.insert("enabled".to_string(), serde_json::Value::Bool(true));
+                            tls_obj.insert(
+                                "server_name".to_string(),
+                                serde_json::Value::String(trimmed_bh.clone()),
+                            );
+                        }
+
+                        if let Some(transport) = ob_obj.get_mut("transport").and_then(|t| t.as_object_mut()) {
+                            let headers = transport
+                                .entry("headers".to_string())
+                                .or_insert_with(|| serde_json::json!({}));
+                            if let Some(h_obj) = headers.as_object_mut() {
+                                h_obj.insert(
+                                    "Host".to_string(),
+                                    serde_json::Value::String(trimmed_bh.clone()),
+                                );
+                            }
+                        }
+                        modified_count += 1;
+                    }
+                }
+                crate::config::generator::BugHostMode::CdnFronting => {
+                    if !trimmed_bh.is_empty() {
+                        let tls = ob_obj
+                            .entry("tls".to_string())
+                            .or_insert_with(|| serde_json::json!({ "enabled": true }));
+                        if let Some(tls_obj) = tls.as_object_mut() {
+                            tls_obj.insert("enabled".to_string(), serde_json::Value::Bool(true));
+                            if !server.is_empty() {
+                                tls_obj.insert(
+                                    "server_name".to_string(),
+                                    serde_json::Value::String(server.clone()),
+                                );
+                            }
+                        }
+                        ob_obj.insert(
+                            "server".to_string(),
+                            serde_json::Value::String(trimmed_bh.clone()),
+                        );
+                        modified_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if modified_count == 0 {
+        return Ok(0);
+    }
+
+    let updated_bytes = serde_json::to_vec_pretty(&config)
+        .map_err(|e| format!("Failed to serialize updated config: {}", e))?;
+
+    // Validate the exact candidate bytes before replacing a working configuration.
+    let validation_path = get_temp_config_path(&app)?;
+    std::fs::write(&validation_path, &updated_bytes)
+        .map_err(|e| format!("Failed to stage bug-host validation: {}", e))?;
+    let validation = validate_singbox_config(&app, &validation_path).await;
+    let _ = std::fs::remove_file(&validation_path);
+    validation?;
+
+    let was_running = state.get_status() == crate::state::ConnectionStatus::Connected && state.is_running();
+    let selected_tag = get_selected_outbound_tag(&app);
+    let mode_override = state.effective_proxy_mode.lock()
+        .map_err(|error| format!("state_lock_poisoned: {}", error))?
+        .clone();
+    commit_and_apply_with_rollback(
+        vec![(config_path, updated_bytes)],
+        was_running,
+        |_restoring| crate::commands::proxy::try_reload_proxy_config_with_mode(
+            &app,
+            selected_tag.clone(),
+            mode_override.clone(),
+        ),
+        || state.get_status() == crate::state::ConnectionStatus::Connected && state.is_running(),
+    ).await?;
+
+    Ok(modified_count)
 }
