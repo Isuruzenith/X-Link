@@ -891,37 +891,25 @@ pub fn generate_singbox_config_with_bug_hosts(
             );
         }
 
-        // If outbound server is a domain name, pre-resolve it to avoid DNS deadlock on zero-data ISPs
+        // If outbound server is a domain name, extract it for validation and SNI preservation
         let server_str = obj
             .get("server")
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim()
             .to_string();
-        let server_port = obj
-            .get("server_port")
-            .and_then(Value::as_u64)
-            .unwrap_or(443) as u16;
 
         if !server_str.is_empty() && server_str.parse::<std::net::IpAddr>().is_err() {
-            let resolved_ips = crate::config::resolve_host_ip_addrs(&server_str, server_port);
-            let chosen_ip = resolved_ips
-                .iter()
-                .find(|ip| ip.is_ipv4())
-                .or_else(|| resolved_ips.first());
-            if let Some(ip) = chosen_ip {
-                // If TLS is configured on this outbound, ensure SNI server_name is preserved
-                if let Some(tls) = obj.get_mut("tls").and_then(Value::as_object_mut) {
-                    let has_sni = tls
-                        .get("server_name")
-                        .and_then(Value::as_str)
-                        .map(|s| !s.trim().is_empty())
-                        .unwrap_or(false);
-                    if !has_sni {
-                        tls.insert("server_name".to_string(), Value::String(server_str.clone()));
-                    }
+            // If TLS is configured on this outbound, ensure SNI server_name is preserved
+            if let Some(tls) = obj.get_mut("tls").and_then(Value::as_object_mut) {
+                let has_sni = tls
+                    .get("server_name")
+                    .and_then(Value::as_str)
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                if !has_sni {
+                    tls.insert("server_name".to_string(), Value::String(server_str.clone()));
                 }
-                obj.insert("server".to_string(), Value::String(ip.to_string()));
             }
         }
 
@@ -1844,6 +1832,7 @@ mod tests {
         assert_eq!(node["tls"]["server_name"], "cloud.microsoft");
         assert_eq!(node["tls"]["insecure"], serde_json::json!(true));
         assert_eq!(node["tls"]["alpn"], serde_json::json!(["http/1.1"]));
+        assert_eq!(node["server"], "azure.ezgateway.net");
     }
 
     #[test]
