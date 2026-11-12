@@ -1,6 +1,107 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::str::FromStr;
 use tauri::Manager;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingMode {
+    SniZeroData, // Sri Lanka 0-data ISP package mode (strict remote DNS detour)
+    #[default]
+    Rule,        // Split tunneling with custom user rules
+    Global,      // All traffic through proxy
+    Direct,      // Bypass mode for diagnostics
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleMatchType {
+    Domain,
+    DomainSuffix,
+    DomainKeyword,
+    DomainRegex,
+    IpCidr,
+    Port,
+    ProcessName,
+    Protocol,
+    RuleSet,
+}
+
+impl RuleMatchType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuleMatchType::Domain => "domain",
+            RuleMatchType::DomainSuffix => "domain_suffix",
+            RuleMatchType::DomainKeyword => "domain_keyword",
+            RuleMatchType::DomainRegex => "domain_regex",
+            RuleMatchType::IpCidr => "ip_cidr",
+            RuleMatchType::Port => "port",
+            RuleMatchType::ProcessName => "process_name",
+            RuleMatchType::Protocol => "protocol",
+            RuleMatchType::RuleSet => "rule_set",
+        }
+    }
+}
+
+impl std::fmt::Display for RuleMatchType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for RuleMatchType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "domain" => Ok(RuleMatchType::Domain),
+            "domain_suffix" | "domainsuffix" => Ok(RuleMatchType::DomainSuffix),
+            "domain_keyword" | "domainkeyword" => Ok(RuleMatchType::DomainKeyword),
+            "domain_regex" | "domainregex" => Ok(RuleMatchType::DomainRegex),
+            "ip_cidr" | "ipcidr" | "cidr" => Ok(RuleMatchType::IpCidr),
+            "port" => Ok(RuleMatchType::Port),
+            "process_name" | "processname" => Ok(RuleMatchType::ProcessName),
+            "protocol" => Ok(RuleMatchType::Protocol),
+            "rule_set" | "ruleset" => Ok(RuleMatchType::RuleSet),
+            other => Err(format!("Unknown rule match type: '{}'", other)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleOutbound {
+    Proxy,
+    Direct,
+    Block,
+}
+
+impl RuleOutbound {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RuleOutbound::Proxy => "proxy",
+            RuleOutbound::Direct => "direct",
+            RuleOutbound::Block => "block",
+        }
+    }
+}
+
+impl std::fmt::Display for RuleOutbound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for RuleOutbound {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "proxy" => Ok(RuleOutbound::Proxy),
+            "direct" => Ok(RuleOutbound::Direct),
+            "block" | "reject" => Ok(RuleOutbound::Block),
+            other => Err(format!("Unknown rule outbound: '{}'", other)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -37,6 +138,28 @@ pub struct RoutingRule {
     pub invert: bool,
     pub notes: Option<String>,
     pub enabled: Option<bool>,
+}
+
+impl RoutingRule {
+    pub fn new(match_type: RuleMatchType, value: impl Into<String>, outbound: RuleOutbound) -> Self {
+        Self {
+            id: String::new(),
+            rule_type: match_type.as_str().to_string(),
+            value: value.into(),
+            outbound: outbound.as_str().to_string(),
+            invert: false,
+            notes: None,
+            enabled: Some(true),
+        }
+    }
+
+    pub fn match_type(&self) -> Option<RuleMatchType> {
+        self.rule_type.parse().ok()
+    }
+
+    pub fn parsed_outbound(&self) -> Option<RuleOutbound> {
+        self.outbound.parse().ok()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -171,7 +294,7 @@ pub fn build_singbox_rule(
 
     if let Some(map) = obj.as_object_mut() {
         match map.get("outbound").and_then(|v| v.as_str()) {
-            Some("block") => {
+            Some("block") | Some("reject") => {
                 map.remove("outbound");
                 map.insert("action".to_string(), serde_json::json!("reject"));
             }
@@ -188,9 +311,21 @@ pub fn build_singbox_rule(
     Some(obj)
 }
 
+pub fn build_typed_singbox_rule(
+    match_type: RuleMatchType,
+    value: &str,
+    outbound: RuleOutbound,
+    invert: bool,
+    outbound_groups: &[OutboundGroup],
+) -> Option<Value> {
+    let mut rule = RoutingRule::new(match_type, value, outbound);
+    rule.invert = invert;
+    build_singbox_rule(&rule, true, true, outbound_groups)
+}
+
 fn map_outbound_action<'a>(action: &'a str, outbound_groups: &'a [OutboundGroup]) -> &'a str {
     match action {
-        "block" => "block",
+        "block" | "reject" => "block",
         "direct" => "direct",
         "proxy" => "proxy",
         "dns" => "dns",
@@ -211,7 +346,7 @@ fn map_outbound_action<'a>(action: &'a str, outbound_groups: &'a [OutboundGroup]
 pub fn has_block_rule(user_rules: &[RoutingRule]) -> bool {
     user_rules
         .iter()
-        .any(|r| r.enabled.unwrap_or(true) && r.outbound == "block")
+        .any(|r| r.enabled.unwrap_or(true) && (r.outbound == "block" || r.outbound == "reject"))
 }
 
 /// Windows reserved device names that cannot be used as file stems or names.
@@ -440,5 +575,129 @@ mod tests {
         assert!(validate_rule_set_tag(".leading_dot").is_err());
         assert!(validate_rule_set_tag("trailing_dot.").is_err());
         assert!(validate_rule_set_tag("double..dot").is_err());
+    }
+
+    #[test]
+    fn test_phase2_enums_serialization_and_parsing() {
+        // RoutingMode
+        assert_eq!(
+            serde_json::to_string(&RoutingMode::SniZeroData).unwrap(),
+            "\"sni_zero_data\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RoutingMode::Rule).unwrap(),
+            "\"rule\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RoutingMode::Global).unwrap(),
+            "\"global\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RoutingMode::Direct).unwrap(),
+            "\"direct\""
+        );
+        assert_eq!(RoutingMode::default(), RoutingMode::Rule);
+
+        // RuleMatchType
+        let match_types = [
+            (RuleMatchType::Domain, "domain"),
+            (RuleMatchType::DomainSuffix, "domain_suffix"),
+            (RuleMatchType::DomainKeyword, "domain_keyword"),
+            (RuleMatchType::DomainRegex, "domain_regex"),
+            (RuleMatchType::IpCidr, "ip_cidr"),
+            (RuleMatchType::Port, "port"),
+            (RuleMatchType::ProcessName, "process_name"),
+            (RuleMatchType::Protocol, "protocol"),
+            (RuleMatchType::RuleSet, "rule_set"),
+        ];
+        for (mt, name) in match_types {
+            assert_eq!(mt.as_str(), name);
+            assert_eq!(
+                serde_json::to_string(&mt).unwrap(),
+                format!("\"{}\"", name)
+            );
+            assert_eq!(name.parse::<RuleMatchType>().unwrap(), mt);
+        }
+
+        // RuleOutbound
+        let outbounds = [
+            (RuleOutbound::Proxy, "proxy"),
+            (RuleOutbound::Direct, "direct"),
+            (RuleOutbound::Block, "block"),
+        ];
+        for (ro, name) in outbounds {
+            assert_eq!(ro.as_str(), name);
+            assert_eq!(
+                serde_json::to_string(&ro).unwrap(),
+                format!("\"{}\"", name)
+            );
+            assert_eq!(name.parse::<RuleOutbound>().unwrap(), ro);
+        }
+        assert_eq!("reject".parse::<RuleOutbound>().unwrap(), RuleOutbound::Block);
+    }
+
+    #[test]
+    fn test_phase2_build_typed_singbox_rule_action_schema() {
+        // For RuleOutbound::Block, output action: reject, NEVER outbound: block
+        let block_rule = build_typed_singbox_rule(
+            RuleMatchType::Domain,
+            "malware.example",
+            RuleOutbound::Block,
+            false,
+            &[],
+        )
+        .expect("block rule must generate valid JSON");
+
+        assert_eq!(block_rule["action"].as_str().unwrap(), "reject");
+        assert!(block_rule.get("outbound").is_none());
+        assert_eq!(block_rule["domain"][0].as_str().unwrap(), "malware.example");
+
+        // RuleOutbound::Proxy
+        let proxy_rule = build_typed_singbox_rule(
+            RuleMatchType::DomainSuffix,
+            "google.com",
+            RuleOutbound::Proxy,
+            false,
+            &[],
+        )
+        .expect("proxy rule must generate valid JSON");
+        assert_eq!(proxy_rule["outbound"].as_str().unwrap(), "proxy");
+        assert_eq!(proxy_rule["domain_suffix"][0].as_str().unwrap(), "google.com");
+
+        // RuleOutbound::Direct
+        let direct_rule = build_typed_singbox_rule(
+            RuleMatchType::IpCidr,
+            "192.168.1.0/24",
+            RuleOutbound::Direct,
+            false,
+            &[],
+        )
+        .expect("direct rule must generate valid JSON");
+        assert_eq!(direct_rule["outbound"].as_str().unwrap(), "direct");
+        assert_eq!(direct_rule["ip_cidr"][0].as_str().unwrap(), "192.168.1.0/24");
+
+        // RuleSet match type
+        let ruleset_rule = build_typed_singbox_rule(
+            RuleMatchType::RuleSet,
+            "geoip-cn",
+            RuleOutbound::Direct,
+            false,
+            &[],
+        )
+        .expect("ruleset rule must generate valid JSON");
+        assert_eq!(ruleset_rule["rule_set"][0].as_str().unwrap(), "geoip-cn");
+        assert_eq!(ruleset_rule["outbound"].as_str().unwrap(), "direct");
+
+        // ProcessName match type
+        let proc_rule = build_typed_singbox_rule(
+            RuleMatchType::ProcessName,
+            "chrome.exe",
+            RuleOutbound::Proxy,
+            false,
+            &[],
+        )
+        .expect("process_name rule must generate valid JSON");
+        assert_eq!(proc_rule["process_name"][0].as_str().unwrap(), "chrome.exe");
+        assert_eq!(proc_rule["outbound"].as_str().unwrap(), "proxy");
     }
 }

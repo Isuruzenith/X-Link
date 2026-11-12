@@ -7,22 +7,7 @@ use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 
 /// Network routing mode that determines DNS strategy, route rules, and safety constraints.
-///
-/// - `SniZeroData`: Sri Lanka 0-data ISP package mode. Forces remote DNS detour through proxy,
-///   suppresses user `direct` rules and LAN-direct rules to prevent unbilled data leaks,
-///   forces QUIC block, and forces `proxy` as the final outbound.
-/// - `Rule`: Split tunneling with custom user rules (default).
-/// - `Global`: All traffic through proxy.
-/// - `Direct`: Full bypass mode for diagnostics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum RoutingMode {
-    SniZeroData,
-    #[default]
-    Rule,
-    Global,
-    Direct,
-}
+pub use crate::config::rules::RoutingMode;
 
 /// Maximum lines retained in the Rust-side log buffer and diagnostic ring buffers.
 pub const LOG_BUFFER_RUST_MAX: usize = 500;
@@ -246,8 +231,8 @@ impl Default for UserSettings {
             api_secret: generate_secure_secret(),
             api_cors: false,
             geo_lookup_enabled: false,
-            primary_dns: "https://1.1.1.1/dns-query".to_string(),
-            fallback_dns: "https://8.8.8.8/dns-query".to_string(),
+            primary_dns: "tls://1.1.1.1".to_string(),
+            fallback_dns: "tls://8.8.8.8".to_string(),
             direct_dns: "".to_string(),
             dns_strategy: "prefer_ipv4".to_string(),
             dns_mode: "fakeip".to_string(),

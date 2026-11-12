@@ -49,7 +49,7 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
             );
         }
 
-        let is_insecure = query_params
+        let mut is_insecure = query_params
             .get("allowInsecure")
             .map(|s| s == "1" || s == "true")
             .or_else(|| {
@@ -58,6 +58,26 @@ fn parse_tls_settings(query_params: &HashMap<String, String>) -> Option<Value> {
                     .map(|s| s == "1" || s == "true")
             })
             .unwrap_or(false);
+
+        // If SNI is spoofed for ISP zero-data / bug host (e.g. SNI differs from the transport host),
+        // the server's certificate will never match the spoofed SNI. Auto-detect on import so
+        // nodes connect seamlessly out-of-the-box (like in NetMod / v2rayN):
+        if !is_insecure && security != "reality" {
+            if let Some(sni_val) = sni {
+                let sni_clean = sni_val.trim().to_lowercase();
+                if let Some(host_val) = query_params.get("host") {
+                    let host_clean = host_val.trim().to_lowercase();
+                    if !sni_clean.is_empty()
+                        && !host_clean.is_empty()
+                        && sni_clean != host_clean
+                        && !host_clean.ends_with(&format!(".{}", sni_clean))
+                        && !sni_clean.ends_with(&format!(".{}", host_clean))
+                    {
+                        is_insecure = true;
+                    }
+                }
+            }
+        }
 
         if is_insecure {
             tls.insert("insecure".to_string(), Value::Bool(true));
@@ -1122,6 +1142,17 @@ mod tests {
         assert_eq!(transport["path"], "/azure");
         assert!(transport.get("headers").is_none());
         assert_eq!(nodes[0].fields["tls"]["server_name"], "tls.example");
+    }
+
+    #[test]
+    fn test_adapt_spoofed_sni_without_allow_insecure_sets_insecure() {
+        // Real-world zero-data URI where allowInsecure was omitted from query parameters:
+        let uri = "vless://7efbd5f5-f9f9-425e-b0eb-d46a8a6f3bd9@azure.ezgateway.net:443?alpn=h2%2Chttp%2F1.1&encryption=none&fp=chrome&host=azure.ezgateway.net&path=%2Fazure&security=tls&sni=cloud.microsoft&type=ws#One%20Piece%20SG-Prabathya";
+        let nodes = adapt(uri.as_bytes()).unwrap();
+        assert_eq!(nodes.len(), 1);
+        let node = &nodes[0];
+        assert_eq!(node.fields["tls"]["server_name"], "cloud.microsoft");
+        assert_eq!(node.fields["tls"]["insecure"], serde_json::json!(true));
     }
 
     #[test]

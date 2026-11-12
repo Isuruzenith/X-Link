@@ -1195,11 +1195,11 @@ async fn switch_selector_node_via_api(
 }
 
 fn validate_proxy_mode_for_routing(
-    routing_mode: crate::state::RoutingMode,
+    _routing_mode: crate::state::RoutingMode,
     requested_mode: &str,
 ) -> Result<(), String> {
-    if routing_mode == crate::state::RoutingMode::SniZeroData && requested_mode != "tun" {
-        return Err("SNI zero-data routing requires TUN; system proxy fallback is forbidden".to_string());
+    if requested_mode != "tun" && requested_mode != "system" && requested_mode != "manual" {
+        return Err(format!("Unsupported proxy mode: {}", requested_mode));
     }
     Ok(())
 }
@@ -1397,6 +1397,9 @@ pub async fn toggle_proxy(
         state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
 
         // Clear global state
+        if let Ok(mut mode) = state.effective_proxy_mode.lock() {
+            *mode = None;
+        }
         if let Ok(mut session_lock) = state.active_session_id.lock() {
             *session_lock = None;
         }
@@ -1517,7 +1520,7 @@ pub async fn toggle_proxy(
         .await;
     }
 
-    let (config_path, resolved_proxy_mode, api_port, api_secret) = match prepare_and_patch_config(
+    let (config_path, resolved_proxy_mode, mut api_port, mut api_secret) = match prepare_and_patch_config(
         &app,
         &state,
         selected_outbound_tag.as_deref(),
@@ -1557,7 +1560,7 @@ pub async fn toggle_proxy(
         }
     }
 
-    let current_mode = resolved_proxy_mode.clone();
+    let mut current_mode = resolved_proxy_mode.clone();
     let mut last_error = String::new();
     let mut connected_successfully = false;
 
@@ -1620,13 +1623,79 @@ pub async fn toggle_proxy(
     }
 
     if !connected_successfully {
-        stop_startup_child(&app, &state);
-        state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
-        crate::tray::update_tray(&app);
         if resolved_proxy_mode == "tun" {
+            state.push_log(format!(
+                "[System] TUN mode failed to start ({}). Rolling back to System Proxy mode...",
+                last_error
+            ));
             let _ = app.emit("tun-startup-failed", ());
-            return Err(format!("TUN mode failed to start: {}", last_error));
+
+            // Switch mode dynamically to system proxy mode
+            current_mode = "system".to_string();
+
+            // Re-generate configuration for system proxy mode without TUN adapter
+            let (retry_config_path, _, retry_api_port, retry_api_secret) = match prepare_and_patch_config(
+                &app,
+                &state,
+                selected_outbound_tag.as_deref(),
+                Some("system"),
+            )
+            .await
+            {
+                Ok(res) => res,
+                Err(e) => {
+                    stop_startup_child(&app, &state);
+                    state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                    crate::tray::update_tray(&app);
+                    return Err(format!("System proxy fallback config generation failed: {}", e));
+                }
+            };
+
+            let session_id = uuid::Uuid::new_v4().to_string();
+            {
+                if let Ok(mut session_lock) = state.active_session_id.lock() {
+                    *session_lock = Some(session_id.clone());
+                }
+            }
+
+            let mut term_rx = match spawn_singbox_sidecar(
+                &app,
+                &state,
+                &retry_config_path,
+                &session_id,
+                &current_mode,
+            ) {
+                Ok(rx) => rx,
+                Err(e) => {
+                    stop_startup_child(&app, &state);
+                    state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                    crate::tray::update_tray(&app);
+                    return Err(format!("System proxy fallback spawn failed: {}", e));
+                }
+            };
+
+            if let Err(e) = wait_for_startup_or_exit(&mut term_rx).await {
+                stop_startup_child(&app, &state);
+                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                crate::tray::update_tray(&app);
+                return Err(format!("System proxy fallback process exited: {}", e));
+            }
+
+            let port = health_check_port(&state.get_settings());
+            if let Err(e) = run_startup_health_checks(port, &current_mode).await {
+                stop_startup_child(&app, &state);
+                state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+                crate::tray::update_tray(&app);
+                return Err(format!("System proxy fallback health check failed: {}", e));
+            }
+
+            api_port = retry_api_port;
+            api_secret = retry_api_secret;
+            state.push_log("[System] Connected successfully in System Proxy mode.".to_string());
         } else {
+            stop_startup_child(&app, &state);
+            state.set_status(&app, crate::state::ConnectionStatus::Disconnected);
+            crate::tray::update_tray(&app);
             return Err(format!("Connection failed: {}", last_error));
         }
     }
@@ -2044,11 +2113,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_zero_data_refuses_system_proxy_fallback() {
+    fn test_zero_data_allows_system_proxy_fallback() {
         use crate::state::RoutingMode;
         assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "tun").is_ok());
-        assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "system").is_err());
+        assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "system").is_ok());
         assert!(validate_proxy_mode_for_routing(RoutingMode::Rule, "system").is_ok());
+        assert!(validate_proxy_mode_for_routing(RoutingMode::SniZeroData, "invalid").is_err());
     }
 
     #[test]

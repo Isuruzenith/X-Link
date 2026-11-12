@@ -41,39 +41,48 @@ pub fn build_route_exclude_addresses(dns_address: &str, server_ips: &[String]) -
     addresses
 }
 
-pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
+pub fn resolve_host_ip_addrs(host: &str, default_port: u16) -> Vec<IpAddr> {
     use std::net::ToSocketAddrs;
+    let trimmed = host.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(ip) = trimmed.parse::<IpAddr>() {
+        return vec![ip];
+    }
+    // Fast path: skip RFC 2606 reserved test domains
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with(".example")
+        || lower.ends_with(".test")
+        || lower.ends_with(".invalid")
+        || lower == "localhost"
+    {
+        return Vec::new();
+    }
+    let host_port = format!("{}:{}", trimmed, default_port);
+    if let Ok(addrs) = host_port.to_socket_addrs() {
+        let mut ips = Vec::new();
+        for addr in addrs {
+            let ip = addr.ip();
+            if !ips.contains(&ip) {
+                ips.push(ip);
+            }
+        }
+        return ips;
+    }
+    Vec::new()
+}
+
+pub fn resolve_server_ips(servers: &[String]) -> Vec<String> {
     let mut ip_strings = Vec::new();
     for server in servers {
-        let trimmed = server.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        if let Ok(ip) = trimmed.parse::<IpAddr>() {
-            match ip {
-                IpAddr::V4(addr) => ip_strings.push(format!("{}/32", addr)),
-                IpAddr::V6(addr) => ip_strings.push(format!("{}/128", addr)),
-            }
-        } else {
-            let host_port = format!("{}:443", trimmed);
-            if let Ok(addrs) = host_port.to_socket_addrs() {
-                for addr in addrs {
-                    match addr.ip() {
-                        IpAddr::V4(a) => {
-                            let cidr = format!("{}/32", a);
-                            if !ip_strings.contains(&cidr) {
-                                ip_strings.push(cidr);
-                            }
-                        }
-                        IpAddr::V6(a) => {
-                            let cidr = format!("{}/128", a);
-                            if !ip_strings.contains(&cidr) {
-                                ip_strings.push(cidr);
-                            }
-                        }
-                    }
-                }
+        for ip in resolve_host_ip_addrs(server, 443) {
+            let cidr = match ip {
+                IpAddr::V4(addr) => format!("{}/32", addr),
+                IpAddr::V6(addr) => format!("{}/128", addr),
+            };
+            if !ip_strings.contains(&cidr) {
+                ip_strings.push(cidr);
             }
         }
     }
@@ -272,7 +281,7 @@ fn has_vless_websocket_outbound(config_val: &Value) -> bool {
                         .get("transport")
                         .and_then(|v| v.get("type"))
                         .and_then(|v| v.as_str())
-                        .map(|transport| transport == "ws" || transport == "httpupgrade")
+                        .map(|transport| transport == "ws" || transport == "httpupgrade" || transport == "grpc")
                         .unwrap_or(false)
             })
         })
