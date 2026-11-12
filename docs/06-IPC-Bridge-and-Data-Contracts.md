@@ -16,7 +16,7 @@ updated: 2026-11-03
 
 ---
 
-## 1. Complete Tauri `invoke()` Command Reference (49 Commands)
+## 1. Complete Tauri `invoke()` Command Reference (61 Commands)
 
 All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handler![...]`. Note that Tauri v2 automatically maps Rust `snake_case` parameter names to JavaScript `camelCase` keys in the `invoke('cmd', { camelCaseArg })` payload.
 
@@ -25,7 +25,12 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | Command Name | JS Arguments (`camelCase`) | Return Type | Description |
 | :--- | :--- | :--- | :--- |
 | `get_proxy_status` | `{}` | `{ status: 'connected' \| 'connecting' \| 'disconnected', effectiveProxyMode: 'tun' \| 'system' \| null }` | Returns authoritative native proxy status and active mode. |
+| `get_tunnel_status` | `{}` | `TunnelStatusResponse` (`{ status, effectiveProxyMode, selectedOutboundTag, isRunning, apiPort, mixedPort }`) | Returns structured tunnel runtime status, active mode, selected tag, and listener port metrics. |
 | `toggle_proxy` | `{ start: boolean, selectedOutboundTag: string \| null, modeOverride?: 'tun' \| 'system' \| null }` | `string` (`"started"` or `"stopped"`) | Starts (with 5-stage self-healing) or stops the owned `sing-box` child process and manages OS system proxy. |
+| `start_tunnel` | `{ selectedOutboundTag?: string \| null, modeOverride?: string \| null }` | `string` (`"started"`) | Convenience entrypoint to initiate proxy tunnel. |
+| `stop_tunnel` | `{}` | `string` (`"stopped"`) | Convenience entrypoint to terminate active proxy tunnel. |
+| `reload_tunnel` | `{}` | `()` | Hot/cold reloads active tunnel configuration with safety rollback. |
+| `select_active_node` | `{ tag?: string, nodeTag?: string, nodeId?: string }` | `()` | Switches active outbound server node using tag or ID identifier. |
 | `reload_active_config` | `{ selectedOutboundTag: string \| null }` | `string` (`"reloaded"`) | Validates candidate config first; if connected, stops old child and restarts with rollback protection. |
 | `switch_node_hot` | `{ tag: string }` | `string` (`"switched"`) | Hot-switches the active node via Clash API `PUT /proxies/proxy` if `apiEnabled` & connected; otherwise cold-restarts. |
 | `get_traffic_stats` | `{}` | `TrafficStats` (`uploadSpeed`, `downloadSpeed`, `uploadTotal`, `downloadTotal`, `activeConnections`, `corePid`, `memoryBytes`, `cpuPercent`) | Queries Clash API `/connections` + `sysinfo` for live 1-second telemetry. |
@@ -56,15 +61,20 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `update_node` | `{ newOutbound: Value }` | `string` (`"updated"`) | Inserts or updates a node by `tag` in both `configs/active.json` and `profiles/{activeProfileId}.json`, validates via `sing-box check`, and reloads if connected. |
 | `delete_node` | `{ tag: string }` | `string` (`"deleted"`) | Deletes a node by `tag` from the active profile and `active.json`, updates `nodeCount`/`selectedNodeTag`, and reloads if connected. |
 | `update_rule_set` | `{ ruleSetId: string, url: string }` | `string` (saved file path) | Downloads a remote `.srs` or `.json` rule-set file into `app_data_dir()/rule-sets/`. |
+| `preview_singbox_config` | `{}` | `ConfigPreviewPayload` (`{ configJson, outboundCount, routeRuleCount, hasTun }`) | Compiles a full in-memory preview of the sing-box JSON configuration for debugging and inspectability. |
+| `get_persisted_state` | `{}` | `PersistedStore` | Loads persisted state from `xlink_store.json` in `app_data_dir` or initializes clean defaults. |
+| `save_generator_settings` | `{ settings: UserSettings }` | `()` | Saves generator configuration atomically to disk. |
+| `save_routing_rules` | `{ routingRules: RoutingRule[], ruleSets?: RuleSet[] }` | `()` | Atomically persists routing rules and rule sets to `routing.json`. |
+| `bulk_apply_bug_host` | `{ bugHost: string, mode: 'sniSpoof' \| 'cdnFronting' }` | `usize` (count of modified outbounds) | Bulk-transforms eligible TLS outbounds (`vless`, `vmess`, `trojan`) in active profile with spoofed SNI or CDN bug host headers. |
 
 ---
 
-### 1.3 System, OS & Privilege Commands (`src-tauri/src/commands/system.rs` & `logs.rs`)
+### 1.3 System, OS, Privilege & Logging Commands (`src-tauri/src/commands/system.rs` & `logs.rs`)
 
 | Command Name | JS Arguments (`camelCase`) | Return Type | Description |
 | :--- | :--- | :--- | :--- |
 | `get_singbox_version` | `{}` | `string` | Runs `sing-box version`, caches the semver string (`"1.13.14"`), and returns it. |
-| `get_app_version` | `{}` | `string` | Returns `env!("CARGO_PKG_VERSION")` (`"0.8.0"`). |
+| `get_app_version` | `{}` | `string` | Returns `env!("CARGO_PKG_VERSION")` (`"0.9.0"`). |
 | `is_minimized_launch` | `{}` | `boolean` | Returns `true` if process was started with `--minimized`. |
 | `show_window` | `{}` | `()` | Reveals, unminimizes, and focuses the `"main"` WebView window. |
 | `check_port_conflict` | `{ ports: u16[] }` | `u16 \| null` | Returns the first port in `ports` bound by an external process (ignoring X-Link's own `sing-box` child). |
@@ -76,6 +86,8 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 | `set_runas_admin` | `{ enabled: boolean }` | `()` | Sets/removes `RUNASADMIN` compatibility flag in Windows Registry. |
 | `get_running_processes` | `{}` | `string[]` | Returns sorted, deduplicated process names via `sysinfo` for the Routing rule picker. |
 | `get_buffered_logs` | `{}` | `string[]` | Returns all lines currently stored in `ProxyState.log_buffer`. |
+| `get_logs` | `{}` | `string[]` | Retrieves all recent in-memory sing-box process logs. |
+| `clear_logs` | `{}` | `()` | Clears the in-memory log buffer in `ProxyState`. |
 
 ---
 
@@ -114,10 +126,10 @@ All commands are registered in `src-tauri/src/lib.rs` via `tauri::generate_handl
 
 ## 3. On-Disk Storage Schemas (`app_data_dir()`)
 
-On Windows, `app.path().app_data_dir()` resolves to `C:\Users\<User>\AppData\Roaming\com.isuru.x-link\`.
+On Windows, `app.path().app_data_dir()` resolves to `C:\Users\<User>\AppData\Roaming\com.xlink.app\`.
 
 ```text
-%APPDATA%\com.isuru.x-link\
+%APPDATA%\com.xlink.app\
 ├── settings.json              # Managed by plugin-store + read by Rust generator/commands
 ├── profiles.json              # Profile list metadata & activeProfileId
 ├── routing.json               # Custom routing rules & rule-set definitions

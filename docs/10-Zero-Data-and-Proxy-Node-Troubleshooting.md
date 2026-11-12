@@ -51,32 +51,59 @@ In a Zero-Data network configuration:
 NetMod Syna is specifically architected for ISP bug host tunneling. By default, it sets `InsecureSkipVerify: true` on all TLS connections, silently ignoring x509 certificate mismatches when an SNI differs from the server domain.
 
 ### 2.4 Automated Solution in X-Link
-X-Link implements **dual-layer auto-detection** so users never have to manually edit nodes or toggle insecure settings:
+X-Link implements **dual-layer architecture** separating pristine import from runtime configuration so users never have to manually edit nodes or toggle insecure settings:
 
-1. **Import Layer (`src-tauri/src/config/adapters/raw_uri.rs`)**:
-   When parsing raw URIs (`vless://`, `vmess://`, `trojan://`):
+1. **Pristine Import Layer (`src-tauri/src/config/adapters/raw_uri.rs`)**:
+   When parsing raw URIs (`vless://`, `vmess://`, `trojan://`), the importer preserves the user's exact share link parameters without mutating or auto-injecting flags:
    ```rust
-   // If SNI is spoofed for ISP zero-data / bug host (e.g. SNI differs from the transport host),
-   // auto-detect on import so nodes connect seamlessly out-of-the-box:
-   if !is_insecure && security != "reality" {
-       if let Some(sni_val) = sni {
+   let is_insecure = query_params
+       .get("allowInsecure")
+       .map(|s| s == "1" || s == "true")
+       .or_else(|| {
+           query_params
+               .get("insecure")
+               .map(|s| s == "1" || s == "true")
+       })
+       .unwrap_or(false);
+
+   if is_insecure {
+       tls.insert("insecure".to_string(), Value::Bool(true));
+   }
+   ```
+   *Note: Pristine node preservation ensures imported nodes remain valid, unmodified representations of the source configuration.*
+
+2. **Runtime Generation Layer (`src-tauri/src/config/generator.rs`)**:
+   Before compiling sing-box JSON configuration, X-Link inspects outbound TLS and transport configuration. If the node uses a spoofed SNI for zero-data bug hosting where `tls.server_name` differs from the transport `host` (and is not Reality), X-Link injects `"insecure": true` dynamically at runtime into the sing-box outbound configuration:
+   ```rust
+   // If outbound is using spoofed SNI for zero-data bug host (where SNI differs from transport host),
+   // remote certificate will fail validation because server presents its domain cert.
+   // Inject insecure: true dynamically at runtime:
+   if let Some(tls) = obj.get_mut("tls").and_then(Value::as_object_mut) {
+       let sni = tls.get("server_name").and_then(Value::as_str);
+       let transport_host = obj
+           .get("transport")
+           .and_then(|t| t.get("headers"))
+           .and_then(|h| h.get("Host").or_else(|| h.get("host")))
+           .and_then(Value::as_str)
+           .or_else(|| {
+               obj.get("transport")
+                   .and_then(|t| t.get("host"))
+                   .and_then(Value::as_str)
+           });
+       if let (Some(sni_val), Some(host_val)) = (sni, transport_host) {
            let sni_clean = sni_val.trim().to_lowercase();
-           if let Some(host_val) = query_params.get("host") {
-               let host_clean = host_val.trim().to_lowercase();
-               if !sni_clean.is_empty()
-                   && !host_clean.is_empty()
-                   && sni_clean != host_clean
-                   && !host_clean.ends_with(&format!(".{}", sni_clean))
-                   && !sni_clean.ends_with(&format!(".{}", host_clean))
-               {
-                   is_insecure = true;
-               }
+           let host_clean = host_val.trim().to_lowercase();
+           if !sni_clean.is_empty()
+               && !host_clean.is_empty()
+               && sni_clean != host_clean
+               && !host_clean.ends_with(&format!(".{}", sni_clean))
+               && !sni_clean.ends_with(&format!(".{}", host_clean))
+           {
+               tls.insert("insecure".to_string(), Value::Bool(true));
            }
        }
    }
    ```
-2. **Runtime Generation Layer (`src-tauri/src/config/generator.rs`)**:
-   Protects existing imported nodes without requiring re-import. Before writing sing-box JSON configuration, X-Link inspects the outbound. If `transport.host` matches the server host domain, but `tls.server_name` (SNI) is different (and not Reality), X-Link injects `"insecure": true` dynamically into the sing-box outbound configuration.
 
 ---
 
@@ -164,8 +191,8 @@ Startup error: Connection failed: HTTP proxy probe failed: node/outbound/config 
      ]
    }
    ```
-2. **Direct IP Outbound Assignment**:
-   The outbound `server` field is pre-populated with the chosen IP address, while `tls.server_name` preserves the spoofed SNI or host domain.
+2. **Domain Name Retention in Outbound `server`**:
+   Rather than overriding the outbound `server` field with a hardcoded IP address (which could break TLS SNI/hostname handling), X-Link retains the pristine domain name in `server` while ensuring that `tls.server_name` preserves the spoofed SNI or host domain. The predefined DNS answer resolves the domain locally inside sing-box without requiring an external bootstrap query.
 3. **System Proxy Mode DNS Decoupling**:
    In System Proxy mode, remote domain names are resolved remotely by the proxy server over SOCKS5/HTTP CONNECT. X-Link decouples the local DNS server from remote DoT, routing internal DNS strictly via `local-dns` with direct detour.
 4. **Graceful Routing Mode Fallback (`src-tauri/src/commands/proxy.rs`)**:
@@ -209,10 +236,10 @@ In `src-tauri/src/config/rules.rs`:
 
 | Symptom / Log Output | Underlying Technical Defect | NetMod Syna Behavior | X-Link Automated Resolution |
 | :--- | :--- | :--- | :--- |
-| `tls: failed to verify certificate: x509: certificate is valid for <server>, not <sni>` | Remote VPS certificate does not match the ISP spoofed Bug Host SNI. | Ignores mismatch (`InsecureSkipVerify: true` by default). | Auto-detects spoofed SNI on import (`raw_uri.rs`) and injects `insecure: true` at runtime (`generator.rs`). |
+| `tls: failed to verify certificate: x509: certificate is valid for <server>, not <sni>` | Remote VPS certificate does not match the ISP spoofed Bug Host SNI. | Ignores mismatch (`InsecureSkipVerify: true` by default). | Preserves pristine link parameters on import (`raw_uri.rs`); dynamically injects `insecure: true` at runtime (`generator.rs`). |
 | `outbound ... unavailable: EOF` after 500ms on WebSocket node | `alpn=h2,http/1.1` negotiates `h2`, but WebSocket uses HTTP/1.1 Upgrade. Server drops connection. | Forces HTTP/1.1 on all WebSocket connections. | Automatically strips `h2` from ALPN when `transport` is `ws` or `httpupgrade`. |
 | `malformed HTTP response "\x00\x00$\x04..."` | Server sends binary HTTP/2 SETTINGS frame on HTTPUpgrade session. | Strips `h2` from HTTPUpgrade negotiation. | Strips `h2` from ALPN on HTTPUpgrade outbounds. |
-| `dial udp [ip]:53: i/o timeout` / `dial tcp [ip]:853: i/o timeout` | ISP drops non-whitelisted UDP/TCP; remote DoT cannot bootstrap proxy server. | Resolves proxy domains directly or relies on system proxy remote resolution. | Pre-resolves server IPs, injects static predefined DNS rules, decouples System Proxy DNS. |
+| `dial udp [ip]:53: i/o timeout` / `dial tcp [ip]:853: i/o timeout` | ISP drops non-whitelisted UDP/TCP; remote DoT cannot bootstrap proxy server. | Resolves proxy domains directly or relies on system proxy remote resolution. | Pre-resolves server IPs into static predefined DNS rules (`dns.rules`) while preserving outbound domain name in `server`. |
 | Probe failure in TUN mode on Dialog / Zero-Data | TUN interface packet filter stalls on restricted zero-data cellular network. | Typically defaults to System Proxy mode. | Automated graceful fallback from TUN mode to System Proxy mode upon probe timeout. |
 
 ---

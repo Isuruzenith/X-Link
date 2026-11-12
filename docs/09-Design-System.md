@@ -12,9 +12,9 @@ updated: 2026-11-06
 
 # 09 — Design System: Material 3 Tokens, Components & Icons
 
-**Navigation**: [[00-Home-MOC]] | **Prev**: [[08-User-Guide-and-FAQ]] | **Geometry**: [[wireframes/00-window-and-grid]] | **Specs**: [[specs/001-self-hosted-icons/spec]] · [[specs/004-material-web-ui-conformance/spec]]
+**Navigation**: [[00-Home-MOC]] | **Prev**: [[08-User-Guide-and-FAQ]] | **Next**: [[10-Zero-Data-and-Proxy-Node-Troubleshooting]]
 
-This note is the contract for *how X-Link looks*. If a UI change contradicts it, change this note first (see [[specs/README]]).
+This note is the contract for *how X-Link looks*. If a UI change contradicts it, update documentation and codebase in synchronization.
 
 ---
 
@@ -24,44 +24,46 @@ This note is the contract for *how X-Link looks*. If a UI change contradicts it,
 | :--- | :--- |
 | Which "Material" library? | **Material Web** (`@material/web`, Material 3 web components, `<md-*>` elements). Not MUI (`@mui/material`), which is a different, React-only library. |
 | Why? | Already in the app, framework-agnostic custom elements, small per-component imports, first-class M3 token system (`--md-sys-*`). |
-| Risk | The Material Web repo is in **maintenance mode** (no new components, bug fixes case-by-case). Mitigation: import components individually, wrap each in a thin local wrapper (`src/components/md/*`) so a swap to another library only touches wrappers, and keep **layout, navigation rail, cards, tables and toasts as our own CSS** (Material Web does not ship them). |
-| Role of Tailwind v4 | **Layout utilities only** (grid, flex, spacing, `min-w-0`). No colors, radii or shadows from Tailwind — those come from tokens. |
-| Role of shadcn / Base UI | Behavior only (focus trap, portal) where `md-dialog`/`md-menu` is insufficient. Their *visual* styling is removed in [[specs/004-material-web-ui-conformance/spec]]. |
+| Risk | The Material Web repo is in **maintenance mode** (no new components, bug fixes case-by-case). Mitigation: import components individually, wrap each in a thin local wrapper (`src/components/ui/` or `src/components/md/`) so a swap to another library only touches wrappers, and keep **layout, navigation rail, cards, tables and toasts as our own CSS** (Material Web does not ship them). |
+| Role of Tailwind v4 | **Layout utilities only** (grid, flex, spacing, `min-w-0`). Theme colors and radii flow from token definitions. |
+| Role of shadcn / Base UI | Behavior only (focus trap, portal) where `<md-dialog>` or `<md-menu>` is insufficient. |
 
-## 2. Token layers
+## 2. Token Layers & Theming
 
 ```text
- seed color ──► M3 scheme (light/dark)  ──►  --md-sys-color-*        (library tokens, generated)
-                                        └──►  --xl-*  semantic aliases (app tokens, hand-written)
- components read ONLY --xl-* or --md-sys-*; never raw hex.
+ seed color ──► M3 scheme (light/dark in src/material-theme.css) ──►  --md-sys-color-*
+             └──► Semantic application tokens (src/index.css)    ──►  --background, --card, --primary, ...
 ```
 
-### 2.1 Required app aliases (`src/styles/tokens.css`)
+### 2.1 Active Token Hierarchy (`src/material-theme.css` & `src/index.css`)
 
-| Token | Maps to | Used for |
-| :--- | :--- | :--- |
-| `--xl-canvas` | `--md-sys-color-surface` | Window background behind the rail |
-| `--xl-panel` | `--md-sys-color-surface-container-low` | View host / content surface |
-| `--xl-card` | `--md-sys-color-surface-container` | Cards |
-| `--xl-card-hi` | `--md-sys-color-surface-container-high` | Dialogs, side sheet, menus |
-| `--xl-on-surface` | `--md-sys-color-on-surface` | Primary text |
-| `--xl-muted` | `--md-sys-color-on-surface-variant` | Secondary text, labels |
-| `--xl-outline` | `--md-sys-color-outline-variant` | Dividers, card borders |
-| `--xl-accent` | `--md-sys-color-primary` | Primary actions, active nav |
-| `--xl-accent-container` | `--md-sys-color-secondary-container` | Active nav pill, selected rows |
-| `--xl-ok` / `--xl-warn` / `--xl-err` | custom, see §2.2 | Connection and latency status |
-| `--xl-rail-w`, `--xl-page-pad`, `--xl-gap`, `--xl-header-h` | from [[wireframes/00-window-and-grid]] | Layout |
+X-Link coordinates two complementary token layers:
 
-### 2.2 Status colors (semantic, theme-aware)
+1. **Material Theme Tokens (`src/material-theme.css`)**:
+   Defines complete Material 3 light/dark tokens on `:root, :host` and `.dark`:
+   - `--md-sys-color-surface`: Window surface and main view host.
+   - `--md-sys-color-surface-container`: Cards and panels.
+   - `--md-sys-color-surface-container-high`: Dialogs, menus, and side sheets.
+   - `--md-sys-color-primary`: Primary actions and accent branding.
+   - `--md-sys-color-outline-variant`: Borders and separators.
+
+2. **Semantic UI Tokens (`src/index.css`)**:
+   Provides CSS variables consumed by Tailwind utility classes:
+   - `--background`, `--foreground`: Base canvas text and background.
+   - `--card`, `--card-foreground`: Card backgrounds and content.
+   - `--muted`, `--muted-foreground`: Secondary text, sub-labels, and disabled states.
+   - `--border`, `--input`, `--ring`: Form borders and focus rings.
+
+### 2.2 Status Colors (Semantic, Theme-Aware)
 
 | State | Light | Dark | Rule |
 | :--- | :--- | :--- | :--- |
-| Connected / fast `< 100 ms` | `#368360` | `#7bd3a4` | Always paired with text "Connected"/"Protected" |
-| Connecting / medium `100–250 ms` | `#b47a29` | `#f0c06c` | Pulsing dot, text "Connecting…" |
-| Disconnected | `#7e7576` | `#a99fa0` | Text "Disconnected"/"Unprotected" |
-| Error / slow `≥ 250 ms` | `#b3261e` | `#f2b8b5` | Text + icon, never color alone |
+| Connected / fast `< 100 ms` | `#16a34a` (green-600) | `#4ade80` (green-400) | Paired with text "Connected" / "Protected" |
+| Connecting / medium `100–250 ms` | `#f59e0b` (amber-500) | `#fbbf24` (amber-400) | Pulsing dot, text "Connecting…" |
+| Disconnected | `#7e7576` (neutral) | `#a99fa0` (neutral) | Text "Disconnected" / "Unprotected" |
+| Error / slow `≥ 250 ms` | `#dc2626` (red-600) | `#f87171` (red-400) | Text + icon, never color alone |
 
-Light values reuse the colors already documented in [[wireframes/01-shell-navigation]]; dark values are new and must reach **≥ 4.5:1** against `--xl-card`.
+Light and dark status colors reach **≥ 4.5:1** contrast ratio against card backgrounds.
 
 ### 2.3 Theme switching
 
@@ -109,7 +111,7 @@ Fonts are **self-hosted** (e.g. `@fontsource-variable/inter` and `@fontsource-va
 | **Toasts / snackbar** | **Custom** `ToastContainer` | local | Not in Material Web |
 | **Side sheet** | **Custom** `<dialog>`-based | local | Replaces Radix `Sheet` styling |
 | Tooltips | native `title` + `aria-label` for now | – | No `md-tooltip` |
-| Charts | **Custom** SVG `TrafficChart` | local | Colors from `--xl-*` |
+| Charts | **Custom** SVG `TrafficChart` | local | Colors from theme variables |
 
 **Register only what you use** — `import '@material/web/button/filled-button.js'`, never `@material/web/all.js` (bundle size, startup time).
 
@@ -117,7 +119,7 @@ Fonts are **self-hosted** (e.g. `@fontsource-variable/inter` and `@fontsource-va
 
 ### 6.1 Why icons vanish in the built app
 
-`<md-icon>` draws an icon by writing its **name as text** (`speed`, `settings`) and relying on a **Material Symbols font ligature** to turn it into a glyph. If the font is missing the user sees the raw word, a blank box, or nothing. In `tauri dev` this often works because a CDN stylesheet loads over the internet with no strict CSP; in the packaged app the WebView serves files from the app's own origin, offline-capable, with whatever CSP `tauri.conf.json` sets. Full diagnosis in [[specs/001-self-hosted-icons/spec]].
+`<md-icon>` draws an icon by writing its **name as text** (`speed`, `settings`) and relying on a **Material Symbols font ligature** to turn it into a glyph. If the font is missing the user sees the raw word, a blank box, or nothing. In `tauri dev` this often works because a CDN stylesheet loads over the internet with no strict CSP; in the packaged app the WebView serves files from the app's own origin, offline-capable, with whatever CSP `tauri.conf.json` sets.
 
 ### 6.2 Rules
 
@@ -146,7 +148,7 @@ Fonts are **self-hosted** (e.g. `@fontsource-variable/inter` and `@fontsource-va
 
 | Do | Don't |
 | :--- | :--- |
-| `color: var(--xl-muted)` | `color: #9ca3af`, `text-gray-400` |
+| `color: var(--muted-foreground)` | `color: #9ca3af`, hardcoded hex |
 | `<Icon name="speed" />` | `<md-icon>speed</md-icon>` in a view |
 | `import '@material/web/switch/switch.js'` | `import '@material/web/all.js'` |
 | Give a flex child `min-w-0` | Fix overflow with `overflow-x: scroll` on `body` |

@@ -35,16 +35,16 @@ flowchart TB
         Sub["subscription.rs\n(HTTP Stream Fetch <=10MB + UA Fallback)"]
     end
 
-    subgraph Commands["commands/ (49 Tauri IPC Handlers)"]
-        CProxy["proxy.rs\n(toggle_proxy, Detour Validation, Ring Buffer Ingestion, Clash API)"]
-        CConfig["config.rs\n(Import, Profiles, Diff Preview, Node Extraction Filtering)"]
+    subgraph Commands["commands/ (61 Tauri IPC Handlers)"]
+        CProxy["proxy.rs\n(toggle_proxy, start/stop/reload_tunnel, select_active_node, Detour Validation, Ring Buffer Ingestion, Clash API)"]
+        CConfig["config.rs\n(Import, Profiles, Diff Preview, Preview Singbox Config, Bulk Apply Bug Host, Routing Rules)"]
         CSystem["system.rs\n(Version Gate, Port Status, check_tun_support_status, Autostart)"]
         CLatency["latency.rs\n(TCP Ping + Clash URL Delay Test)"]
         CGeo["geo.rs\n(Consent-Gated Public IP Geo Lookup)"]
         CDiag["diagnostics.rs\n(Sanitized Bundle with Ring Buffers + Routing Simulator)"]
         CBackup["backup.rs\n(Encrypted v2 Backup AES-256-GCM + Argon2id Validation/Restore)"]
         CSched["subscription_schedule.rs\n(60s Background Auto-Update Task)"]
-        CLogs["logs.rs\n(get_buffered_logs)"]
+        CLogs["logs.rs\n(get_buffered_logs, get_logs, clear_logs)"]
     end
 
     Main --> State & Tray & OS & Commands

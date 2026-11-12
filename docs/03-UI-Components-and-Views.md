@@ -43,7 +43,7 @@ flowchart LR
 ## 2. Shell, Layout & Global Components (`src/components/`)
 
 ### 2.1 `NavRail` (`src/components/NavRail.tsx`)
-- **Role**: Left navigation rail (`220px` Expanded, `80px` Medium icon-only, drawer in Compact — [[wireframes/00-window-and-grid]]) providing top-level view switching and a live connection summary footer.
+- **Role**: Left navigation rail (`220px` Expanded, `80px` Medium icon-only, drawer in Compact; see [[04-UI-Wireframes]]) providing top-level view switching and a live connection summary footer.
 - **Props**: `{ activeTab: Tab; setActiveTab: (tab: Tab) => void }`.
 - **Structure**:
   1. **Brand Header**: X-Link logo (`X-Link-logo.png`), title `"X-Link"`, subtitle `"Private Tunnel"`.

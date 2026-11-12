@@ -11,15 +11,12 @@ updated: 2026-11-03
 
 # 04 — UI Wireframes & Screen Layouts
 
-**Navigation**: [[00-Home-MOC]] | **Prev**: [[03-UI-Components-and-Views]] | **Next**: [[05-Rust-Backend-Architecture]] | **Related**: [[02-Frontend-UI-Architecture]] · [[wireframes/README|Current UI/UX Wireframes]]
-
-> [!WARNING] Historical design reference
-> Some layouts and features below are proposals, not the running app. For source-aligned screens and states, see [[wireframes/README|Current UI/UX Wireframes]].
+**Navigation**: [[00-Home-MOC]] | **Prev**: [[03-UI-Components-and-Views]] | **Next**: [[05-Rust-Backend-Architecture]] | **Related**: [[02-Frontend-UI-Architecture]]
 
 > [!NOTE] Window Geometry & Cross-Platform Ergonomics
-> **Superseded geometry.** This note was drawn for `1080 × 700` / min `900 × 620`. The canonical window is now **1000 × 680, minimum 720 × 520**, with rail `220px` (Expanded) / `80px` (Medium) — see [[wireframes/00-window-and-grid]] and drawings at exact scale in [[wireframes/09-fit-layouts]].
+> The application window is configured in `src-tauri/tauri.conf.json` as **950 × 650, minimum 380 × 550**, with navigation rail `220px` (Expanded) / `80px` (Medium icon-only).
 > The layout is a **Left Navigation Rail (`NavRail`)** plus a flexible **Main Viewport (`ViewShell`)**.
-> On **macOS**, `"titleBarStyle": "Overlay"` is enabled with a **72px top padding/inset (`pt-[72px]`)** *(as documented here; target is 40px, see [[wireframes/00-window-and-grid]] §5)* in `NavRail` and primary headers to provide clearance for native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
+> On **macOS**, `"titleBarStyle": "Overlay"` is enabled with a **72px top padding/inset (`pt-[72px]`)** in `NavRail` and primary headers to provide clearance for native traffic light buttons, while Windows and Linux preserve native title bar layouts and client-side decoration margins.
 
 ---
 
@@ -51,7 +48,7 @@ updated: 2026-11-03
 |  | [🇺🇸] US-West-1 |  |                                          | ========================-------- | |
 |  +----------------+  |                                          +----------------------------------+ |
 |  sing-box v1.13.14   |                                                        (ToastContainer.tsx)   |
-|  X-Link v0.8.0       |                                                                               |
+|  X-Link v0.9.0       |                                                                               |
 +----------------------+-------------------------------------------------------------------------------+
 ```
 

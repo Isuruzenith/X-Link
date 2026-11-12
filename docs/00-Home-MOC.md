@@ -13,7 +13,7 @@ updated: 2026-11-06
 # X-Link — Complete AI Agent Knowledge Vault
 
 > [!IMPORTANT] AI Agent Orientation
-> This Obsidian vault (`C:\Projects\X-Link\docs`) is the **complete, authoritative architectural and UI/backend context** for **X-Link** (`com.isuru.x-link`, v0.8.0). Any AI coding agent or developer reading this vault can understand every UI screen, React component, Zustand store, Tauri IPC bridge command/event, Rust backend module, `sing-box` sidecar configuration pipeline, and ASCII wireframe without guessing.
+> This Obsidian vault (`C:\Projects\X-Link\docs`) is the **complete, authoritative architectural and UI/backend context** for **X-Link** (`com.xlink.app`, v0.9.0). Any AI coding agent or developer reading this vault can understand every UI screen, React component, Zustand store, Tauri IPC bridge command/event, Rust backend module, `sing-box` sidecar configuration pipeline, and ASCII wireframe without guessing.
 
 ---
 
@@ -25,18 +25,14 @@ updated: 2026-11-06
 | **[[01-Architecture-Overview]]** | End-to-end 3-tier system topology, boot lifecycle, cross-platform process supervision, 5-stage self-healing engine, transactional config pipeline, and non-negotiable core invariants. | `#architecture` `#backend` `#frontend` |
 | **[[02-Frontend-UI-Architecture]]** | React 19 + TypeScript + Tailwind CSS v4 + Material Web (`@material/web`) styling system, theme tokens, `App.tsx` orchestration, and all **8 Zustand stores** (`connectionStore`, `profileStore`, `routingStore`, `settingsStore`, `nodeEditorStore`, `statsStore`, `logStore`, `toastStore`). | `#frontend` `#state-management` |
 | **[[03-UI-Components-and-Views]]** | Exhaustive component reference: layout shell (`NavRail` with 72px macOS traffic light inset, `ViewShell`, `ToastContainer`, `ErrorBoundary`), domain editors (`NodeEditor`, `TrafficChart`), form controls (`FormInput`, `FormSelect`, `FormSwitchRow`, `SegmentedControl`), UI primitives, and all **6 main views** (`DashboardView`, `ConfigView`, `RoutingView`, `ConnectionsView`, `LogsView`, `SettingsView`). | `#frontend` `#components` `#ui` |
-| **[[04-UI-Wireframes]]** | Historical UI design sketches; some proposed flows do not match the running app. | `#wireframe` `#ui` `#frontend` |
-| **[[wireframes/README\|Current UI/UX Wireframes]]** | Source-aligned wireframes for the six current views, settings tabs, editor, dialogs, and responsive states. | `#wireframe` `#ui` `#frontend` |
+| **[[04-UI-Wireframes]]** | UI view architecture sketches, responsive layout bounds (canonical `950 × 650`, min `380 × 550`), and component wireframes. | `#wireframe` `#ui` `#frontend` |
 | **[[05-Rust-Backend-Architecture]]** | Deep dive into `src-tauri`: `ProxyState`, `SingBox` sidecar management (`v1.13.14`), cross-platform process supervision (`SidecarChild`, Windows Job Objects, Linux `PR_SET_PDEATHSIG`, macOS root helper), config generator (`generator.rs`), Kahn's DAG cycle validator (`validator.rs`), Outbound Group routing (`rules.rs`), telemetry ring buffers, and encrypted backup/restore v2. | `#backend` `#rust` `#sing-box` |
-| **[[06-IPC-Bridge-and-Data-Contracts]]** | Complete contract dictionary: all **49 Tauri `invoke` commands** (arguments, return types, side effects), all **8 Tauri events** (`emit` -> `listen`), Clash REST API (`127.0.0.1:9090`) integration, and on-disk JSON schemas (`settings.json`, `profiles.json`, `routing.json`, `stats.json`, `configs/active.json`, `sidecar.session.json`). | `#ipc` `#contracts` `#backend` `#frontend` |
+| **[[06-IPC-Bridge-and-Data-Contracts]]** | Complete contract dictionary: all **61 Tauri `invoke` commands** (arguments, return types, side effects), all **8 Tauri events** (`emit` -> `listen`), Clash REST API (`127.0.0.1:9090`) integration, and on-disk JSON schemas (`settings.json`, `profiles.json`, `routing.json`, `stats.json`, `configs/active.json`, `sidecar.session.json`). | `#ipc` `#contracts` `#backend` `#frontend` |
 | **[[07-AI-Agent-Playbook]]** | Practical engineering guide for AI agents: 7 non-negotiable invariants, Dual-Store Synchronization Rule (`@tauri-apps/plugin-store` vs Rust `std::fs`), Connected-Apply Policy (`applyPolicy.ts`), and step-by-step recipes for adding settings, protocols, or IPC commands. | `#ai-context` `#playbook` `#architecture` |
 | **[[08-User-Guide-and-FAQ]]** | Comprehensive end-user guide: plain-English core concepts, platform-specific quickstarts (Windows, macOS, Linux), and operational runbooks for ghost TUN interface recovery and port conflict resolution. | `#user-guide` `#runbook` `#faq` |
-| **[[09-Design-System]]** | Material 3 tokens, typography, component map (Material Web vs custom), **icon strategy that survives `tauri build`**, accessibility baseline. | `#design-system` `#frontend` |
+| **[[09-Design-System]]** | Material 3 tokens, typography, component styling architecture, self-hosted icons, and accessibility baseline. | `#design-system` `#frontend` |
 | **[[10-Zero-Data-and-Proxy-Node-Troubleshooting]]** | Exhaustive reference for Zero-Data ISP firewalls, Bug Host SNI spoofing, x509 cert validation bypass, WebSocket ALPN `h2` EOF mismatch, DNS bootstrap deadlocks, and comparative benchmarks against NetMod Syna. | `#troubleshooting` `#zero-data` `#protocols` |
-| **[[wireframes/00-window-and-grid\|Window & Grid]]** | **Canonical** window (1000×680, min 720×520), size classes, fit-to-window rules, budgets, test matrix. | `#wireframe` `#layout` |
-| **[[wireframes/09-fit-layouts\|Fit Layouts]]** | Exact-scale wireframes of every view at 1000×680 and 720×520. | `#wireframe` `#layout` |
-| **[[specs/README\|Specs (SDD)]]** | Spec-driven development: constitution, templates and four ready-to-run feature specs (icons, window shell, responsive fit, Material Web conformance). | `#spec` `#sdd` |
-| **[[99-Vault-Changelog]]** | What changed in this revision and the documentation-drift register. | `#changelog` |
+| **[[99-Vault-Changelog]]** | What changed across revisions and the documentation-drift register. | `#changelog` |
 
 ---
 
@@ -183,16 +179,14 @@ C:\Projects\X-Link\
 
 ---
 
-## Active Work & Known Issues
+## Core Design References & Architecture Guides
 
-| ID | Issue | Spec | Status |
-| :--- | :--- | :--- | :--- |
-| ICON-001 | Material icons not shown in the packaged (built) app | [[specs/001-self-hosted-icons/spec]] | Ready — do first |
-| WIN-001 | Window size inconsistent across notes; first paint/clamp not guaranteed | [[specs/002-desktop-window-shell/spec]] | Ready |
-| FIT-001 | UI does not consistently fit the window; five breakpoint sets | [[specs/003-responsive-fit-layout/spec]] | Ready |
-| MUI-001 | Mixed shadcn / Tailwind / Material Web look | [[specs/004-material-web-ui-conformance/spec]] | Ready |
-
-**Start any UI task here:** [[specs/README]] → [[specs/constitution]] → the feature's `spec.md`, `plan.md`, `tasks.md`.
+| Topic | Reference Note | Focus Area |
+| :--- | :--- | :--- |
+| **Design System & M3 Tokens** | [[09-Design-System]] | Material Web components, typography, self-hosted icons, and token architecture. |
+| **UI Wireframes & Bounds** | [[04-UI-Wireframes]] | Window geometry (`950 × 650`, min `380 × 550`), navigation rail, and screen layouts. |
+| **Zero-Data & ISP Troubleshooting** | [[10-Zero-Data-and-Proxy-Node-Troubleshooting]] | SNI spoofing, WebSocket ALPN stripping, and DNS bootstrap deadlock bypass. |
+| **Engineering Invariants** | [[07-AI-Agent-Playbook]] | 7 non-negotiable invariants, dual-store synchronization, and process supervision. |
 
 ---
 
@@ -203,17 +197,13 @@ C:\Projects\X-Link\
 - **Want to see how React state is stored and synced with Rust?** $\rightarrow$ See [[02-Frontend-UI-Architecture#3. Zustand State Management Stores]] and [[06-IPC-Bridge-and-Data-Contracts]]
 - **Want to modify `sing-box` config generation, TUN, or DNS?** $\rightarrow$ See [[05-Rust-Backend-Architecture#3. Configuration Engine (`src-tauri/src/config/`)]]
 - **Want to make code changes without breaking critical invariants?** $\rightarrow$ Read [[07-AI-Agent-Playbook]] first!
-- **Want to change how anything looks or fits the window?** $\rightarrow$ [[09-Design-System]], [[wireframes/00-window-and-grid]], then [[specs/README]]
+- **Want to change how anything looks or fits the window?** $\rightarrow$ [[09-Design-System]], [[04-UI-Wireframes]], then [[02-Frontend-UI-Architecture]]
 
 ## Obsidian Workspace
 
 | Area | Purpose |
 |---|---|
-| [[notes/README]] | General technical notes |
-| [[decisions/README]] | Architecture and product decisions |
-| [[meetings/README]] | Meeting notes and action items |
-| [[_inbox/README]] | Temporary capture area |
-| `_templates/` | Standard note, ADR, meeting, MOC and daily templates |
-| `assets/`, `wireframes/`, `designs/`, `specs/` | Existing project documentation and assets |
+| `docs/` | Root knowledge vault containing core numbered architectural references (`00`–`10`), drift register (`99-Vault-Changelog.md`), and entrypoint (`README.md`). |
+| `docs/designs/` | Architectural design RFCs, recovery specifications, and consolidated EGM audit reports. |
 
-Use `_templates/` when creating new notes. Keep established architecture-note filenames unchanged so existing wikilinks remain valid.
+Keep established architecture-note filenames unchanged so existing wikilinks remain valid.

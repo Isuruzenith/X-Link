@@ -21,10 +21,10 @@ updated: 2026-11-03
 > [!DANGER] Read Before Editing Any Code
 > Every AI agent working on X-Link **must** preserve these 7 invariants. Breaking any of them will cause routing loops, TLS handshake failures, state corruption, or security regressions.
 
-### Invariant 1: VLESS/VMess WebSocket & HTTPUpgrade ALPN Enforcement
+### Invariant 1: VLESS/VMess WebSocket & HTTPUpgrade ALPN Stripping
 - **Where**: `src-tauri/src/config/generator.rs` (`generate_config`)
-- **Rule**: Whenever an outbound has `type == "vless" || type == "vmess"` with `transport.type == "ws" || "httpupgrade"` and `tls.enabled == true`, `tls.alpn` **must** be forced to `["http/1.1"]`.
-- **Why**: CDNs (Cloudflare, Nginx) negotiate HTTP/2 (`h2`) by default if ALPN is omitted or includes `h2`. RFC 6455 WebSocket `Upgrade` headers are HTTP/1.1-only; negotiating `h2` causes immediate stream resets.
+- **Rule**: Whenever an outbound has `type == "vless" || type == "vmess"` with `transport.type == "ws" || "httpupgrade"` and `tls.enabled == true`, any `"h2"` (HTTP/2) entry **must** be stripped from `tls.alpn`. If the remaining ALPN array is empty, it **must** be set to `["http/1.1"]`.
+- **Why**: CDNs (Cloudflare, Nginx) negotiate HTTP/2 (`h2`) by default if ALPN is omitted or includes `h2`. RFC 6455 WebSocket `Upgrade` headers and HTTPUpgrade transports use HTTP/1.1 text framing; negotiating `h2` causes immediate stream resets (`EOF`) or binary framing parser errors (`malformed HTTP response`). Protocols legitimately requiring `h2` (e.g. gRPC, native HTTP/2, TCP Reality Vision) retain explicit `h2`.
 
 ### Invariant 2: TUN Route Exclusions & Locale-Independent DNS Discovery
 - **Where**: `src-tauri/src/config/generator.rs` (`build_inbounds`) & `src-tauri/src/os/mod.rs` (`get_system_dns_server`)
@@ -50,9 +50,10 @@ updated: 2026-11-03
 - **Why**: Eliminates orphan zombie processes across ungraceful parent crashes, power loss, or force-quits without risking termination of unrelated processes on the host machine.
 
 ### Invariant 5: Explicit Mode Transitions & Connected-Apply Policy
-- **Where**: `src/utils/applyPolicy.ts`, `src/utils/connectedApply.ts`, `src/stores/connectionStore.ts`, `src/stores/settingsStore.ts`
+- **Where**: `src/utils/applyPolicy.ts`, `src/utils/connectedApply.ts`, `src/stores/connectionStore.ts`, `src/stores/settingsStore.ts`, `src-tauri/src/commands/proxy.rs`
 - **Rule**:
-  - **No Silent TUN Fallback**: In v0.8.0, silent `modeOverride = 'system'` fallback is strictly forbidden. If TUN mode initiation fails or required OS elevation is missing, the application must present a structured diagnostic error modal rather than silently downgrading the connection security posture.
+  - **No Silent TUN Fallback (User Action)**: In v0.9.0, silent `modeOverride = 'system'` fallback during standard user connection attempts is strictly forbidden. If TUN mode initiation fails due to missing OS elevation or missing virtual adapter drivers, the application must present a structured diagnostic error modal rather than silently downgrading the connection security posture.
+  - **Automated Graceful Fallback for Zero-Data Networks**: As documented in [[10-Zero-Data-and-Proxy-Node-Troubleshooting]], when connecting over restrictive Zero-Data ISP cellular networks (such as Dialog) where raw UDP/TCP packets are dropped and cause TUN probe timeouts, the Rust proxy controller (`commands/proxy.rs`) executes an automated graceful fallback to System Proxy mode to prevent a total connectivity blackout while logging the fallback event.
   - **Deferred Mode Switching**: `proxyMode` is a **`defer`** setting: changing it while connected saves the preference for the next session and must **not** silently restart or switch the active session's mode.
   - **Debounced Rollback Pipeline**: All `restart`-class settings and routing edits while connected must flow through the `800ms` debounced `createApplier` pipeline so invalid edits or failed restarts automatically roll back to the pre-edit `baseline`.
 
@@ -126,23 +127,21 @@ When verifying changes in `C:\Projects\X-Link`:
 
 ---
 
-## 4. Spec-Driven Workflow for UI Changes
+## 4. UI Architecture & Modification Workflow
 
-UI work follows [[specs/README]]: **spec → plan → tasks → one task per commit**. Before editing anything under `src/components`, `src/views` or `src/*.css`:
+UI development follows the design patterns documented in [[09-Design-System]], [[04-UI-Wireframes]], and [[02-Frontend-UI-Architecture]]: **design alignment → plan → tasks → verified commit**. Before editing anything under `src/components`, `src/views` or `src/*.css`:
 
-1. Read [[specs/constitution]], [[09-Design-System]] and [[wireframes/00-window-and-grid]].
-2. Open the relevant `specs/NNN-*/tasks.md` and work only on the first unchecked task.
-3. UI work **never** changes Rust commands, IPC payloads, store schemas or the 7 invariants above (Constitution V).
-4. When done, tick the task, update any note the change made stale, stop.
+1. Review [[09-Design-System]], [[04-UI-Wireframes]], and [[03-UI-Components-and-Views]].
+2. UI styling work **never** changes Rust commands, IPC payloads, store schemas or the 7 invariants above without architectural approval.
+3. Verify changes with `npm test` and `npm run build`.
 
 ### Recipe D: Add an icon
 1. Add the name to `src/components/ui/icon-names.ts` (typed allow-list) — the compiler rejects unknown names.
 2. Use `<Icon name="…" size={20} />`; never a raw `<md-icon>`.
-3. Run `npm run build` (includes `check:offline`). Verify in a `tauri build --debug` window, not only `tauri dev`.
+3. Run `npm run build`. Verify in a `tauri build --debug` window, not only `tauri dev`.
 
 ### Recipe E: Add or change a view so it fits the window
 1. Body is `grid-template-rows: …; min-height: 0`; exactly one `.scroll-region` per list/table.
-2. No `vh`/`vw`, no fixed `max-height`, no raw `@media` — use `data-size` / `data-dense` ([[wireframes/00-window-and-grid]]).
-3. Add the view to `e2e/fit.spec.ts` and to [[wireframes/09-fit-layouts]] (edit `tools/gen_wireframes.py`).
-4. Long text gets `min-width: 0` + ellipsis + `title`.
+2. No `vh`/`vw`, no fixed `max-height`, no raw `@media` — respect desktop window bounds (canonical `950×650`, minimum `380×550`).
+3. Long text gets `min-width: 0` + ellipsis + `title`.
 
